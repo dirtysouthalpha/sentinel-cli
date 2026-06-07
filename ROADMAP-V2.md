@@ -156,3 +156,34 @@ Add the **subagent spawn** API to `core/agent-runner.ts` (isolated context + res
 merge) and wire **plan mode** through the existing permissions engine (a `plan` mode that
 denies writes until approval). This unblocks V8's autonomous pipelines and reuses
 machinery you already shipped.
+
+---
+
+## V11–V20 — the long game (toward a 20-version GA)
+
+After V1–V10 reach feature parity + the workflow moat, V11–V20 deepen each pillar to
+production grade:
+
+- **V11 — Semantic repo RAG.** Local embeddings index (via the B60/Ollama gateway, zero
+  cloud cost), semantic retrieval feeding the agent, `/index`, incremental re-index on change.
+- **V12 — Deep LSP.** Multi-language LSP servers; diagnostics-driven auto-fix loops;
+  go-to-def / find-refs / rename exposed as agent tools.
+- **V13 — Command blocks + ⌘K palette (deep V4).** Full block rendering (collapsible,
+  re-runnable), fuzzy command palette, history search, autosuggestions.
+- **V14 — Voice & multimodal.** Voice input (local whisper/Omni), image/screenshot input to
+  vision models, paste-image-to-chat.
+- **V15 — Plugin/extension SDK + marketplace client.** Install skills/agents/MCP servers
+  from a registry; versioned, sandboxed extensions.
+- **V16 — Sandboxing & safety.** Sandboxed bash, network egress policy, secret redaction,
+  tamper-evident audit log; safe-by-default for autonomous runs.
+- **V17 — Observability & cost governance.** Per-session/per-tool metrics, token budgets,
+  traces, a `/usage` dashboard; alerts when a run exceeds budget.
+- **V18 — Multi-repo / workspaces.** Cross-repo context + retrieval, workspace-scoped
+  sessions and workflows for monorepos and multi-service projects.
+- **V19 — Team collaboration & cloud sync.** Shared live sessions, cloud-synced
+  settings/workflows/history/secrets, team roles + SSO.
+- **V20 — GA hardening.** Cross-platform QA, ≥95% coverage, autoupdate, startup/perf
+  budgets, a stable public extension API, and a docs site. The 1.0-you'd-bet-the-company-on.
+
+Build cadence: parallel worktree subagents per wave (disjoint modules), then serial
+integration + central verification (tsc + full test suite + build) + push.
