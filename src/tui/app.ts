@@ -11,6 +11,7 @@ import { ToolCall } from "../ai/types.js";
 import { AgentRunner } from "../core/agent-runner.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
+import { suggestCommand } from "../core/command-search.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
 import { sessionManager, Session } from "../core/session-manager.js";
@@ -462,6 +463,7 @@ export class TUIApp {
       ["/bg <command>", "Run a shell command in the background"],
       ["/tasks", "List background tasks (and their status)"],
       ["/mcp", "List connected MCP tools"],
+      ["/cmd <text>", "AI command-search: natural language → shell command"],
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
       ["/cost", "Session cost breakdown"],
@@ -717,6 +719,11 @@ export class TUIApp {
       return;
     }
 
+    if (parsed.name === "cmd") {
+      await this.handleCmdSearch(parsed.args.join(" "));
+      return;
+    }
+
     const cmd = commandRegistry.get(parsed.name);
     if (cmd) {
       await this.chatWithAI(resolveTemplate(cmd.template, parsed.args));
@@ -724,6 +731,50 @@ export class TUIApp {
     }
 
     this.addError(`Unknown command: /${parsed.name}. Type / to see commands.`);
+  }
+
+  /** /cmd <natural language> — AI command-search: NL → one shell command. */
+  private async handleCmdSearch(nl: string): Promise<void> {
+    const query = nl.trim();
+    if (!query) {
+      this.addSystem("Usage: /cmd <natural language>  e.g. /cmd list the 5 largest files");
+      return;
+    }
+
+    const [providerName, ...modelParts] = state.get("currentModel").split("/");
+    const modelName = modelParts.join("/") || undefined;
+    const provider = providerManager.getProvider(providerName);
+    if (!provider) {
+      this.addError(`No provider "${providerName}". Try /providers`);
+      return;
+    }
+    if (!provider.isAvailable()) {
+      this.addError(`No API key for "${providerName}". Type /connect`);
+      return;
+    }
+
+    this.addSystem(`Searching for a command for: ${query}`);
+    try {
+      const { command, explanation } = await suggestCommand(provider, query, {
+        model: modelName,
+      });
+      if (!command) {
+        this.addSystem(
+          explanation
+            ? `No command produced. ${explanation}`
+            : "No command produced."
+        );
+        return;
+      }
+      let msg = `Suggested command:\n  ${command}`;
+      if (explanation) msg += `\n\n${explanation}`;
+      msg += `\n\nRun it with /bg ${command}  — or copy/paste it into your shell.`;
+      this.addSystem(msg);
+    } catch (err) {
+      this.addError(
+        `Command search failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   private handleTabsCommand(args: string[]): void {
