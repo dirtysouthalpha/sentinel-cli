@@ -45,8 +45,13 @@ export interface ToolDef {
 
 export interface ToolParameterSchema {
   type: string;
-  description: string;
+  description?: string;
   enum?: string[];
+  /** For type: "array" — the schema of each element. */
+  items?: ToolParameterSchema;
+  /** For type: "object" — nested property schemas. */
+  properties?: Record<string, ToolParameterSchema>;
+  required?: string[];
 }
 
 export interface AIProvider {

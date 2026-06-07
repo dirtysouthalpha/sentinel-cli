@@ -18,6 +18,10 @@ import { RoutedProvider } from "../ai/routed-provider.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "../core/permissions.js";
 import { CheckpointManager } from "../core/checkpoints.js";
 import { createGuardedExecutor } from "../core/guarded-executor.js";
+import { createSubagentTool, createSubagentAwareExecutor } from "../core/subagent.js";
+import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
+import { BackgroundTaskManager } from "../core/background.js";
+import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
@@ -66,6 +70,8 @@ export class TUIApp {
   private permissionMode: PermissionMode = "yolo";
   private mcp = new MCPManager();
   private mcpConnected = false;
+  private background = new BackgroundTaskManager();
+  private bgWired = false;
   private pendingPermission?: (allow: boolean) => void;
 
   private inputBuffer = "";
@@ -258,6 +264,36 @@ export class TUIApp {
     this.push(`\n${body}\n`);
   }
 
+  /** Register the one-time background-task completion notifier. */
+  private wireBackground(): void {
+    if (this.bgWired) return;
+    this.bgWired = true;
+    this.background.onUpdate((t) => {
+      if (t.status === "running") return;
+      const mark = t.status === "done" ? "✓" : t.status === "error" ? "✗" : "∅";
+      const detail =
+        t.status === "done"
+          ? (t.result || "").split("\n").slice(0, 10).join("\n")
+          : t.status === "error"
+            ? t.error || ""
+            : "";
+      this.addSystem(`${mark} bg #${t.id} ${t.status}: ${t.label}${detail ? `\n${detail}` : ""}`);
+    });
+  }
+
+  /** Run a shell command detached; the AbortSignal kills the process on cancel. */
+  private runShell(command: string, signal: AbortSignal): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const isWindows = process.platform === "win32";
+      const shell = isWindows ? "powershell.exe" : undefined;
+      exec(command, { cwd: this.projectRoot, signal, maxBuffer: 10 * 1024 * 1024, shell }, (error, stdout, stderr) => {
+        const out = `${stdout || ""}${stderr ? `\n${stderr}` : ""}`.trim();
+        if (error) return reject(new Error((stderr || error.message || "command failed").trim().slice(0, 4000)));
+        resolve((out || "(no output)").slice(0, 4000));
+      });
+    });
+  }
+
   private addError(text: string): void {
     const c = themeEngine.getBlessedColors();
     this.push(`\n{${c.error}-fg}{bold}✗ ${this.esc(text)}{/}\n`);
@@ -421,7 +457,10 @@ export class TUIApp {
       ["/agent <name>", "Switch agent (gsd, code, debug, plan, ask)"],
       ["/theme <name>", "Switch theme"],
       ["/providers", "Check API status"],
-      ["/permissions <mode>", "Guardrails: yolo | auto | gated"],
+      ["/permissions <mode>", "Guardrails: yolo | auto | gated | plan"],
+      ["/plan [off]", "Read-only research mode: propose a plan, no edits"],
+      ["/bg <command>", "Run a shell command in the background"],
+      ["/tasks", "List background tasks (and their status)"],
       ["/mcp", "List connected MCP tools"],
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
@@ -543,15 +582,55 @@ export class TUIApp {
     if (parsed.name === "permissions" || parsed.name === "perms") {
       const mode = parsed.args[0];
       if (!mode) {
-        this.addSystem(`Permission mode: ${this.permissionMode}  (yolo | auto | gated)`);
+        this.addSystem(`Permission mode: ${this.permissionMode}  (yolo | auto | gated | plan)`);
         return;
       }
-      if (mode === "yolo" || mode === "auto" || mode === "gated") {
+      if (mode === "yolo" || mode === "auto" || mode === "gated" || mode === "plan") {
         this.permissionMode = mode;
         this.addSystem(`Permission mode → ${mode}`);
       } else {
-        this.addError(`Unknown mode: ${mode}. Use yolo | auto | gated.`);
+        this.addError(`Unknown mode: ${mode}. Use yolo | auto | gated | plan.`);
       }
+      return;
+    }
+
+    // /plan toggles read-only research mode; /plan off restores yolo.
+    if (parsed.name === "plan") {
+      if (parsed.args[0] === "off") {
+        this.permissionMode = "yolo";
+        this.addSystem("Plan mode off → yolo. Edits/commands re-enabled.");
+      } else {
+        this.permissionMode = "plan";
+        this.addSystem("Plan mode on (read-only). I'll research and propose a plan; edits/commands are blocked until you `/plan off`.");
+      }
+      return;
+    }
+
+    // /bg <cmd> runs a shell command in the background; /bg cancel <id> stops it.
+    if (parsed.name === "bg") {
+      if (parsed.args[0] === "cancel") {
+        const id = parsed.args[1];
+        if (!id) return void this.addError("Usage: /bg cancel <id>");
+        this.addSystem(this.background.cancel(id) ? `bg #${id} cancelled.` : `No running bg task #${id}.`);
+        return;
+      }
+      const command = parsed.args.join(" ").trim();
+      if (!command) return void this.addSystem("Usage: /bg <shell command>   ·   /bg cancel <id>   ·   /tasks");
+      this.wireBackground();
+      const task = this.background.start(command, (signal) => this.runShell(command, signal));
+      this.addSystem(`▶ bg #${task.id} started: ${command}`);
+      return;
+    }
+
+    // /tasks lists background tasks and their status.
+    if (parsed.name === "tasks") {
+      const tasks = this.background.list();
+      if (tasks.length === 0) return void this.addSystem("No background tasks. Start one with /bg <command>.");
+      const mark: Record<string, string> = { running: "▶", done: "✓", error: "✗", cancelled: "∅" };
+      this.addSystem(
+        "Background tasks:\n" +
+          tasks.map((t) => `${mark[t.status] || "?"} #${t.id} [${t.status}] ${t.label}`).join("\n")
+      );
       return;
     }
 
@@ -780,12 +859,31 @@ export class TUIApp {
         ask: (req, reason) => this.askPermission(req, reason),
       });
 
+      // V1: subagent delegation — child reuses the guarded executor, omits the
+      // subagent tool (depth capped at 1).
+      const childToolDefs = [...getToolDefinitions(), ...this.mcp.getToolDefs()];
+      const subagentTool = createSubagentTool({
+        provider,
+        toolDefs: childToolDefs,
+        executeTool: execute,
+        extractToolCalls,
+        model: runnerModel,
+        systemPrompt: buildSystemPrompt(agentName, this.projectRoot),
+      });
+      const subagentExecute = createSubagentAwareExecutor(subagentTool, execute);
+      // V1: todo tracker — render the board in the TUI whenever it changes.
+      const todoTool = createTodoTool();
+      todoTool.store.onChange((items) => {
+        if (items.length) this.addSystem(todoTool.store.render());
+      });
+      const parentExecute = createTodoAwareExecutor(todoTool, subagentExecute);
+
       const runner = new AgentRunner(
         {
           provider,
           context: cm,
-          toolDefs: [...getToolDefinitions(), ...this.mcp.getToolDefs()],
-          executeTool: execute,
+          toolDefs: [...childToolDefs, subagentTool.def, todoTool.def],
+          executeTool: parentExecute,
           extractToolCalls,
         },
         { model: runnerModel, maxRounds: agentName === "gsd" ? 30 : 15, largeContextWarnAt: 50 }

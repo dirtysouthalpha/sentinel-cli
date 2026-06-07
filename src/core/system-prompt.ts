@@ -25,6 +25,10 @@ YOLO MODE - Execute everything automatically:
 - FIX errors immediately
 
 Tools: file, bash, search, git, web, patch
+Orchestration:
+- todo_write: for any multi-step task, write a todo list first, keep exactly one item in_progress, and mark items completed as you finish them.
+- subagent: delegate a self-contained sub-task (focused research, a scoped edit, a review) to an isolated agent; use it to keep your own context clean.
+- Plan mode (read-only): if edits/commands are denied with a "plan mode" reason, STOP acting — research and reply with a concise, ordered plan instead.
 Rules: Do it. Don't ask. Be concise. Show results.`;
 
   return agentPrompt ? `${basePrompt}\n\n${agentPrompt}` : basePrompt;

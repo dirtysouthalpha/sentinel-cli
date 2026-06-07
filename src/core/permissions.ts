@@ -9,7 +9,7 @@ import { resolve, isAbsolute, relative } from "path";
  * an "ask" into allow/deny (interactive prompt in the TUI, a flag headless).
  */
 
-export type PermissionMode = "yolo" | "auto" | "gated";
+export type PermissionMode = "yolo" | "auto" | "gated" | "plan";
 export type Decision = "allow" | "deny" | "ask";
 export type ToolCategory = "read" | "edit" | "bash" | "network" | "git" | "other";
 
@@ -64,6 +64,10 @@ const MODE_DEFAULTS: Record<PermissionMode, Record<ToolCategory, Decision>> = {
   yolo: { read: "allow", edit: "allow", bash: "allow", network: "allow", git: "allow", other: "allow" },
   auto: { read: "allow", edit: "allow", bash: "ask", network: "allow", git: "ask", other: "ask" },
   gated: { read: "allow", edit: "ask", bash: "ask", network: "ask", git: "ask", other: "ask" },
+  // Plan mode: research-only. Reads/search/web stay open; anything that mutates
+  // the workspace or runs commands is denied so the agent must PROPOSE a plan
+  // instead of acting. Reused by the `/plan` flow.
+  plan: { read: "allow", edit: "deny", bash: "deny", network: "allow", git: "deny", other: "deny" },
 };
 
 /** Convert a simple glob (supporting ** and *) to a RegExp anchored to the whole string. */
@@ -152,6 +156,12 @@ export class PermissionEngine {
     if (category === "edit" && decision === "allow" && !this.inProject(req.path)) {
       decision = "ask";
       reason = "edit outside project root";
+    }
+
+    // In plan mode, make the denial self-explanatory so the model knows to plan,
+    // not retry. (config rules could still allow specific categories above.)
+    if (this.mode === "plan" && decision === "deny") {
+      reason = "plan mode is read-only — propose a plan instead of editing/running";
     }
 
     return { decision, category, reason };

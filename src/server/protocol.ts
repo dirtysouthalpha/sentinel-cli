@@ -1,7 +1,7 @@
 // Wire protocol for `sentinel serve` — a local WebSocket bridge that exposes the
 // Sentinel engine to a GUI (or any client). All messages are JSON.
 
-export type PermissionMode = "yolo" | "auto" | "gated";
+export type PermissionMode = "yolo" | "auto" | "gated" | "plan";
 
 export interface StateSnapshot {
   model: string;
@@ -31,7 +31,22 @@ export type ClientMessage =
   | { type: "checkpoints"; action: "list" | "undo" }
   | { type: "compact" }
   | { type: "clear" }
-  | { type: "getState" };
+  | { type: "getState" }
+  // ---- settings (providers / models / MCP) ----
+  | { type: "getConfig" }
+  | { type: "setProvider"; name: string; apiKey?: string; baseURL?: string; defaultModel?: string }
+  | { type: "removeProvider"; name: string }
+  | { type: "addModel"; model: string }
+  | { type: "removeModel"; model: string }
+  | { type: "addMcp"; name: string; command?: string[]; url?: string; enabled?: boolean }
+  | { type: "removeMcp"; name: string }
+  | { type: "toggleMcp"; name: string; enabled: boolean };
+
+export interface ConfigView {
+  providers: { name: string; hasKey: boolean; baseURL?: string; defaultModel?: string; builtin: boolean; available: boolean }[];
+  models: string[];
+  mcp: { name: string; command?: string[]; url?: string; enabled: boolean; connected: boolean }[];
+}
 
 // ---- server -> client -------------------------------------------------------
 export interface ToolArgs {
@@ -54,6 +69,8 @@ export type ServerMessage =
   | { type: "system"; text: string }
   | { type: "error"; message: string }
   | { type: "checkpoints"; items: { id: string; tool: string; path: string; existed: boolean; timestamp: number }[] }
+  | { type: "todos"; items: { content: string; status: "pending" | "in_progress" | "completed" }[] }
+  | { type: "config"; config: ConfigView }
   | { type: "busy"; busy: boolean };
 
 export interface ServeHandshake {
