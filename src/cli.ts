@@ -1,0 +1,355 @@
+#!/usr/bin/env node
+
+import { resolve } from "path";
+import { Command } from "commander";
+import { TUIApp } from "./tui/app.js";
+import { getConfigManager } from "./core/config.js";
+import { state } from "./core/state.js";
+import { events } from "./core/events.js";
+import { providerManager } from "./ai/provider.js";
+import { toolManager } from "./tools/index.js";
+import { runSetup } from "./commands/setup.js";
+import { loadAllSkills } from "./skills/loader.js";
+import { skillRegistry } from "./skills/registry.js";
+import { loadAllCommands } from "./commands/loader.js";
+import { commandRegistry } from "./commands/registry.js";
+import { loadAllAgents } from "./agents/loader.js";
+import { agentRegistry } from "./agents/registry.js";
+import { themeEngine } from "./tui/themes/engine.js";
+import { sessionManager } from "./core/session-manager.js";
+import { contextManager } from "./ai/context.js";
+import { getToolDefinitions, executeToolCall } from "./tools/tool-executor.js";
+import { AgentRunner } from "./core/agent-runner.js";
+import { extractToolCalls } from "./core/tool-call-extractor.js";
+import { buildSystemPrompt } from "./core/system-prompt.js";
+import { RoutedProvider } from "./ai/routed-provider.js";
+import { setLogLevel, createLogger } from "./utils/logger.js";
+
+const log = createLogger({ prefix: "cli" });
+
+const VERSION = "0.2.0";
+
+function getInstallRoot(): string {
+  return resolve(
+    new URL("..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
+  );
+}
+
+function loadRegistries(installRoot: string, skillPaths: string[]): void {
+  const { skills } = loadAllSkills(installRoot, skillPaths);
+  for (const skill of skills) {
+    skillRegistry.register(skill);
+  }
+
+  const commands = loadAllCommands(installRoot);
+  for (const cmd of commands) {
+    commandRegistry.register(cmd);
+  }
+
+  const agents = loadAllAgents(installRoot);
+  for (const agent of agents) {
+    agentRegistry.register(agent);
+  }
+}
+
+const program = new Command();
+
+program
+  .name("sentinel")
+  .description("AI-powered coding CLI - The best coding CLI on the planet")
+  .version(VERSION)
+  .option("--theme <theme>", "Set theme", "cyberpunk")
+  .option("--model <model>", "Set AI model")
+  .option("--agent <agent>", "Set default agent")
+  .option("--verbose", "Enable verbose logging")
+  .option("--no-tui", "Run without TUI (headless mode)")
+  .option("--project <path>", "Project root directory", process.cwd())
+  .action(async (options) => {
+    try {
+      await runMain(options);
+    } catch (err) {
+      console.error(`Fatal error: ${err}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("config")
+  .description("Show current configuration")
+  .option("--json", "Output as JSON")
+  .action((opts) => {
+    const config = getConfigManager().load();
+    if (opts.json) {
+      console.log(JSON.stringify(config, null, 2));
+    } else {
+      console.log("Current Configuration:");
+      console.log(JSON.stringify(config, null, 2));
+    }
+  });
+
+program
+  .command("themes")
+  .description("List available themes")
+  .action(() => {
+    const themes = themeEngine.getAllThemes();
+    const current = themeEngine.getTheme().name;
+    console.log("\nAvailable Themes:\n");
+    for (const theme of themes) {
+      const marker = theme.name === current ? " * " : "   ";
+      console.log(`${marker}${theme.display.padEnd(12)} - ${theme.description}`);
+    }
+    console.log();
+  });
+
+program
+  .command("skills")
+  .description("List available skills")
+  .action(() => {
+    const config = getConfigManager().load();
+    loadRegistries(getInstallRoot(), config.skills.paths);
+    const skills = skillRegistry.getAll();
+    if (skills.length === 0) {
+      console.log("No skills loaded. Run sentinel first to load skills.");
+      return;
+    }
+    console.log("\nLoaded Skills:\n");
+    for (const skill of skills) {
+      console.log(`  ${skill.name.padEnd(16)} - ${skill.description} [${skill.source}]`);
+    }
+    console.log();
+  });
+
+program
+  .command("agents")
+  .description("List available agents")
+  .action(() => {
+    const config = getConfigManager().load();
+    loadRegistries(getInstallRoot(), config.skills.paths);
+    const agents = agentRegistry.getAll();
+    if (agents.length === 0) {
+      console.log("No agents loaded. Run sentinel first to load agents.");
+      return;
+    }
+    console.log("\nAvailable Agents:\n");
+    for (const agent of agents) {
+      console.log(`  ${agent.name.padEnd(12)} - ${agent.description} [${agent.mode}]`);
+    }
+    console.log();
+  });
+
+program
+  .command("setup")
+  .description("Interactive setup wizard for API keys and models")
+  .action(async () => {
+    await runSetup();
+  });
+
+program
+  .command("ask <question>")
+  .description("Ask a question (headless mode)")
+  .option("--model <model>", "AI model to use")
+  .action(async (question, _opts, command) => {
+    const config = getConfigManager().load();
+    providerManager.initializeFromConfig(config.provider as any);
+    // --model is also defined on the root command, so commander binds it to the
+    // global opts; merge both so the subcommand override is honored either way.
+    const merged = command.optsWithGlobals();
+    const model = merged.model || config.model;
+    const [providerName, ...modelParts] = model.split("/");
+    const modelName = modelParts.join("/") || undefined;
+
+    console.log(`\nAsking ${model}...\n`);
+
+    try {
+      const response = await providerManager.chat(
+        providerName,
+        [{ role: "user", content: question }],
+        { model: modelName }
+      );
+      console.log(response.content);
+    } catch (err) {
+      console.error(`Error: ${err}`);
+    }
+  });
+
+program
+  .command("run <task>")
+  .description("Run an agentic task headlessly — executes tools (file, bash, search, git, web, patch)")
+  .option("--model <model>", "AI model to use (provider/model)")
+  .option("--agent <agent>", "Agent to use (default: config default_agent)")
+  .option("--max-steps <n>", "Maximum tool rounds")
+  .option("--json", "Emit newline-delimited JSON events instead of text")
+  .option("--project <path>", "Project root directory")
+  .action(async (task, opts, command) => {
+    // --model/--project are also defined on the root command, so commander binds
+    // them to the global opts; merge so subcommand flags are honored either way.
+    const merged = command.optsWithGlobals();
+    const projectRoot = merged.project || opts.project || process.cwd();
+    const config = getConfigManager(projectRoot).load();
+    providerManager.initializeFromConfig(config.provider as any);
+    toolManager.initialize(projectRoot);
+    loadRegistries(getInstallRoot(), config.skills.paths);
+
+    const explicitModel = merged.model as string | undefined;
+    const agentName = opts.agent || config.default_agent;
+    const json = !!opts.json;
+
+    // Use the router when configured (and no explicit --model override); it
+    // resolves a provider/model chain with fallback + retry. Otherwise a single
+    // provider, exactly as before.
+    let provider;
+    let modelName: string | undefined;
+    if (config.router && !explicitModel) {
+      provider = new RoutedProvider(config.router, agentName);
+      modelName = undefined;
+    } else {
+      const model = explicitModel || config.model;
+      const parts = model.split("/");
+      modelName = parts.slice(1).join("/") || undefined;
+      const single = providerManager.getProvider(parts[0]);
+      if (!single || !single.isAvailable()) {
+        console.error(`Provider "${parts[0]}" not available. Configure it (sentinel setup) or set an API key.`);
+        process.exitCode = 1;
+        return;
+      }
+      provider = single;
+    }
+
+    contextManager.setSystemPrompt(buildSystemPrompt(agentName, projectRoot));
+
+    const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : agentName === "gsd" ? 30 : 15;
+    const runner = new AgentRunner(
+      {
+        provider,
+        context: contextManager,
+        toolDefs: getToolDefinitions(),
+        executeTool: executeToolCall,
+        extractToolCalls,
+      },
+      { model: modelName, maxRounds }
+    );
+
+    const emit = (obj: Record<string, unknown>) => {
+      if (json) console.log(JSON.stringify(obj));
+    };
+
+    runner.on("roundStart", (round) => emit({ type: "round_start", round }));
+    runner.on("token", (text) => {
+      if (json) emit({ type: "token", text });
+      else process.stdout.write(text);
+    });
+    runner.on("streamEnd", () => {
+      if (!json) process.stdout.write("\n");
+    });
+    runner.on("usage", (u) => emit({ type: "usage", ...u }));
+    runner.on("toolStart", (name, args) => {
+      emit({ type: "tool_start", name, args });
+      if (!json) process.stdout.write(`[tool] ${name} ${args}\n`);
+    });
+    runner.on("toolResult", (name, ok, firstLine, full) => {
+      emit({ type: "tool_result", name, ok, firstLine, full });
+      if (!json) process.stdout.write(`  ${ok ? "ok" : "ERR"} ${firstLine}\n`);
+    });
+    runner.on("roundEnd", (round, willContinue) => emit({ type: "round_end", round, willContinue }));
+    runner.on("runError", (e) => {
+      const message = e instanceof Error ? e.message : String(e);
+      emit({ type: "error", message });
+      if (!json) console.error(`\nError: ${message}`);
+    });
+
+    const ac = new AbortController();
+    process.on("SIGINT", () => ac.abort());
+
+    const result = await runner.run(task, ac.signal);
+    emit({ type: "done", stopReason: result.stopReason, rounds: result.rounds, usage: result.usage });
+
+    // Set exitCode and let the event loop drain (don't process.exit() — on
+    // Windows that can tear down a still-flushing piped stdout and crash libuv).
+    process.exitCode =
+      result.stopReason === "no_tool_calls" ? 0 :
+      result.stopReason === "aborted" ? 130 :
+      result.stopReason === "max_rounds" ? 3 : 1;
+  });
+
+async function runMain(options: {
+  theme: string;
+  model?: string;
+  agent?: string;
+  verbose?: boolean;
+  tui?: boolean;
+  project: string;
+}): Promise<void> {
+  if (options.verbose) {
+    setLogLevel("debug");
+  }
+
+  log.info(`Sentinel CLI v${VERSION} starting...`);
+
+  const installRoot = getInstallRoot();
+  const projectRoot = options.project;
+
+  const configManager = getConfigManager(projectRoot);
+  const config = configManager.load();
+
+  if (options.theme) {
+    themeEngine.setTheme(options.theme);
+    state.set("currentTheme", options.theme);
+  }
+
+  if (options.model) {
+    state.set("currentModel", options.model);
+  } else {
+    state.set("currentModel", config.model);
+  }
+
+  if (options.agent) {
+    state.set("currentAgent", options.agent);
+  } else {
+    state.set("currentAgent", config.default_agent);
+  }
+
+  providerManager.initializeFromConfig(config.provider as any);
+
+  toolManager.initialize(projectRoot);
+
+  loadRegistries(installRoot, config.skills.paths);
+
+  if (!options.tui) {
+    log.info("Running in headless mode");
+    return;
+  }
+
+  if (!process.stdin.isTTY) {
+    log.error("No TTY detected. Use --no-tui for headless mode or run in a terminal.");
+    process.exit(1);
+  }
+
+  const app = new TUIApp({
+    projectRoot: options.project,
+    installRoot,
+    initialTheme: options.theme,
+  });
+
+  app.initSessionManager();
+
+  const cleanup = () => {
+    events.emit("app:quit");
+    app.destroy();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+  process.on("uncaughtException", (err) => {
+    log.error(`Uncaught: ${err.message}`);
+  });
+  process.on("unhandledRejection", (reason) => {
+    log.error(`Unhandled rejection: ${reason}`);
+  });
+
+  app.start();
+
+  await new Promise(() => {});
+}
+
+program.parse();

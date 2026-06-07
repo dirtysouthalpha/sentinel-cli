@@ -1,0 +1,57 @@
+{
+  "name": "sentinel-cli",
+  "version": "0.1.0",
+  "description": "AI-powered development CLI with cyberpunk aesthetic",
+  "type": "module",
+  "bin": {
+    "sentinel": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup && node scripts/add-shebang.cjs",
+    "dev": "tsup --watch",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "blessed": "^0.1.81",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "glob": "^10.3.10",
+    "headroom-ai": "^0.22.4",
+    "openai": "^4.67.3",
+    "ora": "^8.0.1",
+    "puppeteer": "^22.10.0",
+    "yaml": "^2.4.1"
+  },
+  "devDependencies": {
+    "@types/blessed": "^0.1.25",
+    "@types/node": "^20.14.0",
+    "rimraf": "^5.0.7",
+    "tsup": "^8.1.0",
+    "typescript": "^5.5.0",
+    "vitest": "^1.6.0"
+  },
+  "files": [
+    "dist",
+    "builtin",
+    "themes",
+    "config"
+  ],
+  "keywords": [
+    "cli",
+    "ai",
+    "coding",
+    "tui",
+    "development"
+  ],
+  "license": "MIT"
+}

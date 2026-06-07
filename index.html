@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sentinel CLI - The Best Coding CLI on the Planet</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #06080C;
+      color: #E0E6F0;
+      font-family: 'Inter', system-ui, sans-serif;
+      overflow-x: hidden;
+    }
+    .grid-bg {
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+    }
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+    nav { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid #1A2236; }
+    nav .logo { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: #00D4FF; text-decoration: none; }
+    nav .logo span { color: #FF2E63; }
+    nav .links a { color: #8892A8; text-decoration: none; margin-left: 32px; font-size: 14px; transition: color 0.2s; }
+    nav .links a:hover { color: #00D4FF; }
+    .hero { text-align: center; padding: 100px 0 80px; }
+    .hero h1 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: clamp(40px, 7vw, 72px);
+      font-weight: 700;
+      line-height: 1.1;
+      margin-bottom: 24px;
+    }
+    .hero h1 .cyan { color: #00D4FF; }
+    .hero h1 .magenta { color: #FF2E63; }
+    .hero p { font-size: 20px; color: #8892A8; max-width: 600px; margin: 0 auto 40px; line-height: 1.6; }
+    .hero .tagline {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: #39FF14;
+      margin-bottom: 40px;
+      letter-spacing: 2px;
+    }
+    .install-box {
+      background: #0B0F18;
+      border: 1px solid #1A2236;
+      border-radius: 12px;
+      padding: 24px 32px;
+      display: inline-block;
+      margin-bottom: 40px;
+    }
+    .install-box code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      color: #00D4FF;
+    }
+    .install-box .comment { color: #4A5568; font-size: 14px; display: block; margin-bottom: 8px; }
+    .btn-group { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-block;
+      padding: 14px 32px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: #00D4FF; color: #06080C; }
+    .btn-primary:hover { background: #00A8CC; box-shadow: 0 0 30px rgba(0,212,255,0.3); }
+    .btn-secondary { background: transparent; border: 1px solid #1A2236; color: #E0E6F0; }
+    .btn-secondary:hover { border-color: #00D4FF; color: #00D4FF; }
+    .features { padding: 80px 0; }
+    .features h2 { text-align: center; font-size: 36px; margin-bottom: 60px; font-family: 'JetBrains Mono', monospace; }
+    .features h2 span { color: #00D4FF; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+    .card {
+      background: #0B0F18;
+      border: 1px solid #1A2236;
+      border-radius: 12px;
+      padding: 32px;
+      transition: border-color 0.2s;
+    }
+    .card:hover { border-color: #00D4FF; }
+    .card .icon { font-size: 32px; margin-bottom: 16px; }
+    .card h3 { font-size: 20px; margin-bottom: 12px; font-family: 'JetBrains Mono', monospace; color: #00D4FF; }
+    .card p { color: #8892A8; line-height: 1.6; font-size: 15px; }
+    .demo { padding: 80px 0; }
+    .demo h2 { text-align: center; font-size: 36px; margin-bottom: 40px; font-family: 'JetBrains Mono', monospace; }
+    .terminal {
+      background: #0B0F18;
+      border: 1px solid #1A2236;
+      border-radius: 12px;
+      overflow: hidden;
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    .terminal-header {
+      background: #111827;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .terminal-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .terminal-dot.red { background: #FF5F56; }
+    .terminal-dot.yellow { background: #FFBD2E; }
+    .terminal-dot.green { background: #27C93F; }
+    .terminal-title { color: #4A5568; font-size: 13px; font-family: 'JetBrains Mono', monospace; margin-left: 8px; }
+    .terminal-body {
+      padding: 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .terminal-body .prompt { color: #39FF14; }
+    .terminal-body .cmd { color: #E0E6F0; }
+    .terminal-body .output { color: #8892A8; }
+    .terminal-body .accent { color: #00D4FF; }
+    .terminal-body .error { color: #FF2E63; }
+    .terminal-body .success { color: #39FF14; }
+    .providers { padding: 80px 0; text-align: center; }
+    .providers h2 { font-size: 36px; margin-bottom: 16px; font-family: 'JetBrains Mono', monospace; }
+    .providers p { color: #8892A8; margin-bottom: 40px; font-size: 18px; }
+    .provider-grid { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; }
+    .provider-chip {
+      background: #0B0F18;
+      border: 1px solid #1A2236;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: #8892A8;
+      transition: all 0.2s;
+    }
+    .provider-chip:hover { border-color: #00D4FF; color: #00D4FF; }
+    .provider-chip .highlight { color: #00D4FF; }
+    footer { border-top: 1px solid #1A2236; padding: 40px 0; text-align: center; color: #4A5568; font-size: 14px; }
+    footer a { color: #8892A8; text-decoration: none; }
+    footer a:hover { color: #00D4FF; }
+  </style>
+</head>
+<body>
+  <div class="grid-bg"></div>
+  <div class="container">
+    <nav>
+      <a href="#" class="logo">SENTINEL<span>CLI</span></a>
+      <div class="links">
+        <a href="#features">Features</a>
+        <a href="#providers">Providers</a>
+        <a href="https://github.com/brandt/sentinel-cli">GitHub</a>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <div class="tagline">// THE BEST CODING CLI ON THE PLANET</div>
+      <h1><span class="cyan">Code</span> at the<br><span class="magenta">Speed</span> of Thought</h1>
+      <p>AI-powered coding assistant with real-time tool execution, token compression, and 14 cyberpunk themes. Works with Z.ai, Anthropic, OpenAI, Ollama, and more.</p>
+      <div class="install-box">
+        <code class="comment"># Install globally</code>
+        <code>npm install -g sentinel-cli</code>
+      </div>
+      <br><br>
+      <div class="btn-group">
+        <a href="#features" class="btn btn-primary">Get Started</a>
+        <a href="https://github.com/brandt/sentinel-cli" class="btn btn-secondary">View on GitHub</a>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <h2>Super <span>Powers</span></h2>
+      <div class="grid">
+        <div class="card">
+          <div class="icon">⚡</div>
+          <h3>Real Tool Execution</h3>
+          <p>AI doesn't just suggest — it reads files, runs commands, searches code, and applies patches. Full agentic loop with multi-round execution.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🧠</div>
+          <h3>Smart Context</h3>
+          <p>Auto-compressing context window saves tokens and money. Track costs in real-time with built-in token counting and usage analytics.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🔥</div>
+          <h3>Get Shit Done Mode</h3>
+          <p>Switch to GSD agent for no-nonsense, fast execution. Auto-approve tools, minimal explanations, maximum output. Ship it.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🎨</div>
+          <h3>14 Cyberpunk Themes</h3>
+          <p>Tron x Gotham, Matrix, Neon, Blood, and more. Built with blessed TUI for the full terminal aesthetic experience.</p>
+        </div>
+        <div class="card">
+          <div class="icon">💰</div>
+          <h3>Cost Tracking</h3>
+          <p>Real-time token usage, request counting, and estimated cost display. Know exactly what each session costs you.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🌐</div>
+          <h3>Multi-Provider</h3>
+          <p>Z.ai GLM, Anthropic Claude, OpenAI GPT-4o, Ollama local, Groq, OpenRouter, Together AI, or any OpenAI-compatible endpoint.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🔧</div>
+          <h3>Super Tools</h3>
+          <p>6 built-in tools: file ops, bash execution, code search, git, web fetch, and smart patching. Plus 12 built-in commands.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🪟</div>
+          <h3>Windows First</h3>
+          <p>Full Windows support with PowerShell integration. Works on Linux and macOS too. No WSL required.</p>
+        </div>
+        <div class="card">
+          <div class="icon">📦</div>
+          <h3>Extensible</h3>
+          <p>Custom skills, commands, agents, and MCP servers. Build your own or use the built-in library. Markdown-based configuration.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="demo">
+      <h2>See It In Action</h2>
+      <div class="terminal">
+        <div class="terminal-header">
+          <div class="terminal-dot red"></div>
+          <div class="terminal-dot yellow"></div>
+          <div class="terminal-dot green"></div>
+          <span class="terminal-title">sentinel</span>
+        </div>
+        <div class="terminal-body">
+          <span class="prompt">❯ </span><span class="cmd">fix the auth bug in src/api/login.ts</span><br>
+          <br>
+          <span class="accent">[SENTINEL]</span> Let me read the file and find the bug...<br>
+          <span class="output">  TOOL: file(action=read, path=src/api/login.ts)</span><br>
+          <span class="success">  OK</span> <span class="output">file: Read 2342 bytes</span><br>
+          <br>
+          <span class="accent">[SENTINEL]</span> Found it. The token validation is missing an expiry check.<br>
+          <span class="output">  TOOL: patch(path=src/api/login.ts, oldText="verify(token)", newText="verify(token, { expiresIn: '24h' })")</span><br>
+          <span class="success">  OK</span> <span class="output">patch: 1 replacement</span><br>
+          <br>
+          <span class="accent">[SENTINEL]</span> Now let me verify the fix compiles:<br>
+          <span class="output">  TOOL: bash(command=npx tsc --noEmit)</span><br>
+          <span class="success">  OK</span> <span class="output">bash: No errors</span><br>
+          <br>
+          <span class="accent">[SENTINEL]</span> <span class="success">Fixed!</span> Added expiry check to token verification in<br>
+          <span class="accent">[SENTINEL]</span> <span class="cmd">src/api/login.ts:47</span>. The token was being validated<br>
+          <span class="accent">[SENTINEL]</span> without checking expiration, allowing expired tokens.<br>
+          <br>
+          <span class="output">Tokens: 4,231 | Requests: 3 | Est. Cost: $0.0642 | Context: 8 msgs</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="providers" id="providers">
+      <h2>Works With Your <span style="color:#00D4FF">Favorite AI</span></h2>
+      <p>One CLI, every provider. Switch with a single command.</p>
+      <div class="provider-grid">
+        <div class="provider-chip"><span class="highlight">Z.ai</span> GLM-5.1 / GLM-4.7</div>
+        <div class="provider-chip"><span class="highlight">Anthropic</span> Claude Sonnet / Haiku</div>
+        <div class="provider-chip"><span class="highlight">OpenAI</span> GPT-4o</div>
+        <div class="provider-chip"><span class="highlight">Ollama</span> Local Models</div>
+        <div class="provider-chip"><span class="highlight">Groq</span> Ultra-Fast</div>
+        <div class="provider-chip"><span class="highlight">OpenRouter</span> 100+ Models</div>
+        <div class="provider-chip"><span class="highlight">Together AI</span> Open Source</div>
+        <div class="provider-chip"><span class="highlight">Custom</span> Any OpenAI-compat</div>
+      </div>
+    </section>
+
+    <footer>
+      <p>Sentinel CLI v0.2.0 | <a href="https://github.com/brandt/sentinel-cli">GitHub</a> | MIT License</p>
+      <p style="margin-top: 8px;">Built with TypeScript, Blessed, and cyberpunk dreams.</p>
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tgz
+.env
+.env.local
+.sentinel/
+sentinel.json
+coverage/
+.plans/
+*.map
+
+# Local test workspace with credentials — never commit
+playground/
+start-sentinel.cmd
