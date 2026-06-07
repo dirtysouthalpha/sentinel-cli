@@ -34,6 +34,7 @@ import { createSubagentTool, createSubagentAwareExecutor } from "../core/subagen
 import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
 import { createHookAwareExecutor, defaultRunShell } from "../core/hooks.js";
 import { BackgroundTaskManager } from "../core/background.js";
+import { usageTracker } from "../core/usage-tracker.js";
 import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
@@ -490,6 +491,7 @@ export class TUIApp {
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
       ["/cost", "Session cost breakdown"],
+      ["/usage", "Usage metrics: tokens, cost, per-tool table"],
       ["/export [md|html] [path]", "Export this session's transcript to a file"],
       ["/branch", "Duplicate this session into a new tab"],
       ["/compact", "Compress context (save tokens)"],
@@ -565,6 +567,11 @@ export class TUIApp {
           `  Est. cost:  $${this.cost.estimatedCostUSD.toFixed(4)}`,
         ].join("\n")
       );
+      return;
+    }
+
+    if (parsed.name === "usage") {
+      this.addSystem(usageTracker.render());
       return;
     }
 
@@ -1238,13 +1245,17 @@ export class TUIApp {
       runner.on("roundStart", () => this.startAssistant());
       runner.on("token", (t) => this.streamAssistant(t));
       runner.on("streamEnd", () => this.endAssistant());
-      runner.on("usage", (u) => this.updateCost(u));
+      runner.on("usage", (u) => {
+        this.updateCost(u);
+        usageTracker.recordTokens(u); // V17: also feed the observability tracker
+      });
       runner.on("toolStart", (_name, args) => {
         this.pendingToolArgs = args;
       });
-      runner.on("toolResult", (name, ok, firstLine) =>
-        this.addTool(name, this.truncateArgs(this.pendingToolArgs), ok, firstLine)
-      );
+      runner.on("toolResult", (name, ok, firstLine) => {
+        usageTracker.recordTool(name, ok); // V17: per-tool metrics
+        this.addTool(name, this.truncateArgs(this.pendingToolArgs), ok, firstLine);
+      });
       runner.on("contextLarge", () =>
         this.addSystem("Context is getting large — /compact to save tokens.")
       );
