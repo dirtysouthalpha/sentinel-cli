@@ -40,7 +40,7 @@ import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 function getInstallRoot(): string {
   return resolve(

@@ -63,7 +63,7 @@ import { join, isAbsolute, resolve } from "node:path";
 
 const log = createLogger({ prefix: "tui" });
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 /**
  * Default marketplace registry source for `/marketplace` (V15). A project-local
