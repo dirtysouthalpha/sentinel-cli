@@ -52,6 +52,8 @@ import { getConfigManager } from "../core/config.js";
 import { fetchRegistry, searchRegistry, installEntry } from "../core/marketplace.js";
 import { exportSessionMarkdown, exportSessionHtml } from "../core/session-export.js";
 import { WorkspaceStore } from "../core/workspace.js";
+import { buildAbout } from "../core/about.js";
+import { checkForUpdate } from "../core/update-check.js";
 import { createLogger } from "../utils/logger.js";
 import { writeFileSync, readFileSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
@@ -520,6 +522,8 @@ export class TUIApp {
       ["/branch", "Duplicate this session into a new tab"],
       ["/workspace ...", "Multi-repo roots: list | add | remove | use (alias /ws)"],
       ["/compact", "Compress context (save tokens)"],
+      ["/about", "Version, runtime, and feature summary"],
+      ["/update", "Check npm for a newer Sentinel release"],
       ["/clear", "Clear chat history"],
       ["/help", "Full help"],
       ["/quit", "Exit Sentinel"],
@@ -597,6 +601,26 @@ export class TUIApp {
 
     if (parsed.name === "usage") {
       this.addSystem(usageTracker.render());
+      return;
+    }
+
+    if (parsed.name === "about") {
+      this.addSystem(buildAbout(VERSION));
+      return;
+    }
+
+    if (parsed.name === "update") {
+      this.addSystem("Checking for updates …");
+      const r = await checkForUpdate(VERSION);
+      if (r.latest === null) {
+        this.addSystem("Could not check for updates (offline?).");
+      } else if (r.updateAvailable) {
+        this.addSystem(
+          `v${r.latest} available (you have v${r.current}). Update: npm i -g sentinel-cli`
+        );
+      } else {
+        this.addSystem(`Sentinel is up to date (v${r.current}).`);
+      }
       return;
     }
 
