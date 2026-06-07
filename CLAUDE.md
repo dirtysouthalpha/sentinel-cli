@@ -40,10 +40,11 @@ node dist/cli.js --no-tui     # load everything but skip the TUI
 - **Singletons via `getInstance()` / exported instance.** `state`, `contextManager`,
   `providerManager`, `themeEngine`, `getConfigManager()`, and the three registries are all
   process-wide singletons. Import the exported instance; do not `new` them.
-- **Builtins are loaded from `src/`, not `dist/`.** `loadAllSkills/Commands/Agents` resolve
-  `installRoot` to the project root (`dist/../`) and then read `src/{skills,commands,agents}/builtin/`.
-  The markdown source tree must be present at runtime — a `dist`-only install will load zero
-  builtins. Keep this in mind when changing build packaging.
+- **Builtin markdown ships in `dist/builtin/`.** `loadAllSkills/Commands/Agents` resolve the
+  builtin dir via `utils/builtins.ts` `resolveBuiltinDir`, which prefers
+  `dist/builtin/<domain>` (copied at build time by `scripts/copy-builtins.cjs`) and falls
+  back to `src/<domain>/builtin/` for local dev. So a `dist`-only/global install works. If you
+  add builtin `.md` files, they're picked up automatically on the next `npm run build`.
 
 ## Architecture
 
