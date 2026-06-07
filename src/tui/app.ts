@@ -35,7 +35,10 @@ import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
+import { exportSessionMarkdown, exportSessionHtml } from "../core/session-export.js";
 import { createLogger } from "../utils/logger.js";
+import { writeFileSync } from "node:fs";
+import { join, isAbsolute, resolve } from "node:path";
 
 const log = createLogger({ prefix: "tui" });
 
@@ -478,6 +481,8 @@ export class TUIApp {
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
       ["/cost", "Session cost breakdown"],
+      ["/export [md|html] [path]", "Export this session's transcript to a file"],
+      ["/branch", "Duplicate this session into a new tab"],
       ["/compact", "Compress context (save tokens)"],
       ["/clear", "Clear chat history"],
       ["/help", "Full help"],
@@ -527,6 +532,16 @@ export class TUIApp {
       this.addSystem(`Compacted: ${before} → ${after} messages.`);
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);
+      return;
+    }
+
+    if (parsed.name === "export") {
+      this.handleExportCommand(parsed.args);
+      return;
+    }
+
+    if (parsed.name === "branch") {
+      this.handleBranchCommand();
       return;
     }
 
@@ -897,6 +912,90 @@ export class TUIApp {
         `Command search failed: ${err instanceof Error ? err.message : String(err)}`
       );
     }
+  }
+
+  private handleExportCommand(args: string[]): void {
+    // Parse args: format (md|html|markdown) and/or an output path, in any order.
+    let format: "md" | "html" = "md";
+    let outPath: string | undefined;
+    for (const arg of args) {
+      const lower = arg.toLowerCase();
+      if (lower === "md" || lower === "markdown") {
+        format = "md";
+      } else if (lower === "html" || lower === "htm") {
+        format = "html";
+      } else {
+        outPath = arg;
+      }
+    }
+
+    const session = sessionManager.getActiveSession();
+    if (!session) {
+      this.addSystem("No active session to export.");
+      return;
+    }
+
+    const messages = session.contextManager
+      .getMessages()
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    if (messages.length === 0) {
+      this.addSystem("Nothing to export — this session has no messages yet.");
+      return;
+    }
+
+    const title = session.title || "Sentinel Session";
+    const ext = format === "html" ? "html" : "md";
+    const content =
+      format === "html"
+        ? exportSessionHtml({ title, messages })
+        : exportSessionMarkdown({ title, messages });
+
+    const defaultName = `sentinel-export-${session.id.slice(0, 8)}.${ext}`;
+    const target = outPath
+      ? isAbsolute(outPath)
+        ? outPath
+        : resolve(this.projectRoot, outPath)
+      : join(this.projectRoot, defaultName);
+
+    try {
+      writeFileSync(target, content, "utf8");
+      this.addSystem(`Exported ${messages.length} messages to ${target}`);
+    } catch (err) {
+      this.addSystem(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private handleBranchCommand(): void {
+    const source = sessionManager.getActiveSession();
+    if (!source) {
+      this.addSystem("No active session to branch.");
+      return;
+    }
+
+    // Create a new session/tab, then copy the source's conversation into it so
+    // the branch starts as an independent duplicate of the current context.
+    const branch = sessionManager.createSession({
+      projectRoot: this.projectRoot,
+      title: `${source.title} (branch)`,
+      model: source.model,
+      agent: source.agent,
+    });
+
+    const srcCm = source.contextManager;
+    const dstCm = branch.contextManager;
+    const sysPrompt = srcCm.getSystemPrompt();
+    if (sysPrompt) dstCm.setSystemPrompt(sysPrompt);
+    for (const m of srcCm.getMessages()) {
+      if (m.role === "system") continue; // re-derived from the system prompt
+      dstCm.addMessage(m.role as "user" | "assistant" | "tool", m.content, m.metadata);
+    }
+    sessionManager.markDirty(branch.id);
+
+    // Switch the UI to the new branch tab and replay its transcript.
+    this.tabManager.refresh();
+    this.tabManager.switchTab(branch.id);
+    this.addSystem(`Branched into a new tab: "${branch.title}" (${srcCm.getMessageCount()} messages copied).`);
   }
 
   private handleTabsCommand(args: string[]): void {
