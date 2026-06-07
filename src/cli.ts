@@ -23,6 +23,9 @@ import { AgentRunner } from "./core/agent-runner.js";
 import { extractToolCalls } from "./core/tool-call-extractor.js";
 import { buildSystemPrompt } from "./core/system-prompt.js";
 import { RoutedProvider } from "./ai/routed-provider.js";
+import { PermissionEngine, PermissionMode, PermissionRequest } from "./core/permissions.js";
+import { CheckpointManager } from "./core/checkpoints.js";
+import { createGuardedExecutor } from "./core/guarded-executor.js";
 import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
@@ -180,6 +183,8 @@ program
   .option("--max-steps <n>", "Maximum tool rounds")
   .option("--json", "Emit newline-delimited JSON events instead of text")
   .option("--project <path>", "Project root directory")
+  .option("--permission-mode <mode>", "Permission mode: yolo | auto | gated (default: yolo)")
+  .option("--yes", "Auto-approve permission prompts (non-interactive)")
   .action(async (task, opts, command) => {
     // --model/--project are also defined on the root command, so commander binds
     // them to the global opts; merge so subcommand flags are honored either way.
@@ -217,13 +222,32 @@ program
 
     contextManager.setSystemPrompt(buildSystemPrompt(agentName, projectRoot));
 
+    // R2: enforce permissions + checkpoint mutations. Default mode is "yolo"
+    // (unchanged behavior); --permission-mode auto|gated turns on guardrails.
+    const mode: PermissionMode = (opts.permissionMode as PermissionMode) || "yolo";
+    const autoApprove = !!opts.yes;
+    const engine = new PermissionEngine(mode, config.permissions as any, projectRoot);
+    const checkpoints = new CheckpointManager(projectRoot);
+    const guardedExecute = createGuardedExecutor({
+      engine,
+      checkpoints,
+      baseExecute: executeToolCall,
+      ask: async (req: PermissionRequest, reason: string) => {
+        // Headless: approve only with --yes; otherwise deny and report on stderr.
+        const label = `${req.tool}${req.action ? `(${req.action})` : ""}`;
+        if (autoApprove) return true;
+        console.error(`Permission required: ${label} [${reason}] — denied (pass --yes to allow).`);
+        return false;
+      },
+    });
+
     const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : agentName === "gsd" ? 30 : 15;
     const runner = new AgentRunner(
       {
         provider,
         context: contextManager,
         toolDefs: getToolDefinitions(),
-        executeTool: executeToolCall,
+        executeTool: guardedExecute,
         extractToolCalls,
       },
       { model: modelName, maxRounds }
@@ -269,6 +293,37 @@ program
       result.stopReason === "no_tool_calls" ? 0 :
       result.stopReason === "aborted" ? 130 :
       result.stopReason === "max_rounds" ? 3 : 1;
+  });
+
+program
+  .command("checkpoints")
+  .description("List file checkpoints created by the agent")
+  .option("--project <path>", "Project root directory")
+  .action((opts, command) => {
+    const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
+    const cps = new CheckpointManager(projectRoot).list();
+    if (cps.length === 0) {
+      console.log("No checkpoints.");
+      return;
+    }
+    for (const c of cps) {
+      const when = new Date(c.timestamp).toLocaleString();
+      console.log(`${c.id}  ${when}  ${c.tool.padEnd(6)} ${c.existed ? "edit  " : "create"}  ${c.path}`);
+    }
+  });
+
+program
+  .command("undo")
+  .description("Undo the most recent agent file change")
+  .option("--project <path>", "Project root directory")
+  .action((opts, command) => {
+    const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
+    const cp = new CheckpointManager(projectRoot).undoLast();
+    if (!cp) {
+      console.log("Nothing to undo.");
+      return;
+    }
+    console.log(`Undid ${cp.tool} ${cp.existed ? "edit" : "create"} of ${cp.path}`);
   });
 
 async function runMain(options: {
