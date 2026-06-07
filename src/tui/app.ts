@@ -42,6 +42,7 @@ import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
 import { fetchRegistry, searchRegistry, installEntry } from "../core/marketplace.js";
 import { exportSessionMarkdown, exportSessionHtml } from "../core/session-export.js";
+import { WorkspaceStore } from "../core/workspace.js";
 import { createLogger } from "../utils/logger.js";
 import { writeFileSync, readFileSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
@@ -505,6 +506,7 @@ export class TUIApp {
       ["/usage", "Usage metrics: tokens, cost, per-tool table"],
       ["/export [md|html] [path]", "Export this session's transcript to a file"],
       ["/branch", "Duplicate this session into a new tab"],
+      ["/workspace ...", "Multi-repo roots: list | add | remove | use (alias /ws)"],
       ["/compact", "Compress context (save tokens)"],
       ["/clear", "Clear chat history"],
       ["/help", "Full help"],
@@ -963,6 +965,11 @@ export class TUIApp {
       return;
     }
 
+    if (parsed.name === "workspace" || parsed.name === "ws") {
+      this.handleWorkspaceCommand(parsed.args);
+      return;
+    }
+
     const cmd = commandRegistry.get(parsed.name);
     if (cmd) {
       await this.chatWithAI(resolveTemplate(cmd.template, parsed.args));
@@ -989,17 +996,15 @@ export class TUIApp {
       return;
     }
 
-    // Resolve a source token (last positional for list/search, last for install)
-    // against the project root when it's a relative path; URLs pass through.
+    // Resolve a source token against the project root when it's a relative path;
+    // URLs and absolute paths pass through.
     const resolveSource = (token?: string): string => {
       const src = token || DEFAULT_MARKETPLACE_SOURCE;
       if (/^https?:\/\//i.test(src) || isAbsolute(src)) return src;
       return resolve(this.projectRoot, src);
     };
 
-    const loadRegistry = async (source: string) => {
-      return await fetchRegistry(source);
-    };
+    const loadRegistry = async (source: string) => fetchRegistry(source);
 
     if (sub === "list") {
       const source = resolveSource(args[1]);
@@ -1076,6 +1081,81 @@ export class TUIApp {
     }
 
     this.addSystem(usage);
+  }
+
+  /**
+   * /workspace (alias /ws) — track several project roots (V18).
+   * Subcommands: list | add [path] | remove <path> | use <path>.
+   * `use` records the active root for the *next* session/tab — it does NOT
+   * hot-swap the running projectRoot.
+   */
+  private handleWorkspaceCommand(args: string[]): void {
+    const sub = (args[0] || "list").toLowerCase();
+    let store: WorkspaceStore;
+    try {
+      store = new WorkspaceStore();
+    } catch (err) {
+      this.addError(`Workspace error: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
+    if (sub === "list") {
+      const roots = store.listRoots();
+      const active = store.getActive();
+      if (roots.length === 0) {
+        this.addSystem(
+          "No workspace roots yet. Add one with /workspace add [path] (defaults to this project)."
+        );
+        return;
+      }
+      let msg = "Workspace roots:\n";
+      for (const r of roots) msg += `  ${r === active ? "→" : " "} ${r}\n`;
+      this.addSystem(msg.trimEnd());
+      return;
+    }
+
+    if (sub === "add") {
+      const path = args.slice(1).join(" ").trim() || this.projectRoot;
+      try {
+        const root = store.addRoot(path);
+        this.addSystem(`Added workspace root: ${root}`);
+      } catch (err) {
+        this.addError(`Failed to add root: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    if (sub === "remove" || sub === "rm") {
+      const path = args.slice(1).join(" ").trim();
+      if (!path) {
+        this.addSystem("Usage: /workspace remove <path>");
+        return;
+      }
+      const removed = store.removeRoot(path);
+      this.addSystem(removed ? `Removed workspace root: ${path}` : `Not a tracked root: ${path}`);
+      return;
+    }
+
+    if (sub === "use") {
+      const path = args.slice(1).join(" ").trim();
+      if (!path) {
+        this.addSystem("Usage: /workspace use <path>");
+        return;
+      }
+      try {
+        const root = store.setActive(path);
+        this.addSystem(
+          `Active workspace root → ${root}\nThis affects the next session / new tab — your current session keeps its project root.`
+        );
+      } catch (err) {
+        this.addError(`Failed to set active root: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    this.addSystem(
+      "Usage: /workspace <list | add [path] | remove <path> | use <path>>  (alias: /ws)"
+    );
   }
 
   /** /cmd <natural language> — AI command-search: NL → one shell command. */
