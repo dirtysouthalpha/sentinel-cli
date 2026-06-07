@@ -20,6 +20,7 @@ import {
   renderSteps,
 } from "../core/workflows-store.js";
 import { expandMentions } from "../core/mentions.js";
+import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
@@ -38,7 +39,7 @@ import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
 import { exportSessionMarkdown, exportSessionHtml } from "../core/session-export.js";
 import { createLogger } from "../utils/logger.js";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
 
 const log = createLogger({ prefix: "tui" });
@@ -478,6 +479,7 @@ export class TUIApp {
       ["/mcp", "List connected MCP tools"],
       ["/cmd <text>", "AI command-search: natural language → shell command"],
       ["/workflow ...", "Saved workflows: list | save | run | delete"],
+      ["/pipeline run <f.json>", "Run a deterministic JSON pipeline of agent steps"],
       ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
@@ -835,6 +837,30 @@ export class TUIApp {
       this.addSystem(
         "Usage: /workflow list  ·  /workflow save <name> <step1> ; <step2> ...  ·  /workflow run <name> [args...]  ·  /workflow delete <name>"
       );
+      return;
+    }
+
+    // /pipeline — V9 deterministic pipeline engine. Steps defined in a JSON file
+    // run in order; consecutive `parallel:true` steps run concurrently. Each step
+    // is delegated to an isolated subagent and may reference prior step results.
+    if (parsed.name === "pipeline") {
+      const sub = (parsed.args[0] || "").toLowerCase();
+      const rawPath = parsed.args.slice(1).join(" ").trim();
+      if (sub !== "run" || !rawPath) {
+        this.addSystem("Usage: /pipeline run <path.json>");
+        return;
+      }
+      const filePath = isAbsolute(rawPath) ? rawPath : resolve(this.projectRoot, rawPath);
+      let pipeline: Pipeline;
+      try {
+        pipeline = parsePipeline(readFileSync(filePath, "utf8"));
+      } catch (err) {
+        this.addError(
+          `Pipeline load failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return;
+      }
+      await this.runPipelineDelegated(pipeline);
       return;
     }
 
@@ -1208,6 +1234,104 @@ export class TUIApp {
       this.addError(err instanceof Error ? err.message : String(err));
     } finally {
       this.ac = undefined;
+      this.isProcessing = false;
+      state.set("isProcessing", false);
+      this.renderInput();
+    }
+  }
+
+  /**
+   * V9: run a parsed pipeline by delegating each step to an isolated subagent.
+   * Uses the pure `runPipeline` engine (sequential by default; consecutive
+   * `parallel:true` steps run concurrently). Each step's subagent receives the
+   * prior steps' results as context, and a per-step error is recorded without
+   * aborting the rest of the pipeline.
+   */
+  private async runPipelineDelegated(pipeline: Pipeline): Promise<void> {
+    this.isProcessing = true;
+    state.set("isProcessing", true);
+    this.renderInput();
+
+    try {
+      const config = getConfigManager().getAll();
+      const [providerName, ...modelParts] = state.get("currentModel").split("/");
+      const modelName = modelParts.join("/") || undefined;
+      const agentName = state.get("currentAgent");
+
+      // Connect MCP once (mirrors chatWithAI) so subagents see MCP tools too.
+      if (!this.mcpConnected) {
+        this.mcpConnected = true;
+        try {
+          await this.mcp.connect((config.mcp as Record<string, never>) || {});
+        } catch {
+          // non-fatal: continue with built-in tools only
+        }
+      }
+
+      let provider;
+      let runnerModel = modelName;
+      if (config.router) {
+        provider = new RoutedProvider(config.router, agentName);
+        runnerModel = undefined;
+      } else {
+        const single = providerManager.getProvider(providerName);
+        if (!single) throw new Error(`No provider "${providerName}". Try /providers`);
+        if (!single.isAvailable()) throw new Error(`No API key for "${providerName}". Type /connect`);
+        provider = single;
+      }
+
+      // Same guarded + MCP-aware executor stack the main loop uses.
+      const engine = new PermissionEngine(this.permissionMode, config.permissions as never, this.projectRoot);
+      const checkpoints = new CheckpointManager(this.projectRoot);
+      const mcpAware = createMcpAwareExecutor(this.mcp, executeToolCall);
+      const execute = createGuardedExecutor({
+        engine,
+        checkpoints,
+        baseExecute: mcpAware,
+        ask: (req, reason) => this.askPermission(req, reason),
+      });
+      const childToolDefs = [...getToolDefinitions(), ...this.mcp.getToolDefs()];
+      const subagentTool = createSubagentTool({
+        provider,
+        toolDefs: childToolDefs,
+        executeTool: execute,
+        extractToolCalls,
+        model: runnerModel,
+        systemPrompt: buildSystemPrompt(agentName, this.projectRoot),
+      });
+
+      this.addSystem(`▶ Running pipeline "${pipeline.name}" (${pipeline.steps.length} step(s))...`);
+
+      const results = await runPipeline(
+        pipeline,
+        async (step, prior) => {
+          const priorBlock = prior.length
+            ? "Prior step results:\n" +
+              prior.map((r) => `### ${r.name}\n${r.result}`).join("\n\n")
+            : "";
+          return subagentTool.execute({
+            task: step.prompt,
+            context: priorBlock || undefined,
+          });
+        },
+        {
+          onStepStart: (s) =>
+            this.addSystem(`  • step "${s.name}"${s.parallel ? " (parallel)" : ""}...`),
+        }
+      );
+
+      let summary = `Pipeline "${pipeline.name}" complete (${results.length} step(s)):\n`;
+      for (const r of results) {
+        const first = r.result.split("\n")[0].slice(0, 200);
+        summary += `  ${r.result.startsWith("ERROR") ? "✗" : "✓"} ${r.name}: ${first}\n`;
+      }
+      this.addSystem(summary.trimEnd());
+
+      const activeId = sessionManager.getActiveSessionId();
+      if (activeId) sessionManager.markDirty(activeId);
+    } catch (err) {
+      this.addError(err instanceof Error ? err.message : String(err));
+    } finally {
       this.isProcessing = false;
       state.set("isProcessing", false);
       this.renderInput();
