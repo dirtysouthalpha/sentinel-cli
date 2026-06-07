@@ -36,6 +36,7 @@ import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
 import { createHookAwareExecutor, defaultRunShell } from "../core/hooks.js";
 import { BackgroundTaskManager } from "../core/background.js";
 import { usageTracker } from "../core/usage-tracker.js";
+import { estimateCostUSD } from "../core/pricing.js";
 import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
@@ -1463,6 +1464,8 @@ export class TUIApp {
       runner.on("usage", (u) => {
         this.updateCost(u);
         usageTracker.recordTokens(u); // V17: also feed the observability tracker
+        // V17+pricing: attribute real per-model cost so /usage shows $ spend.
+        usageTracker.recordCostUSD(estimateCostUSD(state.get("currentModel"), u.promptTokens, u.completionTokens));
       });
       runner.on("toolStart", (_name, args) => {
         this.pendingToolArgs = args;
