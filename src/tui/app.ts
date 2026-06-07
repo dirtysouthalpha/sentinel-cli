@@ -19,6 +19,12 @@ import {
   deleteWorkflow,
   renderSteps,
 } from "../core/workflows-store.js";
+import {
+  buildBundle,
+  writeBundle,
+  readBundle,
+  applyBundle,
+} from "../core/sync.js";
 import { expandMentions } from "../core/mentions.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
@@ -498,6 +504,7 @@ export class TUIApp {
       ["/index", "Build a semantic index of the repo (TF-IDF, local)"],
       ["/search <query>", "Semantic search the repo index for relevant files"],
       ["/workflow ...", "Saved workflows: list | save | run | delete"],
+      ["/sync ...", "Portable settings bundle: export [path] | import <path>"],
       ["/pipeline run <f.json>", "Run a deterministic JSON pipeline of agent steps"],
       ["/ship <task>", "Autonomous GSD: plan → implement → test → review → fix"],
       ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
@@ -902,6 +909,62 @@ export class TUIApp {
       this.addSystem(
         "Usage: /workflow list  ·  /workflow save <name> <step1> ; <step2> ...  ·  /workflow run <name> [args...]  ·  /workflow delete <name>"
       );
+      return;
+    }
+
+    // /sync — V19 portable settings bundle. `export [path]` writes the (redacted)
+    // global config + project skills/workflows to a JSON file; `import <path>`
+    // restores skills + workflows from one. Secrets are stripped on export and the
+    // global config is never overwritten on import.
+    if (parsed.name === "sync") {
+      const sub = (parsed.args[0] || "").toLowerCase();
+
+      if (!sub || sub === "export") {
+        const rawPath = parsed.args.slice(1).join(" ").trim() || "sentinel-sync.json";
+        const outPath = isAbsolute(rawPath) ? rawPath : resolve(this.projectRoot, rawPath);
+        try {
+          const bundle = buildBundle(this.projectRoot);
+          writeBundle(outPath, bundle);
+          const parts: string[] = [];
+          parts.push(bundle.config ? "config (secrets redacted)" : "no config");
+          parts.push(`${Object.keys(bundle.skills ?? {}).length} skill(s)`);
+          parts.push(`${Object.keys(bundle.workflows ?? {}).length} workflow(s)`);
+          this.addSystem(`Exported sync bundle → ${outPath}\n  ${parts.join("  ·  ")}`);
+        } catch (err) {
+          this.addError(
+            `Sync export failed: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+        return;
+      }
+
+      if (sub === "import") {
+        const rawPath = parsed.args.slice(1).join(" ").trim();
+        if (!rawPath) {
+          this.addSystem("Usage: /sync import <path>");
+          return;
+        }
+        const inPath = isAbsolute(rawPath) ? rawPath : resolve(this.projectRoot, rawPath);
+        try {
+          const bundle = readBundle(inPath);
+          const applied = applyBundle(this.projectRoot, bundle);
+          const summary =
+            applied.length > 0
+              ? `Applied ${applied.length} item(s):\n  ${applied.join("\n  ")}`
+              : "Nothing to apply (bundle had no skills or workflows).";
+          const note = bundle.config
+            ? "\nNote: the bundle's global config was NOT applied (review it manually)."
+            : "";
+          this.addSystem(`Imported sync bundle ← ${inPath}\n${summary}${note}`);
+        } catch (err) {
+          this.addError(
+            `Sync import failed: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+        return;
+      }
+
+      this.addSystem("Usage: /sync export [path]  ·  /sync import <path>");
       return;
     }
 
