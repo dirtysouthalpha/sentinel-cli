@@ -12,6 +12,13 @@ import { AgentRunner } from "../core/agent-runner.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { suggestCommand } from "../core/command-search.js";
+import {
+  saveWorkflow,
+  listWorkflows,
+  getWorkflow,
+  deleteWorkflow,
+  renderSteps,
+} from "../core/workflows-store.js";
 import { expandMentions } from "../core/mentions.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { createHeaderBar } from "./header-bar.js";
@@ -466,6 +473,7 @@ export class TUIApp {
       ["/tasks", "List background tasks (and their status)"],
       ["/mcp", "List connected MCP tools"],
       ["/cmd <text>", "AI command-search: natural language → shell command"],
+      ["/workflow ...", "Saved workflows: list | save | run | delete"],
       ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
@@ -724,6 +732,93 @@ export class TUIApp {
 
     if (parsed.name === "cmd") {
       await this.handleCmdSearch(parsed.args.join(" "));
+      return;
+    }
+
+    // /workflow — saved, parameterized workflows (Warp Drive, V5).
+    if (parsed.name === "workflow") {
+      const sub = (parsed.args[0] || "").toLowerCase();
+
+      if (!sub || sub === "list") {
+        const wfs = listWorkflows(this.projectRoot);
+        if (wfs.length === 0) {
+          this.addSystem(
+            "No workflows yet. Save one with:\n  /workflow save <name> <step1> ; <step2> ..."
+          );
+          return;
+        }
+        let msg = `Workflows (${wfs.length}):\n`;
+        for (const wf of wfs) {
+          const desc = wf.description ? ` — ${wf.description}` : "";
+          msg += `  ${wf.name.padEnd(16)} ${wf.steps.length} step(s)${desc}\n`;
+        }
+        this.addSystem(msg.trimEnd());
+        return;
+      }
+
+      if (sub === "save") {
+        const name = parsed.args[1];
+        if (!name) {
+          this.addSystem("Usage: /workflow save <name> <step1> ; <step2> ...");
+          return;
+        }
+        const rest = parsed.args.slice(2).join(" ").trim();
+        const steps = rest
+          .split(" ; ")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (steps.length === 0) {
+          this.addSystem("Usage: /workflow save <name> <step1> ; <step2> ...");
+          return;
+        }
+        try {
+          saveWorkflow(this.projectRoot, { name, steps });
+          this.addSystem(`Saved workflow "${name}" (${steps.length} step(s)).`);
+        } catch (err) {
+          this.addError(
+            `Failed to save workflow: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+        return;
+      }
+
+      if (sub === "delete") {
+        const name = parsed.args[1];
+        if (!name) {
+          this.addSystem("Usage: /workflow delete <name>");
+          return;
+        }
+        this.addSystem(
+          deleteWorkflow(this.projectRoot, name)
+            ? `Deleted workflow "${name}".`
+            : `No workflow named "${name}".`
+        );
+        return;
+      }
+
+      if (sub === "run") {
+        const name = parsed.args[1];
+        if (!name) {
+          this.addSystem("Usage: /workflow run <name> [args...]");
+          return;
+        }
+        const wf = getWorkflow(this.projectRoot, name);
+        if (!wf) {
+          this.addError(`No workflow named "${name}". Try /workflow list`);
+          return;
+        }
+        const rendered = renderSteps(wf, parsed.args.slice(2));
+        const composed =
+          "Execute this workflow:\n" +
+          rendered.map((step, i) => `${i + 1}. ${step}`).join("\n");
+        this.addSystem(`▶ Running workflow "${name}" (${rendered.length} step(s))...`);
+        await this.chatWithAI(composed);
+        return;
+      }
+
+      this.addSystem(
+        "Usage: /workflow list  ·  /workflow save <name> <step1> ; <step2> ...  ·  /workflow run <name> [args...]  ·  /workflow delete <name>"
+      );
       return;
     }
 
