@@ -40,6 +40,7 @@ import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
+import { fetchRegistry, searchRegistry, installEntry } from "../core/marketplace.js";
 import { exportSessionMarkdown, exportSessionHtml } from "../core/session-export.js";
 import { createLogger } from "../utils/logger.js";
 import { writeFileSync, readFileSync } from "node:fs";
@@ -48,6 +49,13 @@ import { join, isAbsolute, resolve } from "node:path";
 const log = createLogger({ prefix: "tui" });
 
 const VERSION = "0.2.0";
+
+/**
+ * Default marketplace registry source for `/marketplace` (V15). A project-local
+ * JSON file by default; overridable per-invocation with an explicit path/URL, or
+ * by committing a registry document at this path. Can also be a remote URL.
+ */
+const DEFAULT_MARKETPLACE_SOURCE = ".sentinel/registry.json";
 
 const BANNER = [
   " ____             _   _            _ ",
@@ -483,6 +491,7 @@ export class TUIApp {
       ["/bg <command>", "Run a shell command in the background"],
       ["/tasks", "List background tasks (and their status)"],
       ["/mcp", "List connected MCP tools"],
+      ["/marketplace ...", "Extension registry: list | search <q> | install <id> [source]"],
       ["/cmd <text>", "AI command-search: natural language → shell command"],
       ["/index", "Build a semantic index of the repo (TF-IDF, local)"],
       ["/search <query>", "Semantic search the repo index for relevant files"],
@@ -693,6 +702,11 @@ export class TUIApp {
       let msg = `MCP tools (${tools.length}):\n`;
       for (const t of tools) msg += `  mcp__${t.server}__${t.tool}\n`;
       this.addSystem(msg.trimEnd());
+      return;
+    }
+
+    if (parsed.name === "marketplace" || parsed.name === "market") {
+      await this.handleMarketplace(parsed.args);
       return;
     }
 
@@ -956,6 +970,112 @@ export class TUIApp {
     }
 
     this.addError(`Unknown command: /${parsed.name}. Type / to see commands.`);
+  }
+
+  /**
+   * /marketplace (alias /market) — V15 extension registry client.
+   *   list [source]            — show every entry in a registry
+   *   search <query> [source]  — filter entries by id/name/description
+   *   install <id> [source]    — install a skill (.md) or MCP server config
+   * `source` defaults to DEFAULT_MARKETPLACE_SOURCE; may be a local path or URL.
+   */
+  private async handleMarketplace(args: string[]): Promise<void> {
+    const sub = (args[0] || "").toLowerCase();
+    const usage =
+      "Usage: /marketplace list [source]  ·  /marketplace search <query> [source]  ·  /marketplace install <id> [source]";
+
+    if (!sub) {
+      this.addSystem(usage);
+      return;
+    }
+
+    // Resolve a source token (last positional for list/search, last for install)
+    // against the project root when it's a relative path; URLs pass through.
+    const resolveSource = (token?: string): string => {
+      const src = token || DEFAULT_MARKETPLACE_SOURCE;
+      if (/^https?:\/\//i.test(src) || isAbsolute(src)) return src;
+      return resolve(this.projectRoot, src);
+    };
+
+    const loadRegistry = async (source: string) => {
+      return await fetchRegistry(source);
+    };
+
+    if (sub === "list") {
+      const source = resolveSource(args[1]);
+      try {
+        const reg = await loadRegistry(source);
+        if (reg.entries.length === 0) {
+          this.addSystem("Marketplace registry is empty.");
+          return;
+        }
+        let msg = `Marketplace (${reg.entries.length} entr${reg.entries.length === 1 ? "y" : "ies"}):\n`;
+        for (const e of reg.entries) {
+          msg += `  ${e.id.padEnd(20)} [${e.type}] ${e.name}${e.description ? ` — ${e.description}` : ""}\n`;
+        }
+        this.addSystem(msg.trimEnd());
+      } catch (err) {
+        this.addError(`Marketplace list failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    if (sub === "search") {
+      const query = (args[1] || "").trim();
+      if (!query) {
+        this.addSystem("Usage: /marketplace search <query> [source]");
+        return;
+      }
+      const source = resolveSource(args[2]);
+      try {
+        const reg = await loadRegistry(source);
+        const hits = searchRegistry(reg, query);
+        if (hits.length === 0) {
+          this.addSystem(`No marketplace entries match "${query}".`);
+          return;
+        }
+        let msg = `${hits.length} match${hits.length === 1 ? "" : "es"} for "${query}":\n`;
+        for (const e of hits) {
+          msg += `  ${e.id.padEnd(20)} [${e.type}] ${e.name}${e.description ? ` — ${e.description}` : ""}\n`;
+        }
+        this.addSystem(msg.trimEnd());
+      } catch (err) {
+        this.addError(`Marketplace search failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    if (sub === "install") {
+      const id = (args[1] || "").trim();
+      if (!id) {
+        this.addSystem("Usage: /marketplace install <id> [source]");
+        return;
+      }
+      const source = resolveSource(args[2]);
+      try {
+        const reg = await loadRegistry(source);
+        const entry = reg.entries.find((e) => e.id === id);
+        if (!entry) {
+          this.addError(`No marketplace entry with id "${id}". Try /marketplace list`);
+          return;
+        }
+        // installEntry never throws on network failure — it returns a status string.
+        const summary = await installEntry(this.projectRoot, entry);
+        this.addSystem(summary);
+        if (entry.type === "mcp") {
+          this.addSystem(
+            "MCP server recorded in .sentinel/mcp.install.json. Merge it into your config.mcp and restart to connect."
+          );
+        } else {
+          this.addSystem("Skill installed. It loads on next start (or restart the session).");
+        }
+      } catch (err) {
+        this.addError(`Marketplace install failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    this.addSystem(usage);
   }
 
   /** /cmd <natural language> — AI command-search: NL → one shell command. */
