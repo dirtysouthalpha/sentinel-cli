@@ -421,6 +421,10 @@ export class TUIApp {
       ["/agent <name>", "Switch agent (gsd, code, debug, plan, ask)"],
       ["/theme <name>", "Switch theme"],
       ["/providers", "Check API status"],
+      ["/permissions <mode>", "Guardrails: yolo | auto | gated"],
+      ["/mcp", "List connected MCP tools"],
+      ["/checkpoints", "List file checkpoints"],
+      ["/undo", "Undo the last agent file change"],
       ["/cost", "Session cost breakdown"],
       ["/compact", "Compress context (save tokens)"],
       ["/clear", "Clear chat history"],
@@ -564,6 +568,30 @@ export class TUIApp {
       let msg = `MCP tools (${tools.length}):\n`;
       for (const t of tools) msg += `  mcp__${t.server}__${t.tool}\n`;
       this.addSystem(msg.trimEnd());
+      return;
+    }
+
+    if (parsed.name === "checkpoints") {
+      const cps = new CheckpointManager(this.projectRoot).list();
+      if (cps.length === 0) {
+        this.addSystem("No checkpoints yet. They're created when the agent edits files.");
+        return;
+      }
+      let msg = `Checkpoints (${cps.length}, newest last):\n`;
+      for (const c of cps) {
+        msg += `  ${c.id}  ${c.tool.padEnd(6)} ${c.existed ? "edit  " : "create"}  ${c.path}\n`;
+      }
+      this.addSystem(msg.trimEnd());
+      return;
+    }
+
+    if (parsed.name === "undo") {
+      const cp = new CheckpointManager(this.projectRoot).undoLast();
+      if (!cp) {
+        this.addSystem("Nothing to undo.");
+        return;
+      }
+      this.addSystem(`Undid ${cp.tool} ${cp.existed ? "edit" : "create"} of ${cp.path}`);
       return;
     }
 
