@@ -1,6 +1,7 @@
 import { AgentDef } from "./types.js";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import { resolveBuiltinDir } from "../utils/builtins.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "agent-loader" });
@@ -61,7 +62,7 @@ export function loadAgentsFromDir(dir: string, source: AgentDef["source"]): Agen
 
 export function loadAllAgents(projectRoot: string): AgentDef[] {
   const agents: AgentDef[] = [];
-  const builtinDir = join(projectRoot, "src", "agents", "builtin");
+  const builtinDir = resolveBuiltinDir(projectRoot, "agents");
   agents.push(...loadAgentsFromDir(builtinDir, "builtin"));
   agents.push(...loadAgentsFromDir(join(projectRoot, ".sentinel", "agents"), "project"));
   log.info(`Loaded ${agents.length} agents`);

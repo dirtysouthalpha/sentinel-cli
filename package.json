@@ -9,7 +9,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsup && node scripts/add-shebang.cjs",
+    "build": "tsup && node scripts/add-shebang.cjs && node scripts/copy-builtins.cjs",
     "dev": "tsup --watch",
     "start": "node dist/cli.js",
     "test": "vitest run",
@@ -43,8 +43,6 @@
   },
   "files": [
     "dist",
-    "builtin",
-    "themes",
     "config"
   ],
   "keywords": [

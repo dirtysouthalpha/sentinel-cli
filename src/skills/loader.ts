@@ -2,6 +2,7 @@ import { SkillDef, SkillLoaderResult } from "./types.js";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join, extname } from "path";
 import { homedir } from "os";
+import { resolveBuiltinDir } from "../utils/builtins.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "skill-loader" });
@@ -77,7 +78,7 @@ export function loadAllSkills(projectRoot: string, skillPaths: string[]): SkillL
   const skills: SkillDef[] = [];
   const errors: string[] = [];
 
-  const builtinDir = join(projectRoot, "src", "skills", "builtin");
+  const builtinDir = resolveBuiltinDir(projectRoot, "skills");
   skills.push(...loadSkillsFromDir(builtinDir, "builtin"));
 
   const projectDirs = [

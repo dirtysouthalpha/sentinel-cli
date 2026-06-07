@@ -1,6 +1,7 @@
 import { CommandDef, ParsedCommand } from "./types.js";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import { resolveBuiltinDir } from "../utils/builtins.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "cmd-loader" });
@@ -78,7 +79,7 @@ export function resolveTemplate(template: string, args: string[]): string {
 
 export function loadAllCommands(projectRoot: string): CommandDef[] {
   const commands: CommandDef[] = [];
-  const builtinDir = join(projectRoot, "src", "commands", "builtin");
+  const builtinDir = resolveBuiltinDir(projectRoot, "commands");
   commands.push(...loadCommandsFromDir(builtinDir, "builtin"));
   commands.push(...loadCommandsFromDir(join(projectRoot, ".sentinel", "commands"), "project"));
   log.info(`Loaded ${commands.length} commands`);
