@@ -69,6 +69,12 @@ export class MCPManager {
         this.clients.set(name, client);
         log.info(`MCP "${name}" connected (${tools.length} tools)`);
       } catch (e) {
+        // Close the transport so a failed connection doesn't leak a child process.
+        try {
+          await transport.close();
+        } catch {
+          // ignore
+        }
         log.warn(`MCP "${name}" failed to connect: ${e instanceof Error ? e.message : String(e)}`);
       }
     }

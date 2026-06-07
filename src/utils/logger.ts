@@ -58,7 +58,9 @@ export function createLogger(options: Partial<LoggerOptions> = {}): Logger {
   const log = (level: LogLevel, message: string, args: unknown[]) => {
     if (!shouldLog(level)) return;
     const formatted = formatMessage(level, message, prefix, showTimestamp);
-    const output = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+    // All logs go to stderr so stdout stays clean for command output (e.g.
+    // `run --json` NDJSON, `config --json`, MCP stdio JSON-RPC).
+    const output = level === "warn" ? console.warn : console.error;
     output(formatted, ...args);
   };
 

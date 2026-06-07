@@ -242,10 +242,11 @@ program
       checkpoints,
       baseExecute: mcpAware,
       ask: async (req: PermissionRequest, reason: string) => {
-        // Headless: approve only with --yes; otherwise deny and report on stderr.
+        // Headless: approve only with --yes; otherwise deny. Stay silent in
+        // --json mode so the denial note can't be mistaken for protocol output.
         const label = `${req.tool}${req.action ? `(${req.action})` : ""}`;
         if (autoApprove) return true;
-        console.error(`Permission required: ${label} [${reason}] — denied (pass --yes to allow).`);
+        if (!json) console.error(`Permission required: ${label} [${reason}] — denied (pass --yes to allow).`);
         return false;
       },
     });
@@ -291,10 +292,16 @@ program
     });
 
     const ac = new AbortController();
-    process.on("SIGINT", () => ac.abort());
+    process.once("SIGINT", () => ac.abort());
 
-    const result = await runner.run(task, ac.signal);
-    await mcp.disconnect(); // shut down MCP child processes so the run can exit
+    // disconnect MCP (kills child processes) on ANY exit path, including a throw
+    // before the agent loop — otherwise the process can't drain and exit.
+    let result;
+    try {
+      result = await runner.run(task, ac.signal);
+    } finally {
+      await mcp.disconnect();
+    }
     emit({ type: "done", stopReason: result.stopReason, rounds: result.rounds, usage: result.usage });
 
     // Set exitCode and let the event loop drain (don't process.exit() — on
@@ -369,7 +376,13 @@ program
   .option("--project <path>", "Project root directory")
   .action(async (opts, command) => {
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
-    await runMcpServer(projectRoot);
+    try {
+      await runMcpServer(projectRoot);
+    } catch (err) {
+      // stderr only — stdout is the JSON-RPC channel.
+      console.error(`MCP server failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
   });
 
 async function runMain(options: {

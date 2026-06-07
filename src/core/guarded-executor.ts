@@ -25,7 +25,16 @@ export function createGuardedExecutor(opts: GuardOptions): (tc: ToolCall) => Pro
     try {
       args = JSON.parse(tc.arguments) as Record<string, unknown>;
     } catch {
-      // leave args empty; permission still evaluated on the tool name
+      // Edit tools depend on the path for glob rules — malformed args could
+      // silently bypass them, so deny outright. Other tools tolerate empty args.
+      if (EDIT_TOOLS.has(tc.name)) {
+        return {
+          role: "tool",
+          content: `ERROR: Permission denied for ${tc.name} — malformed arguments; cannot evaluate path rules.`,
+          toolCallId: tc.id,
+          name: tc.name,
+        };
+      }
     }
 
     const req = toPermissionRequest(tc.name, args);

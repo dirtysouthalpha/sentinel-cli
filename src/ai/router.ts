@@ -79,11 +79,11 @@ export function route(
 
   const filtered = chain.filter((target) => isAvailable(target));
 
-  if (filtered.length === 0) {
-    return [cfg.default];
-  }
+  if (filtered.length > 0) return filtered;
 
-  return filtered;
+  // Nothing in the rule chain is available — fall back to the default only if
+  // it is actually runnable; otherwise an empty chain (caller raises a clear error).
+  return isAvailable(cfg.default) ? [cfg.default] : [];
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -127,6 +127,12 @@ export async function runWithRouter(
   const baseDelayMs = opts.retry?.baseDelayMs ?? 0;
   const maxDelayMs = opts.retry?.maxDelayMs ?? 0;
   const retryOn = opts.retry?.retryOn ?? [];
+
+  if (chain.length === 0) {
+    throw new ProviderError(
+      "No available provider/model in the router chain — check config.router targets and API keys."
+    );
+  }
 
   let lastError: unknown;
 

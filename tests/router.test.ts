@@ -59,13 +59,15 @@ describe("route", () => {
     expect(chain).toEqual(["zai/glm", "anthropic/claude"]);
   });
 
-  it("falls back to [default] when all targets are filtered out", () => {
+  it("falls back to [default] only when the default is available", () => {
     const cfg: RouterConfig = {
       default: "anthropic/claude",
       rules: [{ match: { taskKind: "code" }, use: "openai/gpt", fallbacks: ["zai/glm"] }],
     };
-    const chain = route(cfg, { taskKind: "code" }, () => false);
-    expect(chain).toEqual(["anthropic/claude"]);
+    // rule targets unavailable, but the default is available -> [default]
+    expect(route(cfg, { taskKind: "code" }, (t) => t === "anthropic/claude")).toEqual(["anthropic/claude"]);
+    // everything (incl. default) unavailable -> [] so the caller raises a clear error
+    expect(route(cfg, { taskKind: "code" }, () => false)).toEqual([]);
   });
 
   it("respects minContextTokens matching", () => {
