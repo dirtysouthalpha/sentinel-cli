@@ -20,6 +20,7 @@ import {
   renderSteps,
 } from "../core/workflows-store.js";
 import { expandMentions } from "../core/mentions.js";
+import { buildIndex, search as searchRepoIndex, RepoIndex } from "../core/repo-index.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
@@ -87,6 +88,9 @@ export class TUIApp {
   private background = new BackgroundTaskManager();
   private bgWired = false;
   private pendingPermission?: (allow: boolean) => void;
+
+  // V11 semantic repo index (lite TF-IDF). Built lazily by /index or /search.
+  private repoIndex?: RepoIndex;
 
   private inputBuffer = "";
 
@@ -477,6 +481,8 @@ export class TUIApp {
       ["/tasks", "List background tasks (and their status)"],
       ["/mcp", "List connected MCP tools"],
       ["/cmd <text>", "AI command-search: natural language → shell command"],
+      ["/index", "Build a semantic index of the repo (TF-IDF, local)"],
+      ["/search <query>", "Semantic search the repo index for relevant files"],
       ["/workflow ...", "Saved workflows: list | save | run | delete"],
       ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
       ["/checkpoints", "List file checkpoints"],
@@ -748,6 +754,39 @@ export class TUIApp {
 
     if (parsed.name === "cmd") {
       await this.handleCmdSearch(parsed.args.join(" "));
+      return;
+    }
+
+    // /index — build the lite TF-IDF repo index (V11).
+    if (parsed.name === "index") {
+      this.repoIndex = buildIndex(this.projectRoot);
+      const note = this.repoIndex.truncated ? " (truncated — file cap hit)" : "";
+      this.addSystem(`Indexed ${this.repoIndex.fileCount} file(s)${note}.`);
+      return;
+    }
+
+    // /search <query> — semantic search over the repo index (builds it first if needed).
+    if (parsed.name === "search") {
+      const query = parsed.args.join(" ").trim();
+      if (!query) {
+        this.addSystem("Usage: /search <query>");
+        return;
+      }
+      if (!this.repoIndex) {
+        this.repoIndex = buildIndex(this.projectRoot);
+        this.addSystem(`Built index of ${this.repoIndex.fileCount} file(s).`);
+      }
+      const results = searchRepoIndex(this.repoIndex, query, 8);
+      if (results.length === 0) {
+        this.addSystem(`No matches for: ${query}`);
+        return;
+      }
+      let msg = `Top ${results.length} result(s) for "${query}":\n`;
+      for (const r of results) {
+        msg += `  ${r.path}  (${r.score.toFixed(3)})\n`;
+        if (r.snippet) msg += `      ${r.snippet}\n`;
+      }
+      this.addSystem(msg.trimEnd());
       return;
     }
 
