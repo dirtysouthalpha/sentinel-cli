@@ -36,6 +36,7 @@ import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
 import { createHookAwareExecutor, defaultRunShell } from "../core/hooks.js";
 import { BackgroundTaskManager } from "../core/background.js";
 import { usageTracker } from "../core/usage-tracker.js";
+import { runDiagnostics, formatDiagnostics } from "../core/diagnostics.js";
 import { estimateCostUSD } from "../core/pricing.js";
 import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
@@ -505,6 +506,7 @@ export class TUIApp {
       ["/undo", "Undo the last agent file change"],
       ["/cost", "Session cost breakdown"],
       ["/usage", "Usage metrics: tokens, cost, per-tool table"],
+      ["/diagnostics", "Run typecheck/build, report errors (alias /diag)"],
       ["/export [md|html] [path]", "Export this session's transcript to a file"],
       ["/branch", "Duplicate this session into a new tab"],
       ["/workspace ...", "Multi-repo roots: list | add | remove | use (alias /ws)"],
@@ -586,6 +588,24 @@ export class TUIApp {
 
     if (parsed.name === "usage") {
       this.addSystem(usageTracker.render());
+      return;
+    }
+
+    // /diagnostics (alias /diag): run the project's typecheck/build and surface
+    // structured errors. Optional args override the command (e.g. /diag npm run build).
+    if (parsed.name === "diagnostics" || parsed.name === "diag") {
+      const command = parsed.args.join(" ").trim() || undefined;
+      this.addSystem(`Running diagnostics: ${command || "npx tsc --noEmit"} …`);
+      try {
+        const { ok, diagnostics } = await runDiagnostics(this.projectRoot, { command });
+        if (ok && diagnostics.length === 0) {
+          this.addSystem("No problems found.");
+        } else {
+          this.addSystem(formatDiagnostics(diagnostics));
+        }
+      } catch (err) {
+        this.addError(`Diagnostics failed: ${(err as Error).message}`);
+      }
       return;
     }
 
