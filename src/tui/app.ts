@@ -11,6 +11,7 @@ import { ToolCall } from "../ai/types.js";
 import { AgentRunner } from "../core/agent-runner.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
+import { expandMentions } from "../core/mentions.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
 import { sessionManager, Session } from "../core/session-manager.js";
@@ -810,7 +811,9 @@ export class TUIApp {
         this.addError(e instanceof Error ? e.message : String(e));
       });
 
-      await runner.run(userMessage, this.ac.signal);
+      // V2: expand @file / @url mentions into the message before the agent runs.
+      const expandedMessage = await expandMentions(userMessage, this.projectRoot);
+      await runner.run(expandedMessage, this.ac.signal);
 
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);

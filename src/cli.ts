@@ -22,6 +22,7 @@ import { getToolDefinitions, executeToolCall } from "./tools/tool-executor.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import { extractToolCalls } from "./core/tool-call-extractor.js";
 import { buildSystemPrompt } from "./core/system-prompt.js";
+import { expandMentions } from "./core/mentions.js";
 import { RoutedProvider } from "./ai/routed-provider.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "./core/permissions.js";
 import { CheckpointManager } from "./core/checkpoints.js";
@@ -300,7 +301,9 @@ program
     // before the agent loop — otherwise the process can't drain and exit.
     let result;
     try {
-      result = await runner.run(task, ac.signal);
+      // V2: expand @file / @url mentions in the task before the agent runs.
+      const expandedTask = await expandMentions(task, projectRoot);
+      result = await runner.run(expandedTask, ac.signal);
     } finally {
       await mcp.disconnect();
     }
