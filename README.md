@@ -138,7 +138,7 @@ npm run dev        # tsup --watch
 # GUI: cd gui && npm run dev   (then open with ?port=&token= from `sentinel serve`)
 ```
 
-> **Desktop‑native (Tauri):** `sentinel gui` renders the real design in your browser today. A native Tauri shell (window chrome + sidecar packaging) is the next packaging step — the engine bridge is already shell-agnostic.
+> **Desktop‑native (Tauri):** `sentinel gui` runs the GUI in your browser. For a native window, a **Tauri v2 shell** is scaffolded in [`gui/src-tauri/`](gui/src-tauri/README.md) — install [Rust](https://rustup.rs), then `cd gui && npm install && npm run tauri dev`. It spawns the engine and injects the handshake automatically.
 
 ## License
 
