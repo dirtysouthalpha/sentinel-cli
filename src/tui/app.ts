@@ -12,6 +12,7 @@ import { AgentRunner } from "../core/agent-runner.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { suggestCommand } from "../core/command-search.js";
+import { searchCatalog } from "../core/command-catalog.js";
 import {
   saveWorkflow,
   listWorkflows,
@@ -496,6 +497,7 @@ export class TUIApp {
       ["/mcp", "List connected MCP tools"],
       ["/marketplace ...", "Extension registry: list | search <q> | install <id> [source]"],
       ["/cmd <text>", "AI command-search: natural language → shell command"],
+      ["/palette [query]", "Search the command palette (alias /p)"],
       ["/index", "Build a semantic index of the repo (TF-IDF, local)"],
       ["/search <query>", "Semantic search the repo index for relevant files"],
       ["/workflow ...", "Saved workflows: list | save | run | delete"],
@@ -802,6 +804,21 @@ export class TUIApp {
 
     if (parsed.name === "cmd") {
       await this.handleCmdSearch(parsed.args.join(" "));
+      return;
+    }
+
+    // /palette [query] (alias /p) — searchable text command palette (V13).
+    if (parsed.name === "palette" || parsed.name === "p") {
+      const query = parsed.args.join(" ").trim();
+      const matches = searchCatalog(query);
+      if (matches.length === 0) {
+        this.addSystem(`No commands match: ${query}`);
+        return;
+      }
+      const width = Math.max(...matches.map((m) => m.command.length));
+      const header = query ? `Palette — ${matches.length} match(es) for "${query}":` : "Palette:";
+      const lines = matches.map((m) => `  ${m.command.padEnd(width)} — ${m.description}`);
+      this.addSystem([header, ...lines].join("\n"));
       return;
     }
 
