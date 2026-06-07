@@ -423,6 +423,7 @@ export class TUIApp {
       ["/providers", "Check API status"],
       ["/permissions <mode>", "Guardrails: yolo | auto | gated"],
       ["/mcp", "List connected MCP tools"],
+      ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
       ["/cost", "Session cost breakdown"],
@@ -635,6 +636,30 @@ export class TUIApp {
 
     if (parsed.name === "tabs") {
       this.handleTabsCommand(parsed.args);
+      return;
+    }
+
+    if (parsed.name === "ask-prime") {
+      const question = parsed.args.join(" ").trim();
+      if (!question) {
+        this.addSystem("Usage: /ask-prime <question>");
+        return;
+      }
+      const prime = providerManager.getProvider("sentinel-prime");
+      if (!prime || !prime.isAvailable()) {
+        this.addError(
+          "Sentinel Prime not configured — add a `sentinel-prime` provider in config."
+        );
+        return;
+      }
+      try {
+        const res = await prime.chat([{ role: "user", content: question }], {
+          model: "hermes-agent",
+        });
+        this.addSystem(res.content || "(no answer)");
+      } catch (err) {
+        this.addError(`Sentinel Prime error: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return;
     }
 
