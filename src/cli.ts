@@ -30,6 +30,7 @@ import { CheckpointManager } from "./core/checkpoints.js";
 import { createGuardedExecutor } from "./core/guarded-executor.js";
 import { createSubagentTool, createSubagentAwareExecutor } from "./core/subagent.js";
 import { createTodoTool, createTodoAwareExecutor } from "./core/todos.js";
+import { createHookAwareExecutor, defaultRunShell } from "./core/hooks.js";
 import { MCPManager } from "./mcp/manager.js";
 import { createMcpAwareExecutor } from "./mcp/mcp-executor.js";
 import { runMcpServer } from "./mcp/server.js";
@@ -273,13 +274,18 @@ program
     const todoTool = createTodoTool();
     const parentExecute = createTodoAwareExecutor(todoTool, subagentExecute);
 
+    // V7: user-defined shell hooks around every tool call (outermost layer).
+    const topExecute = config.hooks
+      ? createHookAwareExecutor(config.hooks, parentExecute, defaultRunShell)
+      : parentExecute;
+
     const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : agentName === "gsd" ? 30 : 15;
     const runner = new AgentRunner(
       {
         provider,
         context: contextManager,
         toolDefs: [...toolDefs, subagentTool.def, todoTool.def],
-        executeTool: parentExecute,
+        executeTool: topExecute,
         extractToolCalls,
       },
       { model: modelName, maxRounds }

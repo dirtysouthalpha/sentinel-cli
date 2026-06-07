@@ -23,6 +23,7 @@ import { CheckpointManager } from "../core/checkpoints.js";
 import { createGuardedExecutor } from "../core/guarded-executor.js";
 import { createSubagentTool, createSubagentAwareExecutor } from "../core/subagent.js";
 import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
+import { createHookAwareExecutor, defaultRunShell } from "../core/hooks.js";
 import { BackgroundTaskManager } from "../core/background.js";
 import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
@@ -957,12 +958,18 @@ export class TUIApp {
       });
       const parentExecute = createTodoAwareExecutor(todoTool, subagentExecute);
 
+      // V7: user-defined shell hooks fire around every tool call. Outermost
+      // layer so they observe built-in, MCP, subagent, and todo tools alike.
+      const topExecute = config.hooks
+        ? createHookAwareExecutor(config.hooks, parentExecute, defaultRunShell)
+        : parentExecute;
+
       const runner = new AgentRunner(
         {
           provider,
           context: cm,
           toolDefs: [...childToolDefs, subagentTool.def, todoTool.def],
-          executeTool: parentExecute,
+          executeTool: topExecute,
           extractToolCalls,
         },
         { model: runnerModel, maxRounds: agentName === "gsd" ? 30 : 15, largeContextWarnAt: 50 }

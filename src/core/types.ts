@@ -1,4 +1,5 @@
 import type { RouterConfig } from "../ai/router.js";
+import type { HooksConfig } from "./hooks.js";
 
 export interface SentinelConfig {
   model: string;
@@ -18,6 +19,7 @@ export interface SentinelConfig {
   sessions?: SessionsConfig;
   headroom?: HeadroomConfig;
   ui?: UIConfig;
+  hooks?: HooksConfig;
 }
 
 export interface ProviderConfig {
