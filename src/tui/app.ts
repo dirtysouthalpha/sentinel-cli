@@ -21,6 +21,7 @@ import {
 } from "../core/workflows-store.js";
 import { expandMentions } from "../core/mentions.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
+import { runGsd, buildPhasePrompt } from "../core/gsd.js";
 import { buildIndex, search as searchRepoIndex, RepoIndex } from "../core/repo-index.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { createHeaderBar } from "./header-bar.js";
@@ -487,6 +488,7 @@ export class TUIApp {
       ["/search <query>", "Semantic search the repo index for relevant files"],
       ["/workflow ...", "Saved workflows: list | save | run | delete"],
       ["/pipeline run <f.json>", "Run a deterministic JSON pipeline of agent steps"],
+      ["/ship <task>", "Autonomous GSD: plan → implement → test → review → fix"],
       ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
@@ -907,6 +909,19 @@ export class TUIApp {
         return;
       }
       await this.runPipelineDelegated(pipeline);
+      return;
+    }
+
+    // /ship — V8 autonomous GSD pipeline: plan → implement → test → review → fix.
+    // Each phase is delegated to an isolated subagent that sees the task + all prior
+    // phase outputs; fix runs only when the review signals a problem.
+    if (parsed.name === "ship") {
+      const task = parsed.args.join(" ").trim();
+      if (!task) {
+        this.addSystem("Usage: /ship <task>  — autonomously plan, implement, test, review, and fix");
+        return;
+      }
+      await this.runGsdDelegated(task);
       return;
     }
 
@@ -1374,6 +1389,109 @@ export class TUIApp {
       for (const r of results) {
         const first = r.result.split("\n")[0].slice(0, 200);
         summary += `  ${r.result.startsWith("ERROR") ? "✗" : "✓"} ${r.name}: ${first}\n`;
+      }
+      this.addSystem(summary.trimEnd());
+
+      const activeId = sessionManager.getActiveSessionId();
+      if (activeId) sessionManager.markDirty(activeId);
+    } catch (err) {
+      this.addError(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.isProcessing = false;
+      state.set("isProcessing", false);
+      this.renderInput();
+    }
+  }
+
+  /**
+   * V8: run the autonomous GSD pipeline (plan → implement → test → review → fix)
+   * for a single task. Each phase is delegated to an isolated subagent (same
+   * guarded + MCP-aware executor stack the main loop and pipelines use), receiving
+   * the task plus all prior phase outputs. After review, a fix phase runs only when
+   * the review output signals a problem. Mirrors `runPipelineDelegated`'s wiring.
+   */
+  private async runGsdDelegated(task: string): Promise<void> {
+    this.isProcessing = true;
+    state.set("isProcessing", true);
+    this.renderInput();
+
+    try {
+      const config = getConfigManager().getAll();
+      const [providerName, ...modelParts] = state.get("currentModel").split("/");
+      const modelName = modelParts.join("/") || undefined;
+      const agentName = state.get("currentAgent");
+
+      // Connect MCP once (mirrors chatWithAI) so subagents see MCP tools too.
+      if (!this.mcpConnected) {
+        this.mcpConnected = true;
+        try {
+          await this.mcp.connect((config.mcp as Record<string, never>) || {});
+        } catch {
+          // non-fatal: continue with built-in tools only
+        }
+      }
+
+      let provider;
+      let runnerModel = modelName;
+      if (config.router) {
+        provider = new RoutedProvider(config.router, agentName);
+        runnerModel = undefined;
+      } else {
+        const single = providerManager.getProvider(providerName);
+        if (!single) throw new Error(`No provider "${providerName}". Try /providers`);
+        if (!single.isAvailable()) throw new Error(`No API key for "${providerName}". Type /connect`);
+        provider = single;
+      }
+
+      // Same guarded + MCP-aware executor stack the main loop uses.
+      const engine = new PermissionEngine(this.permissionMode, config.permissions as never, this.projectRoot);
+      const checkpoints = new CheckpointManager(this.projectRoot);
+      const mcpAware = createMcpAwareExecutor(this.mcp, executeToolCall);
+      const execute = createGuardedExecutor({
+        engine,
+        checkpoints,
+        baseExecute: mcpAware,
+        ask: (req, reason) => this.askPermission(req, reason),
+      });
+      const childToolDefs = [...getToolDefinitions(), ...this.mcp.getToolDefs()];
+      const subagentTool = createSubagentTool({
+        provider,
+        toolDefs: childToolDefs,
+        executeTool: execute,
+        extractToolCalls,
+        model: runnerModel,
+        systemPrompt: buildSystemPrompt(agentName, this.projectRoot),
+      });
+
+      this.addSystem(`▶ Shipping: "${task}" — autonomous GSD pipeline (plan → implement → test → review → fix)...`);
+
+      const results = await runGsd(
+        task,
+        async (phase, t, prior) => {
+          const priorBlock = prior.length
+            ? prior.map((p) => `### ${p.phase}\n${p.output}`).join("\n\n")
+            : undefined;
+          return subagentTool.execute({
+            task: buildPhasePrompt(phase, t, prior),
+            context: priorBlock,
+          });
+        },
+        {
+          onPhaseStart: (phase) => this.addSystem(`  • phase "${phase}"...`),
+          onPhaseEnd: (r) => {
+            const first = r.output.split("\n")[0].slice(0, 200);
+            this.addSystem(`    ${r.output.startsWith("ERROR") ? "✗" : "✓"} ${r.phase}: ${first}`);
+          },
+        }
+      );
+
+      let summary = `GSD pipeline complete (${results.length} phase(s)):\n`;
+      for (const r of results) {
+        const first = r.output.split("\n")[0].slice(0, 200);
+        summary += `  ${r.output.startsWith("ERROR") ? "✗" : "✓"} ${r.phase}: ${first}\n`;
+      }
+      if (!results.some((r) => r.phase === "fix")) {
+        summary += "  (review was clean — no fix phase needed)\n";
       }
       this.addSystem(summary.trimEnd());
 
