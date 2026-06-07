@@ -14,6 +14,13 @@ import { buildSystemPrompt } from "../core/system-prompt.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
 import { sessionManager, Session } from "../core/session-manager.js";
+import { RoutedProvider } from "../ai/routed-provider.js";
+import { PermissionEngine, PermissionMode, PermissionRequest } from "../core/permissions.js";
+import { CheckpointManager } from "../core/checkpoints.js";
+import { createGuardedExecutor } from "../core/guarded-executor.js";
+import { MCPManager } from "../mcp/manager.js";
+import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
+import { getConfigManager } from "../core/config.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "tui" });
@@ -56,6 +63,10 @@ export class TUIApp {
   private isProcessing = false;
   private ac?: AbortController;
   private pendingToolArgs = "";
+  private permissionMode: PermissionMode = "yolo";
+  private mcp = new MCPManager();
+  private mcpConnected = false;
+  private pendingPermission?: (allow: boolean) => void;
 
   private inputBuffer = "";
 
@@ -347,6 +358,16 @@ export class TUIApp {
       for (const ch of chunk) {
         const code = ch.charCodeAt(0);
 
+        if (this.pendingPermission) {
+          const allow = ch === "y" || ch === "Y";
+          const resolve = this.pendingPermission;
+          this.pendingPermission = undefined;
+          this.addSystem(allow ? "Allowed." : "Denied.");
+          resolve(allow);
+          this.renderInput();
+          continue;
+        }
+
         if (code === 13) {
           this.submit();
         } else if (code === 127 || code === 8) {
@@ -515,6 +536,37 @@ export class TUIApp {
       return;
     }
 
+    if (parsed.name === "permissions" || parsed.name === "perms") {
+      const mode = parsed.args[0];
+      if (!mode) {
+        this.addSystem(`Permission mode: ${this.permissionMode}  (yolo | auto | gated)`);
+        return;
+      }
+      if (mode === "yolo" || mode === "auto" || mode === "gated") {
+        this.permissionMode = mode;
+        this.addSystem(`Permission mode → ${mode}`);
+      } else {
+        this.addError(`Unknown mode: ${mode}. Use yolo | auto | gated.`);
+      }
+      return;
+    }
+
+    if (parsed.name === "mcp") {
+      if (!this.mcpConnected) {
+        this.addSystem("MCP connects on your first message. Send one, then run /mcp.");
+        return;
+      }
+      const tools = this.mcp.list();
+      if (tools.length === 0) {
+        this.addSystem("No MCP tools (no servers configured or none discovered).");
+        return;
+      }
+      let msg = `MCP tools (${tools.length}):\n`;
+      for (const t of tools) msg += `  mcp__${t.server}__${t.tool}\n`;
+      this.addSystem(msg.trimEnd());
+      return;
+    }
+
     if (parsed.name === "agent") {
       const name = parsed.args[0];
       if (!name) {
@@ -640,68 +692,105 @@ export class TUIApp {
     return buildSystemPrompt(agentName, this.projectRoot);
   }
 
+  /** Interactive permission prompt: resolves when the user presses y/N. */
+  private askPermission(req: PermissionRequest, reason: string): Promise<boolean> {
+    const c = themeEngine.getBlessedColors();
+    const label = `${req.tool}${req.action ? `(${req.action})` : ""}`;
+    this.push(
+      `\n{${c.amber}-fg}{bold}⚠ Permission{/} allow {bold}${this.esc(label)}{/}? ` +
+        `{${c.textTertiary}-fg}[y/N] (${this.esc(reason)}){/}\n`
+    );
+    return new Promise((resolve) => {
+      this.pendingPermission = resolve;
+    });
+  }
+
   private async chatWithAI(userMessage: string): Promise<void> {
     this.isProcessing = true;
     state.set("isProcessing", true);
     this.renderInput();
 
     const cm = this.getContextManager();
-    cm.addMessage("user", userMessage);
-
-    const modelStr = state.get("currentModel");
-    const [providerName, ...modelParts] = modelStr.split("/");
+    const [providerName, ...modelParts] = state.get("currentModel").split("/");
     const modelName = modelParts.join("/") || undefined;
 
     try {
-      const provider = providerManager.getProvider(providerName);
-      if (!provider) throw new Error(`No provider "${providerName}". Try /providers`);
-      if (!provider.isAvailable()) throw new Error(`No API key for "${providerName}". Type /connect`);
+      const config = getConfigManager().getAll();
 
-      const gsdMode = state.get("currentAgent") === "gsd";
-      const toolDefs = getToolDefinitions();
-      const maxRounds = gsdMode ? 30 : 15;
-
-      cm.setSystemPrompt(this.getSystemPrompt());
-
-      for (let round = 1; round <= maxRounds; round++) {
-        if (!this.isProcessing) break;
-
-        const aiMessages = cm.toAIMessages();
-
-        this.startAssistant();
-        const response = await provider.chatStream(aiMessages, { model: modelName, tools: toolDefs }, (chunk) => {
-          if (chunk.content) this.streamAssistant(chunk.content);
-        });
-        this.endAssistant();
-
-        if (response.usage) this.updateCost(response.usage);
-
-        const toolCalls = response.toolCalls || this.extractToolCalls(response.content);
-        if (response.content) {
-          cm.addMessage("assistant", response.content, { toolCalls });
-        }
-
-        if (!toolCalls || toolCalls.length === 0) break;
-
-        for (const tc of toolCalls) {
-          const resultMsg = await executeToolCall(tc);
-          const ok = !resultMsg.content.startsWith("ERROR");
-          const firstLine = resultMsg.content.split("\n")[0].slice(0, 200);
-          this.addTool(tc.name, this.truncateArgs(tc.arguments), ok, firstLine);
-          cm.addMessage("tool", `[Tool: ${resultMsg.name}]\n${resultMsg.content}`);
+      // R3: connect MCP servers once, then expose their tools to the agent.
+      if (!this.mcpConnected) {
+        this.mcpConnected = true;
+        try {
+          await this.mcp.connect((config.mcp as Record<string, never>) || {});
+        } catch {
+          // non-fatal: continue with built-in tools only
         }
       }
+
+      const agentName = state.get("currentAgent");
+      let provider;
+      let runnerModel = modelName;
+      if (config.router) {
+        provider = new RoutedProvider(config.router, agentName);
+        runnerModel = undefined;
+      } else {
+        const single = providerManager.getProvider(providerName);
+        if (!single) throw new Error(`No provider "${providerName}". Try /providers`);
+        if (!single.isAvailable()) throw new Error(`No API key for "${providerName}". Type /connect`);
+        provider = single;
+      }
+
+      cm.setSystemPrompt(buildSystemPrompt(agentName, this.projectRoot));
+
+      // R2: permission gating + checkpoints, composed over R3 MCP routing.
+      const engine = new PermissionEngine(this.permissionMode, config.permissions as never, this.projectRoot);
+      const checkpoints = new CheckpointManager(this.projectRoot);
+      const execute = createGuardedExecutor({
+        engine,
+        checkpoints,
+        baseExecute: createMcpAwareExecutor(this.mcp, executeToolCall),
+        ask: (req, reason) => this.askPermission(req, reason),
+      });
+
+      const runner = new AgentRunner(
+        {
+          provider,
+          context: cm,
+          toolDefs: [...getToolDefinitions(), ...this.mcp.getToolDefs()],
+          executeTool: execute,
+          extractToolCalls,
+        },
+        { model: runnerModel, maxRounds: agentName === "gsd" ? 30 : 15, largeContextWarnAt: 50 }
+      );
+
+      this.ac = new AbortController();
+      runner.on("roundStart", () => this.startAssistant());
+      runner.on("token", (t) => this.streamAssistant(t));
+      runner.on("streamEnd", () => this.endAssistant());
+      runner.on("usage", (u) => this.updateCost(u));
+      runner.on("toolStart", (_name, args) => {
+        this.pendingToolArgs = args;
+      });
+      runner.on("toolResult", (name, ok, firstLine) =>
+        this.addTool(name, this.truncateArgs(this.pendingToolArgs), ok, firstLine)
+      );
+      runner.on("contextLarge", () =>
+        this.addSystem("Context is getting large — /compact to save tokens.")
+      );
+      runner.on("runError", (e) => {
+        this.endAssistant();
+        this.addError(e instanceof Error ? e.message : String(e));
+      });
+
+      await runner.run(userMessage, this.ac.signal);
 
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);
-
-      if (cm.getMessageCount() > 50) {
-        this.addSystem("Context is getting large — /compact to save tokens.");
-      }
     } catch (err) {
       this.endAssistant();
       this.addError(err instanceof Error ? err.message : String(err));
     } finally {
+      this.ac = undefined;
       this.isProcessing = false;
       state.set("isProcessing", false);
       this.renderInput();
@@ -876,6 +965,7 @@ export class TUIApp {
 
   destroy(): void {
     sessionManager.shutdown();
+    void this.mcp.disconnect();
     if (this.screen) this.screen.destroy();
   }
 }
