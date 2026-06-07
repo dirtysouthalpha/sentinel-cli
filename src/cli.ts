@@ -23,6 +23,7 @@ import { AgentRunner } from "./core/agent-runner.js";
 import { extractToolCalls } from "./core/tool-call-extractor.js";
 import { buildSystemPrompt } from "./core/system-prompt.js";
 import { expandMentions } from "./core/mentions.js";
+import { recallRelevant, DEFAULT_RECALL_TOOL } from "./core/brain-recall.js";
 import { RoutedProvider } from "./ai/routed-provider.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "./core/permissions.js";
 import { CheckpointManager } from "./core/checkpoints.js";
@@ -320,8 +321,16 @@ program
     let result;
     try {
       // V2: expand @file / @url mentions in the task before the agent runs.
-      const expandedTask = await expandMentions(task, projectRoot);
-      result = await runner.run(expandedTask, ac.signal);
+      let outboundTask = await expandMentions(task, projectRoot);
+      // V3: auto-recall from the Sentinel Prime brain when its MCP is connected.
+      if (mcp.has(DEFAULT_RECALL_TOOL)) {
+        try {
+          outboundTask += await recallRelevant(mcpAware, task);
+        } catch {
+          // best-effort
+        }
+      }
+      result = await runner.run(outboundTask, ac.signal);
     } finally {
       await mcp.disconnect();
     }

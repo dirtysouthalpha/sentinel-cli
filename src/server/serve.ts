@@ -16,6 +16,8 @@ import { createSubagentTool, createSubagentAwareExecutor } from "../core/subagen
 import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
+import { expandMentions } from "../core/mentions.js";
+import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { sessionManager } from "../core/session-manager.js";
 import { themeEngine } from "../tui/themes/engine.js";
 import { commandRegistry } from "../commands/registry.js";
@@ -323,10 +325,11 @@ class Connection {
 
       const engine = new PermissionEngine(this.permissionMode, config.permissions as never, this.projectRoot);
       const checkpoints = new CheckpointManager(this.projectRoot);
+      const mcpAware = createMcpAwareExecutor(this.mcp, executeToolCall);
       const execute = createGuardedExecutor({
         engine,
         checkpoints,
-        baseExecute: createMcpAwareExecutor(this.mcp, executeToolCall),
+        baseExecute: mcpAware,
         ask: (req: PermissionRequest, reason: string) =>
           new Promise<boolean>((resolve) => {
             this.permResolver = resolve;
@@ -387,7 +390,15 @@ class Connection {
       );
       runner.on("runError", (e) => this.send({ type: "error", message: e instanceof Error ? e.message : String(e) }));
 
-      const result = await runner.run(text, this.ac.signal);
+      let outbound = await expandMentions(text, this.projectRoot);
+      if (this.mcp.has(DEFAULT_RECALL_TOOL)) {
+        try {
+          outbound += await recallRelevant(mcpAware, text);
+        } catch {
+          // best-effort
+        }
+      }
+      const result = await runner.run(outbound, this.ac.signal);
       this.send({ type: "done", stopReason: result.stopReason, rounds: result.rounds });
       this.touchSession((id) => sessionManager.markDirty(id));
     } catch (err) {

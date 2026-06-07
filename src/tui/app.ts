@@ -13,6 +13,7 @@ import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { suggestCommand } from "../core/command-search.js";
 import { expandMentions } from "../core/mentions.js";
+import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
 import { sessionManager, Session } from "../core/session-manager.js";
@@ -929,10 +930,11 @@ export class TUIApp {
       // R2: permission gating + checkpoints, composed over R3 MCP routing.
       const engine = new PermissionEngine(this.permissionMode, config.permissions as never, this.projectRoot);
       const checkpoints = new CheckpointManager(this.projectRoot);
+      const mcpAware = createMcpAwareExecutor(this.mcp, executeToolCall);
       const execute = createGuardedExecutor({
         engine,
         checkpoints,
-        baseExecute: createMcpAwareExecutor(this.mcp, executeToolCall),
+        baseExecute: mcpAware,
         ask: (req, reason) => this.askPermission(req, reason),
       });
 
@@ -986,8 +988,17 @@ export class TUIApp {
       });
 
       // V2: expand @file / @url mentions into the message before the agent runs.
-      const expandedMessage = await expandMentions(userMessage, this.projectRoot);
-      await runner.run(expandedMessage, this.ac.signal);
+      let outbound = await expandMentions(userMessage, this.projectRoot);
+      // V3: auto-recall relevant memories from the Sentinel Prime brain (when its
+      // MCP server is connected). Read-only, so it bypasses the permission guard.
+      if (this.mcp.has(DEFAULT_RECALL_TOOL)) {
+        try {
+          outbound += await recallRelevant(mcpAware, userMessage);
+        } catch {
+          // recall is best-effort; never block the turn on it
+        }
+      }
+      await runner.run(outbound, this.ac.signal);
 
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);
