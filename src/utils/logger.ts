@@ -1,3 +1,5 @@
+import { redact } from "../core/redact.js";
+
 export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
 
 export interface LoggerOptions {
@@ -57,11 +59,13 @@ export function createLogger(options: Partial<LoggerOptions> = {}): Logger {
 
   const log = (level: LogLevel, message: string, args: unknown[]) => {
     if (!shouldLog(level)) return;
-    const formatted = formatMessage(level, message, prefix, showTimestamp);
+    // V16: scrub credentials from log lines + string args before they hit stderr.
+    const formatted = redact(formatMessage(level, message, prefix, showTimestamp));
+    const safeArgs = args.map((a) => (typeof a === "string" ? redact(a) : a));
     // All logs go to stderr so stdout stays clean for command output (e.g.
     // `run --json` NDJSON, `config --json`, MCP stdio JSON-RPC).
     const output = level === "warn" ? console.warn : console.error;
-    output(formatted, ...args);
+    output(formatted, ...safeArgs);
   };
 
   return {
