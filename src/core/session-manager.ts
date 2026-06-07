@@ -123,8 +123,11 @@ class SessionManager {
       if (remaining.length > 0) {
         this.setActiveSession(remaining[0].id);
       } else {
+        // Never leave the app session-less — that would route messages to a
+        // throwaway ContextManager("fallback"). Open a fresh session instead.
         this.activeSessionId = null;
         state.set("activeSessionId", null);
+        this.createSession();
       }
     }
 
