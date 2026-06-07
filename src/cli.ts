@@ -26,6 +26,9 @@ import { RoutedProvider } from "./ai/routed-provider.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "./core/permissions.js";
 import { CheckpointManager } from "./core/checkpoints.js";
 import { createGuardedExecutor } from "./core/guarded-executor.js";
+import { MCPManager } from "./mcp/manager.js";
+import { createMcpAwareExecutor } from "./mcp/mcp-executor.js";
+import { runMcpServer } from "./mcp/server.js";
 import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
@@ -222,6 +225,12 @@ program
 
     contextManager.setSystemPrompt(buildSystemPrompt(agentName, projectRoot));
 
+    // R3: connect configured MCP servers and merge their tools into the toolset.
+    const mcp = new MCPManager();
+    await mcp.connect((config.mcp as any) || {});
+    const toolDefs = [...getToolDefinitions(), ...mcp.getToolDefs()];
+    const mcpAware = createMcpAwareExecutor(mcp, executeToolCall);
+
     // R2: enforce permissions + checkpoint mutations. Default mode is "yolo"
     // (unchanged behavior); --permission-mode auto|gated turns on guardrails.
     const mode: PermissionMode = (opts.permissionMode as PermissionMode) || "yolo";
@@ -231,7 +240,7 @@ program
     const guardedExecute = createGuardedExecutor({
       engine,
       checkpoints,
-      baseExecute: executeToolCall,
+      baseExecute: mcpAware,
       ask: async (req: PermissionRequest, reason: string) => {
         // Headless: approve only with --yes; otherwise deny and report on stderr.
         const label = `${req.tool}${req.action ? `(${req.action})` : ""}`;
@@ -246,7 +255,7 @@ program
       {
         provider,
         context: contextManager,
-        toolDefs: getToolDefinitions(),
+        toolDefs,
         executeTool: guardedExecute,
         extractToolCalls,
       },
@@ -285,6 +294,7 @@ program
     process.on("SIGINT", () => ac.abort());
 
     const result = await runner.run(task, ac.signal);
+    await mcp.disconnect(); // shut down MCP child processes so the run can exit
     emit({ type: "done", stopReason: result.stopReason, rounds: result.rounds, usage: result.usage });
 
     // Set exitCode and let the event loop drain (don't process.exit() — on
@@ -324,6 +334,42 @@ program
       return;
     }
     console.log(`Undid ${cp.tool} ${cp.existed ? "edit" : "create"} of ${cp.path}`);
+  });
+
+program
+  .command("mcp")
+  .description("List configured MCP servers and their discovered tools")
+  .option("--project <path>", "Project root directory")
+  .action(async (opts, command) => {
+    const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
+    const config = getConfigManager(projectRoot).load();
+    const servers = (config.mcp as Record<string, unknown>) || {};
+    if (Object.keys(servers).length === 0) {
+      console.log('No MCP servers configured. Add them under "mcp" in sentinel.json.');
+      return;
+    }
+    const mcp = new MCPManager();
+    await mcp.connect(servers as any);
+    const tools = mcp.list();
+    if (tools.length === 0) {
+      console.log("Connected, but no tools were discovered.");
+    } else {
+      console.log(`\n${mcp.serverCount()} server(s), ${tools.length} tool(s):\n`);
+      for (const t of tools) {
+        const desc = t.description ? ` - ${t.description.split("\n")[0]}` : "";
+        console.log(`  mcp__${t.server}__${t.tool}${desc}`);
+      }
+    }
+    await mcp.disconnect();
+  });
+
+program
+  .command("mcp-serve")
+  .description("Run Sentinel as an MCP server (stdio), exposing its tools to MCP clients")
+  .option("--project <path>", "Project root directory")
+  .action(async (opts, command) => {
+    const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
+    await runMcpServer(projectRoot);
   });
 
 async function runMain(options: {

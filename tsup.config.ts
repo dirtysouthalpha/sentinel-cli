@@ -9,5 +9,5 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   dts: { entry: "src/index.ts" },
-  external: ["blessed", "openai"],
+  external: ["blessed", "openai", "@modelcontextprotocol/sdk"],
 });
