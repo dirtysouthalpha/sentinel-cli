@@ -48,6 +48,32 @@ Sentinel is a UI-agnostic coding **engine** — a streaming agentic loop with re
   <img src="assets/screenshot-welcome.png" width="430" alt="Welcome">
 </p>
 
+## Commands
+
+Slash commands inside the TUI (and many as headless subcommands):
+
+| Command | What it does |
+|---------|--------------|
+| `/plan [off]` | Read-only research mode — proposes a plan, blocks edits/commands |
+| `/cmd <text>` | AI command-search: natural language → a shell command |
+| `/workflow list\|save\|run\|delete` | Saved, parameterized workflows (Warp Drive) |
+| `/pipeline run <file.json>` | Deterministic multi-step pipeline (sequential + parallel groups) |
+| `/ship <task>` | Autonomous GSD: plan → implement → test → review → fix |
+| `/index` · `/search <q>` | Build a repo index (TF-IDF) and semantically search it |
+| `/bg <cmd>` · `/tasks` | Run shell commands in the background; list/cancel them |
+| `/export [md\|html]` · `/branch` | Export or branch the current session |
+| `/usage` | Token / cost / per-tool usage metrics |
+| `/ask-prime <q>` | Ask Sentinel Prime (the Hermes agent) |
+| `/workspace list\|add\|use` | Multi-repo workspace roots (alias `/ws`) |
+| `/marketplace list\|search\|install` | Install skills / MCP servers from a registry |
+| `/permissions <mode>` · `/undo` · `/checkpoints` | Guardrails and git-backed undo |
+| `/mcp` · `/model` · `/agent` · `/theme` | Inspect MCP tools; switch model / agent / theme |
+
+The agent also has tools it drives itself: `subagent` (delegate an isolated sub-task),
+`todo_write` (a live task board), plus `file`/`bash`/`search`/`git`/`web`/`patch` and any
+connected MCP tools. Project context (CLAUDE.md/AGENTS.md/package.json) and relevant
+long-term memory (when the Sentinel Prime brain MCP is connected) are auto-loaded each turn.
+
 ## Quick start
 
 ```bash
