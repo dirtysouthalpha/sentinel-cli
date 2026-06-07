@@ -53,4 +53,20 @@ describe("PermissionEngine", () => {
     expect(e.evaluate({ tool: "file", action: "write", path: "../outside.ts" }).decision).toBe("ask");
     expect(e.evaluate({ tool: "file", action: "write", path: "inside.ts" }).decision).toBe("allow");
   });
+
+  it("plan mode is read-only: reads/search/web allowed, mutations denied", () => {
+    const e = new PermissionEngine("plan", {}, ROOT);
+    // research is allowed
+    expect(e.evaluate({ tool: "file", action: "read", path: "src/a.ts" }).decision).toBe("allow");
+    expect(e.evaluate({ tool: "search", pattern: "x" } as never).decision).toBe("allow");
+    expect(e.evaluate({ tool: "git", action: "status" }).decision).toBe("allow");
+    expect(e.evaluate({ tool: "web" }).decision).toBe("allow");
+    // anything that mutates or runs is denied
+    expect(e.evaluate({ tool: "file", action: "write", path: "src/a.ts" }).decision).toBe("deny");
+    expect(e.evaluate({ tool: "patch", path: "src/a.ts" }).decision).toBe("deny");
+    expect(e.evaluate({ tool: "bash", command: "ls" }).decision).toBe("deny");
+    expect(e.evaluate({ tool: "git", action: "commit" }).decision).toBe("deny");
+    // denial reason explains plan mode so the model proposes a plan
+    expect(e.evaluate({ tool: "bash", command: "ls" }).reason).toMatch(/plan mode is read-only/);
+  });
 });

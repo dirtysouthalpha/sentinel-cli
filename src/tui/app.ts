@@ -11,6 +11,9 @@ import { ToolCall } from "../ai/types.js";
 import { AgentRunner } from "../core/agent-runner.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
+import { suggestCommand } from "../core/command-search.js";
+import { expandMentions } from "../core/mentions.js";
+import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
 import { sessionManager, Session } from "../core/session-manager.js";
@@ -18,6 +21,10 @@ import { RoutedProvider } from "../ai/routed-provider.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "../core/permissions.js";
 import { CheckpointManager } from "../core/checkpoints.js";
 import { createGuardedExecutor } from "../core/guarded-executor.js";
+import { createSubagentTool, createSubagentAwareExecutor } from "../core/subagent.js";
+import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
+import { BackgroundTaskManager } from "../core/background.js";
+import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
@@ -66,6 +73,8 @@ export class TUIApp {
   private permissionMode: PermissionMode = "yolo";
   private mcp = new MCPManager();
   private mcpConnected = false;
+  private background = new BackgroundTaskManager();
+  private bgWired = false;
   private pendingPermission?: (allow: boolean) => void;
 
   private inputBuffer = "";
@@ -258,6 +267,36 @@ export class TUIApp {
     this.push(`\n${body}\n`);
   }
 
+  /** Register the one-time background-task completion notifier. */
+  private wireBackground(): void {
+    if (this.bgWired) return;
+    this.bgWired = true;
+    this.background.onUpdate((t) => {
+      if (t.status === "running") return;
+      const mark = t.status === "done" ? "✓" : t.status === "error" ? "✗" : "∅";
+      const detail =
+        t.status === "done"
+          ? (t.result || "").split("\n").slice(0, 10).join("\n")
+          : t.status === "error"
+            ? t.error || ""
+            : "";
+      this.addSystem(`${mark} bg #${t.id} ${t.status}: ${t.label}${detail ? `\n${detail}` : ""}`);
+    });
+  }
+
+  /** Run a shell command detached; the AbortSignal kills the process on cancel. */
+  private runShell(command: string, signal: AbortSignal): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const isWindows = process.platform === "win32";
+      const shell = isWindows ? "powershell.exe" : undefined;
+      exec(command, { cwd: this.projectRoot, signal, maxBuffer: 10 * 1024 * 1024, shell }, (error, stdout, stderr) => {
+        const out = `${stdout || ""}${stderr ? `\n${stderr}` : ""}`.trim();
+        if (error) return reject(new Error((stderr || error.message || "command failed").trim().slice(0, 4000)));
+        resolve((out || "(no output)").slice(0, 4000));
+      });
+    });
+  }
+
   private addError(text: string): void {
     const c = themeEngine.getBlessedColors();
     this.push(`\n{${c.error}-fg}{bold}✗ ${this.esc(text)}{/}\n`);
@@ -421,8 +460,13 @@ export class TUIApp {
       ["/agent <name>", "Switch agent (gsd, code, debug, plan, ask)"],
       ["/theme <name>", "Switch theme"],
       ["/providers", "Check API status"],
-      ["/permissions <mode>", "Guardrails: yolo | auto | gated"],
+      ["/permissions <mode>", "Guardrails: yolo | auto | gated | plan"],
+      ["/plan [off]", "Read-only research mode: propose a plan, no edits"],
+      ["/bg <command>", "Run a shell command in the background"],
+      ["/tasks", "List background tasks (and their status)"],
       ["/mcp", "List connected MCP tools"],
+      ["/cmd <text>", "AI command-search: natural language → shell command"],
+      ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
       ["/cost", "Session cost breakdown"],
@@ -543,15 +587,55 @@ export class TUIApp {
     if (parsed.name === "permissions" || parsed.name === "perms") {
       const mode = parsed.args[0];
       if (!mode) {
-        this.addSystem(`Permission mode: ${this.permissionMode}  (yolo | auto | gated)`);
+        this.addSystem(`Permission mode: ${this.permissionMode}  (yolo | auto | gated | plan)`);
         return;
       }
-      if (mode === "yolo" || mode === "auto" || mode === "gated") {
+      if (mode === "yolo" || mode === "auto" || mode === "gated" || mode === "plan") {
         this.permissionMode = mode;
         this.addSystem(`Permission mode → ${mode}`);
       } else {
-        this.addError(`Unknown mode: ${mode}. Use yolo | auto | gated.`);
+        this.addError(`Unknown mode: ${mode}. Use yolo | auto | gated | plan.`);
       }
+      return;
+    }
+
+    // /plan toggles read-only research mode; /plan off restores yolo.
+    if (parsed.name === "plan") {
+      if (parsed.args[0] === "off") {
+        this.permissionMode = "yolo";
+        this.addSystem("Plan mode off → yolo. Edits/commands re-enabled.");
+      } else {
+        this.permissionMode = "plan";
+        this.addSystem("Plan mode on (read-only). I'll research and propose a plan; edits/commands are blocked until you `/plan off`.");
+      }
+      return;
+    }
+
+    // /bg <cmd> runs a shell command in the background; /bg cancel <id> stops it.
+    if (parsed.name === "bg") {
+      if (parsed.args[0] === "cancel") {
+        const id = parsed.args[1];
+        if (!id) return void this.addError("Usage: /bg cancel <id>");
+        this.addSystem(this.background.cancel(id) ? `bg #${id} cancelled.` : `No running bg task #${id}.`);
+        return;
+      }
+      const command = parsed.args.join(" ").trim();
+      if (!command) return void this.addSystem("Usage: /bg <shell command>   ·   /bg cancel <id>   ·   /tasks");
+      this.wireBackground();
+      const task = this.background.start(command, (signal) => this.runShell(command, signal));
+      this.addSystem(`▶ bg #${task.id} started: ${command}`);
+      return;
+    }
+
+    // /tasks lists background tasks and their status.
+    if (parsed.name === "tasks") {
+      const tasks = this.background.list();
+      if (tasks.length === 0) return void this.addSystem("No background tasks. Start one with /bg <command>.");
+      const mark: Record<string, string> = { running: "▶", done: "✓", error: "✗", cancelled: "∅" };
+      this.addSystem(
+        "Background tasks:\n" +
+          tasks.map((t) => `${mark[t.status] || "?"} #${t.id} [${t.status}] ${t.label}`).join("\n")
+      );
       return;
     }
 
@@ -638,6 +722,35 @@ export class TUIApp {
       return;
     }
 
+    if (parsed.name === "cmd") {
+      await this.handleCmdSearch(parsed.args.join(" "));
+      return;
+    }
+
+    if (parsed.name === "ask-prime") {
+      const question = parsed.args.join(" ").trim();
+      if (!question) {
+        this.addSystem("Usage: /ask-prime <question>");
+        return;
+      }
+      const prime = providerManager.getProvider("sentinel-prime");
+      if (!prime || !prime.isAvailable()) {
+        this.addError(
+          "Sentinel Prime not configured — add a `sentinel-prime` provider in config."
+        );
+        return;
+      }
+      try {
+        const res = await prime.chat([{ role: "user", content: question }], {
+          model: "hermes-agent",
+        });
+        this.addSystem(res.content || "(no answer)");
+      } catch (err) {
+        this.addError(`Sentinel Prime error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     const cmd = commandRegistry.get(parsed.name);
     if (cmd) {
       await this.chatWithAI(resolveTemplate(cmd.template, parsed.args));
@@ -645,6 +758,50 @@ export class TUIApp {
     }
 
     this.addError(`Unknown command: /${parsed.name}. Type / to see commands.`);
+  }
+
+  /** /cmd <natural language> — AI command-search: NL → one shell command. */
+  private async handleCmdSearch(nl: string): Promise<void> {
+    const query = nl.trim();
+    if (!query) {
+      this.addSystem("Usage: /cmd <natural language>  e.g. /cmd list the 5 largest files");
+      return;
+    }
+
+    const [providerName, ...modelParts] = state.get("currentModel").split("/");
+    const modelName = modelParts.join("/") || undefined;
+    const provider = providerManager.getProvider(providerName);
+    if (!provider) {
+      this.addError(`No provider "${providerName}". Try /providers`);
+      return;
+    }
+    if (!provider.isAvailable()) {
+      this.addError(`No API key for "${providerName}". Type /connect`);
+      return;
+    }
+
+    this.addSystem(`Searching for a command for: ${query}`);
+    try {
+      const { command, explanation } = await suggestCommand(provider, query, {
+        model: modelName,
+      });
+      if (!command) {
+        this.addSystem(
+          explanation
+            ? `No command produced. ${explanation}`
+            : "No command produced."
+        );
+        return;
+      }
+      let msg = `Suggested command:\n  ${command}`;
+      if (explanation) msg += `\n\n${explanation}`;
+      msg += `\n\nRun it with /bg ${command}  — or copy/paste it into your shell.`;
+      this.addSystem(msg);
+    } catch (err) {
+      this.addError(
+        `Command search failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   private handleTabsCommand(args: string[]): void {
@@ -773,19 +930,39 @@ export class TUIApp {
       // R2: permission gating + checkpoints, composed over R3 MCP routing.
       const engine = new PermissionEngine(this.permissionMode, config.permissions as never, this.projectRoot);
       const checkpoints = new CheckpointManager(this.projectRoot);
+      const mcpAware = createMcpAwareExecutor(this.mcp, executeToolCall);
       const execute = createGuardedExecutor({
         engine,
         checkpoints,
-        baseExecute: createMcpAwareExecutor(this.mcp, executeToolCall),
+        baseExecute: mcpAware,
         ask: (req, reason) => this.askPermission(req, reason),
       });
+
+      // V1: subagent delegation — child reuses the guarded executor, omits the
+      // subagent tool (depth capped at 1).
+      const childToolDefs = [...getToolDefinitions(), ...this.mcp.getToolDefs()];
+      const subagentTool = createSubagentTool({
+        provider,
+        toolDefs: childToolDefs,
+        executeTool: execute,
+        extractToolCalls,
+        model: runnerModel,
+        systemPrompt: buildSystemPrompt(agentName, this.projectRoot),
+      });
+      const subagentExecute = createSubagentAwareExecutor(subagentTool, execute);
+      // V1: todo tracker — render the board in the TUI whenever it changes.
+      const todoTool = createTodoTool();
+      todoTool.store.onChange((items) => {
+        if (items.length) this.addSystem(todoTool.store.render());
+      });
+      const parentExecute = createTodoAwareExecutor(todoTool, subagentExecute);
 
       const runner = new AgentRunner(
         {
           provider,
           context: cm,
-          toolDefs: [...getToolDefinitions(), ...this.mcp.getToolDefs()],
-          executeTool: execute,
+          toolDefs: [...childToolDefs, subagentTool.def, todoTool.def],
+          executeTool: parentExecute,
           extractToolCalls,
         },
         { model: runnerModel, maxRounds: agentName === "gsd" ? 30 : 15, largeContextWarnAt: 50 }
@@ -810,7 +987,18 @@ export class TUIApp {
         this.addError(e instanceof Error ? e.message : String(e));
       });
 
-      await runner.run(userMessage, this.ac.signal);
+      // V2: expand @file / @url mentions into the message before the agent runs.
+      let outbound = await expandMentions(userMessage, this.projectRoot);
+      // V3: auto-recall relevant memories from the Sentinel Prime brain (when its
+      // MCP server is connected). Read-only, so it bypasses the permission guard.
+      if (this.mcp.has(DEFAULT_RECALL_TOOL)) {
+        try {
+          outbound += await recallRelevant(mcpAware, userMessage);
+        } catch {
+          // recall is best-effort; never block the turn on it
+        }
+      }
+      await runner.run(outbound, this.ac.signal);
 
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);

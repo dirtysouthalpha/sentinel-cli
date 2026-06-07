@@ -12,14 +12,27 @@ import { buildSystemPrompt } from "../core/system-prompt.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "../core/permissions.js";
 import { CheckpointManager } from "../core/checkpoints.js";
 import { createGuardedExecutor } from "../core/guarded-executor.js";
+import { createSubagentTool, createSubagentAwareExecutor } from "../core/subagent.js";
+import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
+import { expandMentions } from "../core/mentions.js";
+import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { sessionManager } from "../core/session-manager.js";
 import { themeEngine } from "../tui/themes/engine.js";
 import { commandRegistry } from "../commands/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { resolveTemplate } from "../commands/loader.js";
-import { ClientMessage, ServerMessage, StateSnapshot } from "./protocol.js";
+import { ClientMessage, ServerMessage, StateSnapshot, ConfigView } from "./protocol.js";
+import {
+  setProviderConfig,
+  removeProviderConfig,
+  addCustomModel,
+  removeCustomModel,
+  getCustomModels,
+  setMcpConfig,
+  removeMcpConfig,
+} from "./config-store.js";
 
 const VERSION = "0.2.0";
 
@@ -176,7 +189,111 @@ class Connection {
       case "getState":
         this.pushState();
         break;
+      case "getConfig":
+        this.pushConfig();
+        break;
+      case "setProvider": {
+        const patch: Record<string, unknown> = {};
+        if (msg.apiKey !== undefined) patch.apiKey = msg.apiKey;
+        if (msg.baseURL !== undefined) patch.baseURL = msg.baseURL;
+        if (msg.defaultModel !== undefined) patch.defaultModel = msg.defaultModel;
+        setProviderConfig(msg.name, patch);
+        this.reloadProviders();
+        this.pushConfig();
+        this.pushState();
+        break;
+      }
+      case "removeProvider":
+        removeProviderConfig(msg.name);
+        this.reloadProviders();
+        this.pushConfig();
+        this.pushState();
+        break;
+      case "addModel":
+        addCustomModel(msg.model);
+        this.pushConfig();
+        this.pushState();
+        break;
+      case "removeModel":
+        removeCustomModel(msg.model);
+        this.pushConfig();
+        this.pushState();
+        break;
+      case "addMcp":
+        setMcpConfig(msg.name, {
+          type: msg.url ? "remote" : "local",
+          command: msg.command,
+          url: msg.url,
+          enabled: msg.enabled !== false,
+        });
+        await this.reloadMcp();
+        this.pushConfig();
+        this.pushState();
+        break;
+      case "removeMcp":
+        removeMcpConfig(msg.name);
+        await this.reloadMcp();
+        this.pushConfig();
+        this.pushState();
+        break;
+      case "toggleMcp": {
+        const mcpCfg = ((getConfigManager().getAll().mcp as Record<string, never>) || {})[msg.name] as Record<string, unknown> | undefined;
+        setMcpConfig(msg.name, { ...(mcpCfg || {}), enabled: msg.enabled });
+        await this.reloadMcp();
+        this.pushConfig();
+        this.pushState();
+        break;
+      }
     }
+  }
+
+  private reloadProviders(): void {
+    const cfg = getConfigManager(this.projectRoot).load();
+    providerManager.initializeFromConfig(cfg.provider as never);
+  }
+
+  private async reloadMcp(): Promise<void> {
+    const cfg = getConfigManager(this.projectRoot).load();
+    try {
+      await this.mcp.disconnect();
+      await this.mcp.connect((cfg.mcp as Record<string, never>) || {});
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  private pushConfig(): void {
+    this.send({ type: "config", config: this.configView() });
+  }
+
+  private configView(): ConfigView {
+    const cfg = getConfigManager(this.projectRoot).getAll();
+    const provCfg = (cfg.provider as Record<string, Record<string, unknown>>) || {};
+    const builtins = ["anthropic", "openai", "zai", "gemini", "ollama"];
+    const names = [...new Set([...builtins, ...Object.keys(provCfg)])];
+    const available = providerManager.getAvailableProviderNames();
+    const providers = names.map((name) => {
+      const pc = provCfg[name] || {};
+      return {
+        name,
+        hasKey: !!pc.apiKey || available.includes(name),
+        baseURL: pc.baseURL as string | undefined,
+        defaultModel: pc.defaultModel as string | undefined,
+        builtin: builtins.includes(name),
+        available: available.includes(name),
+      };
+    });
+    const models = [...MODEL_CHOICES, ...getCustomModels()].filter((v, i, a) => a.indexOf(v) === i);
+    const mcpCfg = (cfg.mcp as unknown as Record<string, Record<string, unknown>>) || {};
+    const connected = new Set(this.mcp.list().map((t) => t.server));
+    const mcp = Object.entries(mcpCfg).map(([name, e]) => ({
+      name,
+      command: e.command as string[] | undefined,
+      url: e.url as string | undefined,
+      enabled: e.enabled !== false,
+      connected: connected.has(name),
+    }));
+    return { providers, models, mcp };
   }
 
   private async handleSend(text: string): Promise<void> {
@@ -208,10 +325,11 @@ class Connection {
 
       const engine = new PermissionEngine(this.permissionMode, config.permissions as never, this.projectRoot);
       const checkpoints = new CheckpointManager(this.projectRoot);
+      const mcpAware = createMcpAwareExecutor(this.mcp, executeToolCall);
       const execute = createGuardedExecutor({
         engine,
         checkpoints,
-        baseExecute: createMcpAwareExecutor(this.mcp, executeToolCall),
+        baseExecute: mcpAware,
         ask: (req: PermissionRequest, reason: string) =>
           new Promise<boolean>((resolve) => {
             this.permResolver = resolve;
@@ -219,12 +337,28 @@ class Connection {
           }),
       });
 
+      // V1: subagent delegation (child reuses the guard, omits the subagent tool).
+      const childToolDefs = [...getToolDefinitions(), ...this.mcp.getToolDefs()];
+      const subagentTool = createSubagentTool({
+        provider,
+        toolDefs: childToolDefs,
+        executeTool: execute,
+        extractToolCalls,
+        model: modelName,
+        systemPrompt: buildSystemPrompt(agent, this.projectRoot),
+      });
+      const subagentExecute = createSubagentAwareExecutor(subagentTool, execute);
+      // V1: todo tracker — push the board to the GUI whenever it changes.
+      const todoTool = createTodoTool();
+      todoTool.store.onChange((items) => this.send({ type: "todos", items }));
+      const parentExecute = createTodoAwareExecutor(todoTool, subagentExecute);
+
       const runner = new AgentRunner(
         {
           provider,
           context: cm,
-          toolDefs: [...getToolDefinitions(), ...this.mcp.getToolDefs()],
-          executeTool: execute,
+          toolDefs: [...childToolDefs, subagentTool.def, todoTool.def],
+          executeTool: parentExecute,
           extractToolCalls,
         },
         { model: modelName, maxRounds: agent === "gsd" ? 30 : 15, largeContextWarnAt: 50 }
@@ -256,7 +390,15 @@ class Connection {
       );
       runner.on("runError", (e) => this.send({ type: "error", message: e instanceof Error ? e.message : String(e) }));
 
-      const result = await runner.run(text, this.ac.signal);
+      let outbound = await expandMentions(text, this.projectRoot);
+      if (this.mcp.has(DEFAULT_RECALL_TOOL)) {
+        try {
+          outbound += await recallRelevant(mcpAware, text);
+        } catch {
+          // best-effort
+        }
+      }
+      const result = await runner.run(outbound, this.ac.signal);
       this.send({ type: "done", stopReason: result.stopReason, rounds: result.rounds });
       this.touchSession((id) => sessionManager.markDirty(id));
     } catch (err) {
@@ -336,7 +478,7 @@ class Connection {
       theme: themeEngine.getTheme().name,
       permissionMode: this.permissionMode,
       themes: themeEngine.getAllThemes().map((t) => ({ name: t.name, display: t.display })),
-      models: MODEL_CHOICES,
+      models: [...MODEL_CHOICES, ...getCustomModels()].filter((v, i, a) => a.indexOf(v) === i),
       agents: agentRegistry.getAll().map((a) => a.name),
       sessions: sessionManager.getAllSessions().map((s) => ({ id: s.id, title: s.title, active: s.id === activeId })),
       mcpTools: this.mcp.list().map((t) => ({ server: t.server, tool: t.tool, full: `mcp__${t.server}__${t.tool}` })),

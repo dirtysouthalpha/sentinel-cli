@@ -22,10 +22,14 @@ import { getToolDefinitions, executeToolCall } from "./tools/tool-executor.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import { extractToolCalls } from "./core/tool-call-extractor.js";
 import { buildSystemPrompt } from "./core/system-prompt.js";
+import { expandMentions } from "./core/mentions.js";
+import { recallRelevant, DEFAULT_RECALL_TOOL } from "./core/brain-recall.js";
 import { RoutedProvider } from "./ai/routed-provider.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "./core/permissions.js";
 import { CheckpointManager } from "./core/checkpoints.js";
 import { createGuardedExecutor } from "./core/guarded-executor.js";
+import { createSubagentTool, createSubagentAwareExecutor } from "./core/subagent.js";
+import { createTodoTool, createTodoAwareExecutor } from "./core/todos.js";
 import { MCPManager } from "./mcp/manager.js";
 import { createMcpAwareExecutor } from "./mcp/mcp-executor.js";
 import { runMcpServer } from "./mcp/server.js";
@@ -253,13 +257,29 @@ program
       },
     });
 
+    // V1: subagent delegation. The child reuses the same guarded executor (so
+    // permissions/checkpoints still apply) but its toolset omits the subagent
+    // tool, capping nesting at one level.
+    const subagentTool = createSubagentTool({
+      provider,
+      toolDefs,
+      executeTool: guardedExecute,
+      extractToolCalls,
+      model: modelName,
+      systemPrompt: buildSystemPrompt(agentName, projectRoot),
+    });
+    const subagentExecute = createSubagentAwareExecutor(subagentTool, guardedExecute);
+    // V1: todo tracker (parent-only) composed over the subagent executor.
+    const todoTool = createTodoTool();
+    const parentExecute = createTodoAwareExecutor(todoTool, subagentExecute);
+
     const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : agentName === "gsd" ? 30 : 15;
     const runner = new AgentRunner(
       {
         provider,
         context: contextManager,
-        toolDefs,
-        executeTool: guardedExecute,
+        toolDefs: [...toolDefs, subagentTool.def, todoTool.def],
+        executeTool: parentExecute,
         extractToolCalls,
       },
       { model: modelName, maxRounds }
@@ -300,7 +320,17 @@ program
     // before the agent loop — otherwise the process can't drain and exit.
     let result;
     try {
-      result = await runner.run(task, ac.signal);
+      // V2: expand @file / @url mentions in the task before the agent runs.
+      let outboundTask = await expandMentions(task, projectRoot);
+      // V3: auto-recall from the Sentinel Prime brain when its MCP is connected.
+      if (mcp.has(DEFAULT_RECALL_TOOL)) {
+        try {
+          outboundTask += await recallRelevant(mcpAware, task);
+        } catch {
+          // best-effort
+        }
+      }
+      result = await runner.run(outboundTask, ac.signal);
     } finally {
       await mcp.disconnect();
     }
