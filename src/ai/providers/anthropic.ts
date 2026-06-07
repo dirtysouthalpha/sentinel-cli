@@ -6,6 +6,7 @@ import {
   StreamChunk,
   ToolCall,
   ProviderConfig,
+  contentToText,
 } from "../types.js";
 import { ProviderError } from "../errors.js";
 import { createLogger } from "../../utils/logger.js";
@@ -31,18 +32,18 @@ export class AnthropicProvider implements AIProvider {
 
     for (const m of messages) {
       if (m.role === "system") {
-        system = m.content;
+        system = contentToText(m.content);
         continue;
       }
       if (m.role === "tool") {
         result.push({
           role: "user",
-          content: `[Tool Result (${m.name})]: ${m.content}`,
+          content: `[Tool Result (${m.name})]: ${contentToText(m.content)}`,
         });
         continue;
       }
       if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
-        let content = m.content || "";
+        let content = contentToText(m.content) || "";
         for (const tc of m.toolCalls) {
           content += `\n[Tool Call: ${tc.name}(${tc.arguments})]`;
         }

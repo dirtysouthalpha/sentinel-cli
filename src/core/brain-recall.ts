@@ -1,4 +1,4 @@
-import { ChatMessage, ToolCall } from "../ai/types.js";
+import { ChatMessage, ToolCall, contentToText } from "../ai/types.js";
 
 /** Default Sentinel Prime brain-recall tool name (MCP-namespaced). */
 export const DEFAULT_RECALL_TOOL = "mcp__sentinel-prime__brain_recall";
@@ -32,7 +32,7 @@ export async function recallRelevant(
   };
 
   const result = await executeTool(toolCall);
-  const content = (result?.content ?? "").trim();
+  const content = contentToText(result?.content ?? "").trim();
 
   if (content.length === 0) return "";
   if (content.startsWith("ERROR")) return "";
