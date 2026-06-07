@@ -52,6 +52,7 @@ import { getConfigManager } from "../core/config.js";
 import { fetchRegistry, searchRegistry, installEntry } from "../core/marketplace.js";
 import { exportSessionMarkdown, exportSessionHtml } from "../core/session-export.js";
 import { WorkspaceStore } from "../core/workspace.js";
+import { TeamStore } from "../core/team.js";
 import { createLogger } from "../utils/logger.js";
 import { writeFileSync, readFileSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
@@ -519,6 +520,7 @@ export class TUIApp {
       ["/export [md|html] [path]", "Export this session's transcript to a file"],
       ["/branch", "Duplicate this session into a new tab"],
       ["/workspace ...", "Multi-repo roots: list | add | remove | use (alias /ws)"],
+      ["/team ...", "Shared team: info | name <n> | registry <url> | add | remove"],
       ["/compact", "Compress context (save tokens)"],
       ["/clear", "Clear chat history"],
       ["/help", "Full help"],
@@ -1071,6 +1073,11 @@ export class TUIApp {
       return;
     }
 
+    if (parsed.name === "team") {
+      this.handleTeamCommand(parsed.args);
+      return;
+    }
+
     const cmd = commandRegistry.get(parsed.name);
     if (cmd) {
       await this.chatWithAI(resolveTemplate(cmd.template, parsed.args));
@@ -1256,6 +1263,102 @@ export class TUIApp {
 
     this.addSystem(
       "Usage: /workspace <list | add [path] | remove <path> | use <path>>  (alias: /ws)"
+    );
+  }
+
+  /**
+   * /team — a shared team manifest (V10): a team name, a shared extension
+   * registry, and a roster of members. The registry URL doubles as a
+   * /marketplace source so the whole team installs the same skills/MCP servers.
+   * Subcommands: info (default) | name <n> | registry <url> | add <member> | remove <member>.
+   */
+  private handleTeamCommand(args: string[]): void {
+    const sub = (args[0] || "info").toLowerCase();
+    let store: TeamStore;
+    try {
+      store = new TeamStore();
+    } catch (err) {
+      this.addError(`Team error: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
+    if (sub === "info") {
+      const team = store.get();
+      let msg = "Team:\n";
+      msg += `  name:     ${team.name || "(unset)"}\n`;
+      msg += `  registry: ${team.registry || "(unset)"}\n`;
+      const members = team.members || [];
+      if (members.length === 0) {
+        msg += "  members:  (none) — add with /team add <member>";
+      } else {
+        msg += `  members:  ${members.length}\n`;
+        for (const m of members) msg += `    - ${m}\n`;
+        msg = msg.trimEnd();
+      }
+      this.addSystem(msg);
+      return;
+    }
+
+    if (sub === "name") {
+      const name = args.slice(1).join(" ").trim();
+      if (!name) {
+        this.addSystem("Usage: /team name <name>");
+        return;
+      }
+      try {
+        store.setName(name);
+        this.addSystem(`Team name → ${name}`);
+      } catch (err) {
+        this.addError(`Failed to set team name: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    if (sub === "registry") {
+      const url = args.slice(1).join(" ").trim();
+      if (!url) {
+        this.addSystem("Usage: /team registry <url>");
+        return;
+      }
+      try {
+        store.setRegistry(url);
+        this.addSystem(
+          `Team registry → ${url}\nUse it as a /marketplace source, e.g. /marketplace list ${url}`
+        );
+      } catch (err) {
+        this.addError(`Failed to set team registry: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    if (sub === "add") {
+      const member = args.slice(1).join(" ").trim();
+      if (!member) {
+        this.addSystem("Usage: /team add <member>");
+        return;
+      }
+      try {
+        store.addMember(member);
+        this.addSystem(`Added team member: ${member}`);
+      } catch (err) {
+        this.addError(`Failed to add member: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    if (sub === "remove" || sub === "rm") {
+      const member = args.slice(1).join(" ").trim();
+      if (!member) {
+        this.addSystem("Usage: /team remove <member>");
+        return;
+      }
+      const removed = store.removeMember(member);
+      this.addSystem(removed ? `Removed team member: ${member}` : `Not a team member: ${member}`);
+      return;
+    }
+
+    this.addSystem(
+      "Usage: /team <info | name <n> | registry <url> | add <member> | remove <member>>"
     );
   }
 
