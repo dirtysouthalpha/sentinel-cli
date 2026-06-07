@@ -1,221 +1,145 @@
 <p align="center">
-  <img src="assets/logo.svg" width="200" alt="Sentinel CLI Logo">
+  <img src="assets/logo.svg" width="120" alt="Sentinel CLI">
 </p>
 
 <h1 align="center">Sentinel CLI</h1>
 
+<p align="center"><strong>An AI coding agent with a real engine — and a desktop GUI to match.</strong></p>
+
 <p align="center">
-  <strong>The Best Coding CLI on the Planet</strong>
+  Multi-provider (cloud <em>and</em> local) · model router with fallback · enforced permissions + undo ·
+  MCP client <em>and</em> server · a glassmorphism desktop GUI.
 </p>
 
 <p align="center">
-  AI-powered coding assistant with real-time tool execution, token compression, and cyberpunk aesthetics.
+  <img src="https://img.shields.io/badge/node-%3E%3D20-3b82f6?style=flat-square" alt="node">
+  <img src="https://img.shields.io/badge/license-MIT-34d399?style=flat-square" alt="license">
+  <img src="https://img.shields.io/badge/tests-81%20passing-3b82f6?style=flat-square" alt="tests">
+  <img src="https://img.shields.io/badge/MCP-client%20%2B%20server-a78bfa?style=flat-square" alt="mcp">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-00D4FF?style=for-the-badge&labelColor=06080C" alt="Version">
-  <img src="https://img.shields.io/badge/license-MIT-39FF14?style=for-the-badge&labelColor=06080C" alt="License">
-  <img src="https://img.shields.io/badge/node-%3E%3D20-FF2E63?style=for-the-badge&labelColor=06080C" alt="Node.js">
-  <img src="https://img.shields.io/badge/tests-38%20passing-00D4FF?style=for-the-badge&labelColor=06080C" alt="Tests">
-  <img src="https://img.shields.io/badge/themes-14-FFB800?style=for-the-badge&labelColor=06080C" alt="Themes">
+  <img src="assets/screenshot-chat.png" width="860" alt="Sentinel CLI desktop GUI">
 </p>
 
 ---
 
+## What is Sentinel?
+
+Sentinel is a UI-agnostic coding **engine** — a streaming agentic loop with real tools (file, bash, search, git, web, patch) — exposed through **three faces** that all share the same core:
+
+| Face | Command | For |
+|------|---------|-----|
+| **Desktop GUI** | `sentinel gui` | A glassmorphism app: block-based chat, inline diffs, command palette, MCP. |
+| **Headless CLI** | `sentinel run "task" --json` | Scripts, CI, one-shot agentic tasks with a JSON event stream. |
+| **MCP server** | `sentinel mcp-serve` | Expose Sentinel's tools to Claude Desktop or any other MCP client. |
+
 ## Features
 
-- **Real Tool Execution** - AI reads files, runs commands, searches code, applies patches. Full agentic loop.
-- **Get Shit Done Mode** - Switch to GSD agent for fast, no-nonsense execution
-- **Token Compression** - Auto-compressing context saves money. Real-time cost tracking.
-- **14 Cyberpunk Themes** - Tron x Gotham, Matrix, Neon, Blood, and more
-- **Multi-Provider** - Z.ai GLM, Anthropic Claude, OpenAI GPT-4o, Ollama, Groq, OpenRouter
-- **Windows First** - Full PowerShell support. No WSL required.
-- **6 Built-in Tools** - file, bash, search, git, web, patch
-- **12 Built-in Commands** - /fix, /review, /build, /test, /analyze, /refactor, /ship, /optimize, /secure, /docgen, /explain, /migrate
-- **Extensible** - Custom skills, commands, agents via markdown files
+- **Any model, online or local.** Anthropic, OpenAI, Z.ai (GLM), Google Gemini, Ollama / LM Studio / llama.cpp / vLLM, or any OpenAI-compatible endpoint. Models are `provider/model` strings.
+- **Model router** — rule-based selection with **fallback chains** and retry/backoff (`config.router`). A bad model or a dead provider transparently falls through to the next.
+- **Enforced permissions + checkpoints.** Three modes — `yolo` / `auto` / `gated` — honor a per-tool, path-glob config. Every file edit is snapshotted, so **`undo`** reverts the agent's last change.
+- **MCP, both directions.** Connect to MCP servers (stdio + Streamable HTTP) and use their tools inline (`mcp__server__tool`); or run Sentinel itself as an MCP server.
+- **Block-based GUI** with streaming, **inline syntax-highlighted diffs**, an inline approve/deny permission prompt, a ⌘K command palette (commands · models · agents · themes · MCP tools), autocomplete (`/` `@` `mcp`), sessions/tabs, and a live model-router / cost panel.
 
-## Quick Start
+<p align="center">
+  <img src="assets/screenshot-palette.png" width="430" alt="Command palette">
+  &nbsp;
+  <img src="assets/screenshot-welcome.png" width="430" alt="Welcome">
+</p>
+
+## Quick start
 
 ```bash
-# Clone and install
-git clone https://github.com/brandt/sentinel-cli.git
+git clone https://github.com/<you>/sentinel-cli.git
 cd sentinel-cli
 npm install
-
-# Build
 npm run build
 
-# Run the setup wizard
-node dist/cli.js setup
+# configure a provider (any of these)
+set ZAI_API_KEY=...        # or ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+#   ...or Ollama running locally needs no key
 
-# Or install globally
-npm link
-sentinel
+# 1) Desktop GUI
+cd gui && npm install && npm run build && cd ..
+node dist/cli.js gui
+
+# 2) Headless agent (executes tools)
+node dist/cli.js run "fix the failing test in src/foo.ts"
+node dist/cli.js run --json --permission-mode gated "refactor X"   # gated: prompts before mutations
+
+# 3) MCP server (point Claude Desktop at it)
+node dist/cli.js mcp-serve
 ```
 
-## First Run
-
-```bash
-# Start the TUI
-sentinel
-
-# Connect your AI provider
-/connect
-
-# Choose Z.ai (recommended), Anthropic, OpenAI, Ollama, or custom
-# Paste your API key
-# Start coding!
-```
+Or link it globally and use `sentinel` directly: `npm link`.
 
 ## Providers
 
-| Provider | Models | API Key |
-|----------|--------|---------|
-| **Z.ai** (Recommended) | GLM-5.1, GLM-4.7, GLM-4-Flash, CodeGeeX | `ZAI_API_KEY` |
-| **Anthropic** | Claude Sonnet, Claude Haiku | `ANTHROPIC_API_KEY` |
-| **OpenAI** | GPT-4o, GPT-4o Mini | `OPENAI_API_KEY` |
-| **Ollama** | Llama 3, Code Llama, Mistral, DeepSeek | Free (local) |
-| **Groq** | Llama 3.1 70B, Mixtral | `GROQ_API_KEY` |
-| **OpenRouter** | 100+ models | `OPENROUTER_API_KEY` |
-| **Custom** | Any OpenAI-compatible | Provider-specific |
+| Provider | Example model | Key |
+|----------|---------------|-----|
+| Z.ai (GLM) | `zai/glm-4.6`, `zai/glm-5.1` | `ZAI_API_KEY` |
+| Anthropic | `anthropic/claude-sonnet` | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai/gpt-4o` | `OPENAI_API_KEY` |
+| Google | `gemini/gemini-2.0-flash` | `GEMINI_API_KEY` |
+| Ollama (local) | `ollama/llama3.1` | — |
+| Any OpenAI-compatible | `custom/<model>` | provider-specific |
 
-## Commands
+Add a `router` block to `sentinel.json` to auto-select and fall back:
 
-### Core
-- `/help` - Show all commands
-- `/connect` - Set up AI provider
-- `/model <name>` - Switch model (e.g. `/model zai/glm-4.6`)
-- `/agent <name>` - Switch agent (`code`, `gsd`, `ask`, `plan`, `debug`)
-- `/theme <name>` - Switch theme
-- `/providers` - Check API status
-- `/cost` - Session cost breakdown
-- `/compact` - Compress context to save tokens
-- `/context` - Show context stats
+```json
+{
+  "router": {
+    "default": "zai/glm-4.6",
+    "rules": [{ "match": { "agent": "gsd" }, "use": "anthropic/claude-sonnet", "fallbacks": ["zai/glm-4.6"] }],
+    "retry": { "maxAttempts": 2, "baseDelayMs": 200, "maxDelayMs": 2000, "retryOn": [429, 500, 502, 503, 504] }
+  }
+}
+```
 
-### Super Tools
-- `/fix <target>` - Fix lint errors and bugs
-- `/review <target>` - Code review
-- `/build <target>` - Build and verify
-- `/test <target>` - Generate and run tests
-- `/analyze <target>` - Analyze code structure
-- `/refactor <target>` - Refactor for clarity
-- `/ship <target>` - Build, test, prepare release
-- `/optimize <target>` - Performance optimization
-- `/secure <target>` - Security audit
-- `/docgen <target>` - Generate documentation
-- `/explain <target>` - Explain code in detail
-- `/migrate <target>` - Framework migration
+## MCP
 
-### Keyboard Shortcuts
-- `Ctrl+Q` - Quit
-- `Ctrl+C` - Cancel request
-- `Ctrl+T` - Cycle theme
-- `Ctrl+A` - Cycle agent
-- `Ctrl+M` - Cycle model
+**Use other servers** — add them to `sentinel.json` under `mcp`; their tools appear as `mcp__<server>__<tool>`:
 
-## Agents
+```json
+{ "mcp": { "everything": { "type": "local", "command": ["npx", "-y", "@modelcontextprotocol/server-everything"], "enabled": true } } }
+```
 
-| Agent | Mode | Description |
-|-------|------|-------------|
-| `code` | Primary | Expert coding with best practices |
-| `gsd` | Primary | Get Shit Done - fast, auto-approve |
-| `ask` | Primary | Questions and explanations |
-| `plan` | Primary | Architecture and planning |
-| `debug` | Primary | Bug analysis and fixing |
+`sentinel mcp` lists discovered tools. **Be a server** — `sentinel mcp-serve` exposes Sentinel's built-in tools over stdio to any MCP client.
 
-## Tools
-
-| Tool | Description |
-|------|-------------|
-| `file` | Read, write, list, delete, mkdir |
-| `bash` | Execute shell commands |
-| `search` | Grep and glob code search |
-| `git` | Git operations |
-| `web` | Fetch URLs and APIs |
-| `patch` | Smart find-and-replace |
-
-## Themes
-
-14 built-in themes: `cyberpunk`, `tron`, `matrix`, `neon`, `dark`, `blood`, `terminal`, `ocean`, `midnight`, `sunset`, `forest`, `paper`, `mono`, `light`
-
-## Development
+## Permissions & undo
 
 ```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Watch mode
-npm run dev
-
-# Run tests
-npm test
-
-# Type check
-npx tsc --noEmit
-
-# Lint
-npm run lint
+sentinel run --permission-mode gated "…"   # prompt before bash / edits
+sentinel run --permission-mode gated --yes "…"  # auto-approve (headless)
+sentinel checkpoints     # list file snapshots the agent made
+sentinel undo            # revert the last agent file change
 ```
+In the GUI, switch modes from the palette or the `mode` pill; gated edits show an inline **Allow / Deny** with a diff.
 
 ## Architecture
 
 ```
-src/
-  cli.ts              Entry point
-  tui/
-    app.ts            Blessed TUI with streaming
-    connect.ts        /connect onboarding wizard
-    themes/           14 theme variants + engine
-  ai/
-    provider.ts       Provider manager
-    providers/
-      anthropic.ts    Claude (native API + tools)
-      openai.ts       GPT-4o (OpenAI API + tools)
-      zai.ts          Z.ai/Zhipu GLM (Coding Plan)
-      custom.ts       Any OpenAI-compatible
-      openai-compat.ts Shared helpers
-    context.ts        Context manager with auto-compaction
-  tools/
-    file.ts           File operations
-    bash.ts           Shell execution (PowerShell/bash)
-    search.ts         Code search (grep/glob)
-    git.ts            Git operations
-    web.ts            URL fetcher
-    patch.ts          Smart find-and-replace
-    tool-executor.ts  Tool calling bridge
-  skills/builtin/     Markdown skill definitions
-  commands/builtin/   Markdown command templates
-  agents/builtin/     Markdown agent definitions
-  core/
-    config.ts         Config manager
-    state.ts          Reactive state
-    events.ts         Event bus
+            ┌──────────── core engine (UI-agnostic) ───────────┐
+GUI  ─ws─►  │ AgentRunner · providers + router · permissions   │
+CLI  ──────►│ + checkpoints · MCP client/server · sessions     │
+MCP server ►│ · tools (file/bash/search/git/web/patch)          │
+            └──────────────────────────────────────────────────┘
+```
+The GUI talks to `sentinel serve` (a local-only WebSocket on `127.0.0.1` with a per-launch token). One engine, three faces. See [`ROADMAP-10X.md`](ROADMAP-10X.md) and [`CLAUDE.md`](CLAUDE.md).
+
+## Develop
+
+```bash
+npm run build      # tsup -> dist (+ copies builtins into dist/builtin)
+npm run lint       # tsc --noEmit
+npm test           # vitest (81 tests)
+npm run dev        # tsup --watch
+# GUI: cd gui && npm run dev   (then open with ?port=&token= from `sentinel serve`)
 ```
 
-## Z.ai / Zhipu GLM Setup
-
-Z.ai is the recommended provider for best value:
-
-1. Get an API key from [open.bigmodel.cn](https://open.bigmodel.cn)
-2. Optionally subscribe to [Coding Plan](https://bigmodel.cn/coding-plan) for higher limits
-3. Run `/connect` in Sentinel and choose option 1
-4. Or set `ZAI_API_KEY` environment variable
-
-Models:
-- `glm-5.1` - Most capable (3x quota in peak hours)
-- `glm-4.6` - Recommended for coding
-- `glm-4.5-air` - Fast and cheap
-- `codegeex-4` - Specialized for code
+> **Desktop‑native (Tauri):** `sentinel gui` renders the real design in your browser today. A native Tauri shell (window chrome + sidecar packaging) is the next packaging step — the engine bridge is already shell-agnostic.
 
 ## License
 
 MIT
-
----
-
-<p align="center">
-  Built with TypeScript, Blessed, and <span style="color:#00D4FF">cyberpunk</span> dreams.
-</p>

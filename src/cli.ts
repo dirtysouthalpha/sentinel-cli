@@ -29,6 +29,8 @@ import { createGuardedExecutor } from "./core/guarded-executor.js";
 import { MCPManager } from "./mcp/manager.js";
 import { createMcpAwareExecutor } from "./mcp/mcp-executor.js";
 import { runMcpServer } from "./mcp/server.js";
+import { runServe } from "./server/serve.js";
+import { launchGui } from "./server/gui-launcher.js";
 import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
@@ -383,6 +385,40 @@ program
       console.error(`MCP server failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exitCode = 1;
     }
+  });
+
+program
+  .command("serve")
+  .description("Run the engine as a local WebSocket server for the desktop GUI")
+  .option("--project <path>", "Project root directory")
+  .action(async (opts, command) => {
+    // stdout carries only the {port,token} handshake; silence all logging first.
+    setLogLevel("silent");
+    const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
+    const config = getConfigManager(projectRoot).load();
+    providerManager.initializeFromConfig(config.provider as any);
+    toolManager.initialize(projectRoot);
+    loadRegistries(getInstallRoot(), config.skills.paths);
+    try {
+      await runServe({ projectRoot });
+    } catch (err) {
+      console.error(`Serve failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("gui")
+  .description("Launch the Sentinel desktop GUI (engine + glassmorphism web UI)")
+  .option("--project <path>", "Project root directory")
+  .action(async (opts, command) => {
+    setLogLevel("warn");
+    const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
+    const config = getConfigManager(projectRoot).load();
+    providerManager.initializeFromConfig(config.provider as any);
+    toolManager.initialize(projectRoot);
+    loadRegistries(getInstallRoot(), config.skills.paths);
+    await launchGui({ projectRoot, installRoot: getInstallRoot() });
   });
 
 async function runMain(options: {

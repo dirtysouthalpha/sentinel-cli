@@ -12,3 +12,10 @@ coverage/
 # Local test workspace with credentials — never commit
 playground/
 start-sentinel.cmd
+
+# dev/scratch
+.playwright-mcp/
+design-ref.png
+gui-[0-9].png
+gui/dist/
+gui/src-tauri/target/

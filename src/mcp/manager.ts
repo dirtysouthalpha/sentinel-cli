@@ -85,6 +85,10 @@ export class MCPManager {
       return new StdioClientTransport({
         command: cfg.command[0],
         args: cfg.command.slice(1),
+        // Discard the child server's stderr — otherwise its diagnostics (e.g.
+        // "Starting default (STDIO) server…") leak onto whatever owns the
+        // terminal/stdout (the TUI/GUI), corrupting the display.
+        stderr: "ignore",
         ...(cfg.env ? { env: cfg.env } : {}),
       });
     }
