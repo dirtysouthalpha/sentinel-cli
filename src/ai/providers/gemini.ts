@@ -7,6 +7,7 @@ import {
   StreamChunk,
   ToolCall,
   ProviderConfig,
+  contentToText,
 } from "../types.js";
 import { ProviderError } from "../errors.js";
 import { createLogger } from "../../utils/logger.js";
@@ -117,7 +118,8 @@ export class GeminiProvider implements AIProvider {
 
     for (const m of messages) {
       if (m.role === "system") {
-        if (m.content) systemTexts.push(m.content);
+        const sys = contentToText(m.content);
+        if (sys) systemTexts.push(sys);
         continue;
       }
 
@@ -140,7 +142,8 @@ export class GeminiProvider implements AIProvider {
 
       if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
         const parts: GeminiPart[] = [];
-        if (m.content) parts.push({ text: m.content });
+        const assistantText = contentToText(m.content);
+        if (assistantText) parts.push({ text: assistantText });
         for (const tc of m.toolCalls) {
           let args: Record<string, unknown> = {};
           try {
@@ -156,7 +159,7 @@ export class GeminiProvider implements AIProvider {
 
       contents.push({
         role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
+        parts: [{ text: contentToText(m.content) }],
       });
     }
 

@@ -1,9 +1,30 @@
+/**
+ * A single piece of message content. Plain string content stays valid everywhere;
+ * an array of ContentPart enables OpenAI-style multimodal (text + image) messages.
+ */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | ContentPart[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
   name?: string;
+}
+
+/**
+ * Flatten message content to plain text. A string passes through unchanged; a
+ * ContentPart[] is reduced to its concatenated text parts (images are dropped).
+ * Used by legacy code paths that only understand string content.
+ */
+export function contentToText(content: string | ContentPart[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("");
 }
 
 export interface ToolCall {

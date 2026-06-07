@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { AIProvider, ChatMessage, ToolCall, ToolDef } from "../ai/types.js";
+import { AIProvider, ChatMessage, ToolCall, ToolDef, contentToText } from "../ai/types.js";
 
 /**
  * Minimal interface the runner needs from a context manager. The real
@@ -168,10 +168,11 @@ export class AgentRunner extends EventEmitter {
 
           this.emit("toolStart", tc.name, tc.arguments);
           const resultMsg = await this.executeTool(tc);
-          const ok = !resultMsg.content.startsWith("ERROR");
-          const firstLine = resultMsg.content.split("\n")[0].slice(0, 200);
-          this.emit("toolResult", tc.name, ok, firstLine, resultMsg.content);
-          this.context.addMessage("tool", `[Tool: ${resultMsg.name}]\n${resultMsg.content}`, {
+          const resultText = contentToText(resultMsg.content);
+          const ok = !resultText.startsWith("ERROR");
+          const firstLine = resultText.split("\n")[0].slice(0, 200);
+          this.emit("toolResult", tc.name, ok, firstLine, resultText);
+          this.context.addMessage("tool", `[Tool: ${resultMsg.name}]\n${resultText}`, {
             toolCallId: tc.id,
             name: tc.name,
           });

@@ -31,6 +31,8 @@ import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engi
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
 import { buildIndex, search as searchRepoIndex, RepoIndex } from "../core/repo-index.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
+import { loadAttachment } from "../core/attachments.js";
+import { buildVisionMessage } from "../core/vision.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
 import { sessionManager, Session } from "../core/session-manager.js";
@@ -511,6 +513,7 @@ export class TUIApp {
       ["/pipeline run <f.json>", "Run a deterministic JSON pipeline of agent steps"],
       ["/ship <task>", "Autonomous GSD: plan → implement → test → review → fix"],
       ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
+      ["/describe <img> [q]", "Vision: describe a local image (one-shot)"],
       ["/checkpoints", "List file checkpoints"],
       ["/undo", "Undo the last agent file change"],
       ["/cost", "Session cost breakdown"],
@@ -1062,6 +1065,46 @@ export class TUIApp {
         this.addSystem(res.content || "(no answer)");
       } catch (err) {
         this.addError(`Sentinel Prime error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    if (parsed.name === "describe") {
+      const imagePath = parsed.args[0];
+      if (!imagePath) {
+        this.addSystem('Usage: /describe <imagePath> [prompt]');
+        return;
+      }
+      const prompt = parsed.args.slice(1).join(" ").trim() || "Describe this image in detail.";
+
+      let att;
+      try {
+        att = loadAttachment(resolve(this.projectRoot, imagePath));
+      } catch (err) {
+        this.addError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+
+      const [providerName, ...modelParts] = state.get("currentModel").split("/");
+      const modelName = modelParts.join("/") || undefined;
+      const provider = providerManager.getProvider(providerName);
+      if (!provider) {
+        this.addError(`No provider "${providerName}". Try /providers`);
+        return;
+      }
+      if (!provider.isAvailable()) {
+        this.addError(`No API key for "${providerName}". Type /connect`);
+        return;
+      }
+
+      this.addSystem(`Describing ${att.name} with ${state.get("currentModel")}...`);
+      try {
+        const res = await provider.chat([buildVisionMessage(prompt, [att])], {
+          model: modelName,
+        });
+        this.addSystem(res.content || "(no description)");
+      } catch (err) {
+        this.addError(`Vision error: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
