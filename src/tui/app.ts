@@ -116,6 +116,12 @@ export class TUIApp {
   private historyIndex = -1; // -1 = editing a fresh line (not browsing history)
   private historyDraft = ""; // stashed in-progress line while browsing history
 
+  // Interactive slash-command menu (opencode-style filter-as-you-type).
+  private slashBox!: blessed.Widgets.BoxElement;
+  private slashActive = false;
+  private slashItems: { command: string; description: string }[] = [];
+  private slashIndex = 0;
+
   private transcript = "";
   private stream = "";
   private streamHeaderShown = false;
@@ -212,6 +218,23 @@ export class TUIApp {
       style: { bg: c.bgSecondary, fg: c.textSecondary },
     });
 
+    // Interactive slash-command menu: a hidden overlay just above the input.
+    this.slashBox = blessed.box({
+      parent: this.screen,
+      left: 1,
+      width: "70%",
+      bottom: 4,
+      height: 3,
+      hidden: true,
+      tags: true,
+      border: { type: "line" },
+      style: {
+        bg: c.bgSecondary,
+        fg: c.textPrimary,
+        border: { fg: c.accent || c.cyan },
+      },
+    });
+
     this.printWelcome();
     this.setupRawInput();
     this.setupKeys();
@@ -229,7 +252,8 @@ export class TUIApp {
   }
 
   private esc(s: string): string {
-    return s.replace(/\{/g, "{open}").replace(/\}/g, "{close}");
+    // Single pass — a two-step replace corrupts "{" into "{open{close}".
+    return s.replace(/[{}]/g, (ch) => (ch === "{" ? "{open}" : "{close}"));
   }
 
   private render(): void {
@@ -463,7 +487,8 @@ export class TUIApp {
           i = j + 1;
           continue;
         }
-        i += 1; // lone ESC — ignore
+        if (this.slashActive) this.hideSlash(); // lone ESC closes the slash menu
+        i += 1;
         continue;
       }
 
@@ -480,13 +505,15 @@ export class TUIApp {
       }
 
       if (code === 13 || code === 10) {
-        this.submit();
+        if (this.slashActive) this.acceptSlash(); // Enter selects from the menu
+        else this.submit();
       } else if (code === 127 || code === 8) {
         // backspace: delete char before the caret
         if (this.inputCursor > 0) {
           this.inputBuffer = this.inputBuffer.slice(0, this.inputCursor - 1) + this.inputBuffer.slice(this.inputCursor);
           this.inputCursor -= 1;
           this.renderInput();
+          this.maybeSlash();
         }
       } else if (code === 3) {
         // Ctrl+C: cancel a run, else clear the line
@@ -498,9 +525,11 @@ export class TUIApp {
         } else {
           this.setInputLine("", 0);
         }
+        this.hideSlash();
         this.renderInput();
       } else if (code === 9) {
-        this.completeInput(); // Tab → slash-command completion
+        if (this.slashActive) this.acceptSlash(); // Tab selects from the menu
+        else this.completeInput();
       } else if (code === 1) {
         this.inputCursor = 0; // Ctrl+A → start of line
         this.renderInput();
@@ -509,12 +538,14 @@ export class TUIApp {
         this.renderInput();
       } else if (code === 21) {
         this.setInputLine("", 0); // Ctrl+U → clear line
+        this.hideSlash();
         this.renderInput();
       } else if (code >= 32) {
         // printable: insert at caret (handles pasted runs char-by-char)
         this.inputBuffer = this.inputBuffer.slice(0, this.inputCursor) + ch + this.inputBuffer.slice(this.inputCursor);
         this.inputCursor += 1;
         this.renderInput();
+        this.maybeSlash();
       }
       i += 1;
     }
@@ -525,11 +556,13 @@ export class TUIApp {
     if (this.pendingPermission) return;
     const final = seq.slice(-1);
     switch (final) {
-      case "A": // up → previous history
-        this.recallHistory(-1);
+      case "A": // up → menu nav when open, else history
+        if (this.slashActive) this.moveSlash(-1);
+        else this.recallHistory(-1);
         break;
-      case "B": // down → next history
-        this.recallHistory(1);
+      case "B": // down → menu nav when open, else history
+        if (this.slashActive) this.moveSlash(1);
+        else this.recallHistory(1);
         break;
       case "C": // right
         if (this.inputCursor < this.inputBuffer.length) {
@@ -590,6 +623,57 @@ export class TUIApp {
       if (lcp.length > partial.length) this.setInputLine(`/${lcp}`, lcp.length + 1);
       this.addSystem("  " + matches.map((m) => `/${m}`).join("   "));
     }
+    this.renderInput();
+  }
+
+  /** Show/refresh or hide the slash menu based on the current buffer. */
+  private maybeSlash(): void {
+    if (this.inputBuffer.startsWith("/") && !this.inputBuffer.includes(" ")) this.updateSlash();
+    else this.hideSlash();
+  }
+
+  private updateSlash(): void {
+    const c = themeEngine.getBlessedColors();
+    this.slashItems = searchCatalog(this.inputBuffer.slice(1)).slice(0, 8);
+    if (this.slashItems.length === 0) {
+      this.hideSlash();
+      return;
+    }
+    this.slashIndex = this.slashActive ? Math.min(this.slashIndex, this.slashItems.length - 1) : 0;
+    const lines = this.slashItems.map((it, i) => {
+      const name = it.command.padEnd(14);
+      return i === this.slashIndex
+        ? `{${c.accent || c.cyan}-fg}{bold}❯ ${name}{/} {${c.textSecondary}-fg}${this.esc(it.description)}{/}`
+        : `  {${c.textPrimary}-fg}${name}{/} {${c.textTertiary}-fg}${this.esc(it.description)}{/}`;
+    });
+    this.slashBox.height = this.slashItems.length + 2;
+    this.slashBox.setContent(lines.join("\n"));
+    this.slashBox.show();
+    this.slashBox.setFront();
+    this.slashActive = true;
+    this.screen.render();
+  }
+
+  private hideSlash(): void {
+    if (!this.slashActive) return;
+    this.slashActive = false;
+    this.slashBox.hide();
+    this.screen.render();
+  }
+
+  private moveSlash(dir: number): void {
+    if (!this.slashActive || this.slashItems.length === 0) return;
+    this.slashIndex = (this.slashIndex + dir + this.slashItems.length) % this.slashItems.length;
+    this.updateSlash();
+  }
+
+  /** Fill the input with the highlighted command (ready for args / Enter to run). */
+  private acceptSlash(): void {
+    const it = this.slashItems[this.slashIndex];
+    this.hideSlash();
+    if (!it) return;
+    const cmd = it.command.split(/\s/)[0];
+    this.setInputLine(`${cmd} `, cmd.length + 1);
     this.renderInput();
   }
 
