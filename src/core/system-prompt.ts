@@ -16,6 +16,7 @@ export function buildSystemPrompt(agentName: string, projectRoot: string): strin
 
 Mode: ${agentName}
 Project: ${projectRoot}
+Platform: ${process.platform} — the bash tool runs ${process.platform === "win32" ? "PowerShell; use PowerShell syntax (Get-ChildItem, not cmd dir/find)" : "bash"}.
 
 YOLO MODE - Execute everything automatically:
 - READ files before editing
