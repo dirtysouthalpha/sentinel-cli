@@ -15,9 +15,34 @@ export interface RouterRule {
   fallbacks?: string[];
 }
 
+/**
+ * A named routing role (omp-inspired). Maps a logical task slot to a concrete
+ * "provider/model" target plus optional ordered fallbacks. Roles are resolved
+ * independently of the rule engine via {@link resolveRole}.
+ */
+export interface RouterRole {
+  /** Primary "provider/model" target for this role. */
+  model: string;
+  /** Ordered fallback "provider/model" targets, tried after `model`. */
+  fallback?: string[];
+}
+
+/**
+ * Well-known role names. `string` is kept in the union so callers may define
+ * custom roles without a type error, while still getting autocomplete for the
+ * common ones.
+ */
+export type RouterRoleName = "default" | "plan" | "smol" | "commit" | (string & {});
+
 export interface RouterConfig {
   default: string;
   rules?: RouterRule[];
+  /**
+   * Optional named roles. A caller resolves a role to an ordered candidate
+   * chain via {@link resolveRole}. Absent roles leave all existing behavior
+   * unchanged.
+   */
+  roles?: Record<string, RouterRole>;
   retry?: {
     maxAttempts: number;
     baseDelayMs: number;
@@ -84,6 +109,41 @@ export function route(
   // Nothing in the rule chain is available — fall back to the default only if
   // it is actually runnable; otherwise an empty chain (caller raises a clear error).
   return isAvailable(cfg.default) ? [cfg.default] : [];
+}
+
+/**
+ * Resolve a named role to an ordered list of candidate "provider/model"
+ * targets, most-preferred first. The chain is:
+ *
+ *   [role.model, ...role.fallback, cfg.default]
+ *
+ * de-duplicated (preserving first occurrence). `cfg.default` is always appended
+ * as a final backstop so a role can never resolve to an empty chain.
+ *
+ * If the role is not configured (or `cfg.roles` is absent entirely), this falls
+ * back to the existing default behavior and returns `[cfg.default]`. This is a
+ * pure function — it performs no availability filtering; pass the result through
+ * the same machinery you'd use for a manual chain if you need that.
+ *
+ * @example
+ *   resolveRole(config.router, "plan"); // -> ["openai/o3", "anthropic/claude", <default>]
+ */
+export function resolveRole(cfg: RouterConfig, role: RouterRoleName): string[] {
+  const entry = cfg.roles?.[role];
+
+  const chain = entry
+    ? [entry.model, ...(entry.fallback ?? []), cfg.default]
+    : [cfg.default];
+
+  // De-duplicate while preserving order (first occurrence wins).
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const target of chain) {
+    if (!target || seen.has(target)) continue;
+    seen.add(target);
+    result.push(target);
+  }
+  return result;
 }
 
 function defaultSleep(ms: number): Promise<void> {
