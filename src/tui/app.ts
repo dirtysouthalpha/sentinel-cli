@@ -119,6 +119,10 @@ export class TUIApp {
   private repoIndex?: RepoIndex;
 
   private inputBuffer = "";
+  private inputCursor = 0; // caret position within inputBuffer
+  private inputHistory: string[] = [];
+  private historyIndex = -1; // -1 = editing a fresh line (not browsing history)
+  private historyDraft = ""; // stashed in-progress line while browsing history
 
   private transcript = "";
   private stream = "";
@@ -256,7 +260,12 @@ export class TUIApp {
         `{${c.cyan}-fg}❯{/} {${c.textTertiary}-fg}Message Sentinel, or / for commands{/}`
       );
     } else {
-      this.input.setContent(`{${c.cyan}-fg}❯{/} ${this.esc(this.inputBuffer)}{inverse} {/inverse}`);
+      // Render the caret as an inverse cell at its real position within the line.
+      const cur = Math.max(0, Math.min(this.inputCursor, this.inputBuffer.length));
+      const before = this.esc(this.inputBuffer.slice(0, cur));
+      const atChar = cur < this.inputBuffer.length ? this.esc(this.inputBuffer[cur]) : " ";
+      const after = cur < this.inputBuffer.length ? this.esc(this.inputBuffer.slice(cur + 1)) : "";
+      this.input.setContent(`{${c.cyan}-fg}❯{/} ${before}{inverse}${atChar}{/inverse}${after}`);
     }
     this.screen.render();
   }
@@ -434,47 +443,175 @@ export class TUIApp {
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
 
-    process.stdin.on("data", (chunk: string) => {
-      for (const ch of chunk) {
-        const code = ch.charCodeAt(0);
+    process.stdin.on("data", (chunk: string) => this.onInputChunk(chunk));
+  }
 
-        if (this.pendingPermission) {
-          const allow = ch === "y" || ch === "Y";
-          const resolve = this.pendingPermission;
-          this.pendingPermission = undefined;
-          this.addSystem(allow ? "Allowed." : "Denied.");
-          resolve(allow);
-          this.renderInput();
+  /**
+   * Parse a raw stdin chunk into key actions. Handles ESC/CSI sequences (arrows,
+   * Home/End, Delete) as cursor/history actions instead of inserting their bytes,
+   * plus inline line editing (insert/delete at the caret). This replaces the old
+   * byte-by-byte loop that leaked `[A`/`[D` into the buffer.
+   */
+  private onInputChunk(chunk: string): void {
+    let i = 0;
+    while (i < chunk.length) {
+      const ch = chunk[i];
+      const code = ch.charCodeAt(0);
+
+      // ---- escape / CSI / SS3 sequences -------------------------------------
+      if (code === 27) {
+        const next = chunk[i + 1];
+        if (next === "[" || next === "O") {
+          // Consume until the final byte (0x40–0x7e).
+          let j = i + 2;
+          while (j < chunk.length && !(chunk.charCodeAt(j) >= 0x40 && chunk.charCodeAt(j) <= 0x7e)) j++;
+          const seq = chunk.slice(i + 2, j + 1); // params + final
+          this.handleCsi(seq);
+          i = j + 1;
           continue;
         }
+        i += 1; // lone ESC — ignore
+        continue;
+      }
 
-        if (code === 13) {
-          this.submit();
-        } else if (code === 127 || code === 8) {
-          this.inputBuffer = this.inputBuffer.slice(0, -1);
-          this.renderInput();
-        } else if (code === 3) {
-          if (this.isProcessing) {
-            this.ac?.abort();
-            this.isProcessing = false;
-            state.set("isProcessing", false);
-            this.addSystem("Cancelled.");
-            this.renderInput();
-          }
-        } else if (code >= 32 && code !== 127) {
-          this.inputBuffer += ch;
+      // ---- permission prompt swallows the next keypress ----------------------
+      if (this.pendingPermission) {
+        const allow = ch === "y" || ch === "Y";
+        const resolve = this.pendingPermission;
+        this.pendingPermission = undefined;
+        this.addSystem(allow ? "Allowed." : "Denied.");
+        resolve(allow);
+        this.renderInput();
+        i += 1;
+        continue;
+      }
+
+      if (code === 13 || code === 10) {
+        this.submit();
+      } else if (code === 127 || code === 8) {
+        // backspace: delete char before the caret
+        if (this.inputCursor > 0) {
+          this.inputBuffer = this.inputBuffer.slice(0, this.inputCursor - 1) + this.inputBuffer.slice(this.inputCursor);
+          this.inputCursor -= 1;
           this.renderInput();
         }
+      } else if (code === 3) {
+        // Ctrl+C: cancel a run, else clear the line
+        if (this.isProcessing) {
+          this.ac?.abort();
+          this.isProcessing = false;
+          state.set("isProcessing", false);
+          this.addSystem("Cancelled.");
+        } else {
+          this.setInputLine("", 0);
+        }
+        this.renderInput();
+      } else if (code === 1) {
+        this.inputCursor = 0; // Ctrl+A → start of line
+        this.renderInput();
+      } else if (code === 5) {
+        this.inputCursor = this.inputBuffer.length; // Ctrl+E → end of line
+        this.renderInput();
+      } else if (code === 21) {
+        this.setInputLine("", 0); // Ctrl+U → clear line
+        this.renderInput();
+      } else if (code >= 32) {
+        // printable: insert at caret (handles pasted runs char-by-char)
+        this.inputBuffer = this.inputBuffer.slice(0, this.inputCursor) + ch + this.inputBuffer.slice(this.inputCursor);
+        this.inputCursor += 1;
+        this.renderInput();
       }
-    });
+      i += 1;
+    }
+  }
+
+  /** Handle a CSI/SS3 sequence body (params + final byte), e.g. "A", "1;5C", "3~". */
+  private handleCsi(seq: string): void {
+    if (this.pendingPermission) return;
+    const final = seq.slice(-1);
+    switch (final) {
+      case "A": // up → previous history
+        this.recallHistory(-1);
+        break;
+      case "B": // down → next history
+        this.recallHistory(1);
+        break;
+      case "C": // right
+        if (this.inputCursor < this.inputBuffer.length) {
+          this.inputCursor += 1;
+          this.renderInput();
+        }
+        break;
+      case "D": // left
+        if (this.inputCursor > 0) {
+          this.inputCursor -= 1;
+          this.renderInput();
+        }
+        break;
+      case "H": // Home
+        this.inputCursor = 0;
+        this.renderInput();
+        break;
+      case "F": // End
+        this.inputCursor = this.inputBuffer.length;
+        this.renderInput();
+        break;
+      case "~": // Home(1) / End(4) / Delete(3) variants
+        if (seq.startsWith("1") || seq.startsWith("7")) {
+          this.inputCursor = 0;
+          this.renderInput();
+        } else if (seq.startsWith("4") || seq.startsWith("8")) {
+          this.inputCursor = this.inputBuffer.length;
+          this.renderInput();
+        } else if (seq.startsWith("3")) {
+          if (this.inputCursor < this.inputBuffer.length) {
+            this.inputBuffer = this.inputBuffer.slice(0, this.inputCursor) + this.inputBuffer.slice(this.inputCursor + 1);
+            this.renderInput();
+          }
+        }
+        break;
+      default:
+        break; // ignore unknown sequences (don't insert them)
+    }
+  }
+
+  private setInputLine(text: string, cursor: number): void {
+    this.inputBuffer = text;
+    this.inputCursor = Math.max(0, Math.min(cursor, text.length));
+  }
+
+  /** Step through input history (dir -1 = older, +1 = newer). */
+  private recallHistory(dir: number): void {
+    if (this.inputHistory.length === 0) return;
+    if (this.historyIndex === -1) {
+      if (dir > 0) return; // already on the fresh line
+      this.historyDraft = this.inputBuffer;
+      this.historyIndex = this.inputHistory.length - 1;
+    } else {
+      this.historyIndex += dir;
+    }
+    if (this.historyIndex >= this.inputHistory.length) {
+      this.historyIndex = -1;
+      this.setInputLine(this.historyDraft, this.historyDraft.length);
+    } else if (this.historyIndex < 0) {
+      this.historyIndex = 0;
+      this.setInputLine(this.inputHistory[0], this.inputHistory[0].length);
+    } else {
+      const v = this.inputHistory[this.historyIndex];
+      this.setInputLine(v, v.length);
+    }
+    this.renderInput();
   }
 
   private submit(): void {
     if (this.isProcessing) return;
     const msg = this.inputBuffer.trim();
-    this.inputBuffer = "";
+    this.setInputLine("", 0);
+    this.historyIndex = -1;
+    this.historyDraft = "";
     this.renderInput();
     if (!msg) return;
+    if (this.inputHistory[this.inputHistory.length - 1] !== msg) this.inputHistory.push(msg);
     this.addUser(msg);
     void this.handleInput(msg);
   }
