@@ -272,7 +272,11 @@ export class TUIApp {
 
   private addUser(text: string): void {
     const c = themeEngine.getBlessedColors();
-    this.push(`\n{${c.cyan}-fg}{bold}You{/}\n${this.esc(text)}\n`);
+    const body = this.esc(text)
+      .split("\n")
+      .map((l) => `{${c.cyan}-fg}▌{/} ${l}`)
+      .join("\n");
+    this.push(`\n{${c.cyan}-fg}▌ {bold}You{/}\n${body}\n`);
   }
 
   private startAssistant(): void {
@@ -283,7 +287,7 @@ export class TUIApp {
   private streamAssistant(token: string): void {
     const c = themeEngine.getBlessedColors();
     if (!this.streamHeaderShown) {
-      this.transcript += `\n{${c.lime}-fg}{bold}Sentinel{/}\n`;
+      this.transcript += `\n{${c.lime}-fg}▌ {bold}Sentinel{/}\n`;
       this.streamHeaderShown = true;
     }
     this.stream += this.esc(token);
@@ -301,10 +305,13 @@ export class TUIApp {
 
   private addTool(name: string, args: string, ok: boolean, firstLine: string): void {
     const c = themeEngine.getBlessedColors();
-    const mark = ok ? `{${c.lime}-fg}ok{/}` : `{${c.error}-fg}err{/}`;
+    const mark = ok ? `{${c.lime}-fg}✓{/}` : `{${c.error}-fg}✗{/}`;
+    const a = this.esc(args).replace(/\s+/g, " ").slice(0, 60);
+    const fl = this.esc(firstLine).slice(0, 80);
     this.push(
-      `{${c.amber}-fg}» ${name}{/} {${c.textTertiary}-fg}${this.esc(args)}{/}\n` +
-        `  ${mark} {${c.textTertiary}-fg}${this.esc(firstLine)}{/}\n`
+      `  ${mark} {${c.amber}-fg}${name}{/} {${c.textTertiary}-fg}${a}{/}` +
+        (fl ? `  {${c.textTertiary}-fg}${fl}{/}` : "") +
+        "\n"
     );
   }
 
