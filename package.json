@@ -45,7 +45,8 @@
   },
   "files": [
     "dist",
-    "config"
+    "config",
+    "gui/dist"
   ],
   "keywords": [
     "cli",
