@@ -61,6 +61,7 @@ let pendingPerm: { tool: string; action?: string; path?: string; reason: string 
 let pendingToolArgs = "";
 let todos: TodoItem[] = [];
 let cfg: ConfigView | null = null;
+let settingsTab: "providers" | "models" | "mcp" = "providers";
 let round = 0;
 // connection status drives the reconnect banner
 type ConnStatus = "connecting" | "open" | "reconnecting" | "closed" | "noengine";
@@ -94,6 +95,7 @@ function shell() {
         <div class="pill" id="palette-btn">⌘K  palette</div>
         <div class="pill" id="theme-btn">theme</div>
         <div class="pill" id="perm-btn">mode</div>
+        <div class="pill" id="settings-btn">⚙ settings</div>
       </div>
 
       <div class="panel rail" id="rail"></div>
@@ -121,6 +123,7 @@ function shell() {
   $("#palette-btn").onclick = () => openPalette();
   $("#theme-btn").onclick = () => openPalette("theme ");
   $("#perm-btn").onclick = cyclePerm;
+  $("#settings-btn").onclick = () => openSettings();
   $("#model-sel").onclick = () => openPalette("model ");
   $("#agent-sel").onclick = () => openPalette("agent ");
 
@@ -463,6 +466,121 @@ function cyclePerm() {
   send({ type: "setPermissionMode", mode: next as any });
 }
 
+// ---- settings ---------------------------------------------------------------
+function openSettings() {
+  send({ type: "getConfig" });
+  if (document.querySelector(".settings-bg")) return;
+  const bg = el("div", "palette-bg settings-bg");
+  const box = el("div", "settings");
+  const head = el("div", "settings-head");
+  head.append(el("div", "title", "⚙ Settings"));
+  const tabs = el("div", "settings-tabs");
+  for (const t of ["providers", "models", "mcp"] as const) {
+    const tb = el("div", "stab" + (settingsTab === t ? " active" : ""), t === "mcp" ? "MCP" : t[0].toUpperCase() + t.slice(1));
+    tb.onclick = () => { settingsTab = t; box.querySelectorAll(".stab").forEach((e) => e.classList.remove("active")); tb.classList.add("active"); renderSettingsBody(); };
+    tabs.append(tb);
+  }
+  head.append(tabs);
+  const close = el("div", "pill", "✕"); close.onclick = () => bg.remove(); head.append(close);
+  const body = el("div", "settings-body"); body.id = "settings-body";
+  box.append(head, body);
+  bg.append(box); document.body.append(bg);
+  bg.onclick = (e) => { if (e.target === bg) bg.remove(); };
+  renderSettingsBody();
+}
+
+function renderSettingsBody() {
+  const body = document.querySelector("#settings-body") as HTMLElement | null;
+  if (!body) return;
+  body.innerHTML = "";
+  if (!cfg) { body.append(el("div", "hint", "Loading…")); return; }
+  if (settingsTab === "providers") renderProvidersTab(body);
+  else if (settingsTab === "models") renderModelsTab(body);
+  else renderMcpTab(body);
+}
+
+function inp(ph: string, val = "", pw = false): HTMLInputElement {
+  const i = el("input") as HTMLInputElement; i.placeholder = ph; i.value = val; if (pw) i.type = "password"; return i;
+}
+
+function renderProvidersTab(body: HTMLElement) {
+  body.append(el("div", "hint", "Set API keys, base URLs, and default models. Add a custom OpenAI-compatible API (e.g. your Hermes endpoint) at the bottom."));
+  for (const p of cfg!.providers) {
+    const card = el("div", "scard");
+    const h = el("div", "scard-h");
+    h.append(el("span", "", p.name + (p.builtin ? "" : " · custom")));
+    h.append(el("span", "badge " + (p.available ? "ok" : "off"), p.available ? "ready" : "no key"));
+    card.append(h);
+    const key = inp(p.hasKey ? "key set — type to replace" : "API key", "", true);
+    const url = inp("base URL (optional)", p.baseURL || "");
+    const model = inp("default model (optional)", p.defaultModel || "");
+    const save = el("button", "btn primary", "Save");
+    save.onclick = () => {
+      const msg: any = { type: "setProvider", name: p.name };
+      if (key.value) msg.apiKey = key.value;
+      if (url.value) msg.baseURL = url.value;
+      if (model.value) msg.defaultModel = model.value;
+      send(msg); key.value = "";
+    };
+    const row = el("div", "srow"); row.append(key, url, model, save); card.append(row);
+    body.append(card);
+  }
+  const add = el("div", "scard");
+  add.append(el("div", "scard-h", "+ Add custom API (OpenAI-compatible)"));
+  const name = inp("name (e.g. hermes)");
+  const url = inp("base URL (e.g. https://…/v1)");
+  const key = inp("API key (optional)", "", true);
+  const addBtn = el("button", "btn primary", "Add");
+  addBtn.onclick = () => { const n = name.value.trim(); if (!n) return; const msg: any = { type: "setProvider", name: n }; if (url.value) msg.baseURL = url.value; if (key.value) msg.apiKey = key.value; send(msg); name.value = url.value = key.value = ""; };
+  const row = el("div", "srow"); row.append(name, url, key, addBtn); add.append(row);
+  body.append(add);
+}
+
+function renderModelsTab(body: HTMLElement) {
+  body.append(el("div", "hint", "Models shown in the palette and selector. Format: provider/model (e.g. hermes/hermes-3)."));
+  const list = el("div", "list");
+  for (const m of cfg!.models) {
+    const row = el("div", "srow-mini");
+    row.append(el("span", "mono", m));
+    const rm = el("button", "btn danger", "remove"); rm.onclick = () => send({ type: "removeModel", model: m });
+    row.append(rm); list.append(row);
+  }
+  body.append(list);
+  const i = inp("provider/model");
+  const addBtn = el("button", "btn primary", "Add model"); addBtn.onclick = () => { const v = i.value.trim(); if (v) { send({ type: "addModel", model: v }); i.value = ""; } };
+  const row = el("div", "srow"); row.append(i, addBtn); body.append(row);
+}
+
+function renderMcpTab(body: HTMLElement) {
+  body.append(el("div", "hint", "MCP servers. Local: a command like  npx -y @scope/server.  Remote: a Streamable-HTTP URL."));
+  const list = el("div", "list");
+  for (const s of cfg!.mcp) {
+    const row = el("div", "srow-mini");
+    const nm = el("span", "", s.name + (s.connected ? " ●" : "")); nm.style.color = s.connected ? "var(--good)" : "var(--text-dim)";
+    row.append(nm);
+    row.append(el("span", "mono", (s.command ? s.command.join(" ") : s.url) || ""));
+    const tog = el("button", "btn", s.enabled ? "on" : "off"); tog.onclick = () => send({ type: "toggleMcp", name: s.name, enabled: !s.enabled });
+    const rm = el("button", "btn danger", "remove"); rm.onclick = () => send({ type: "removeMcp", name: s.name });
+    row.append(tog, rm); list.append(row);
+  }
+  body.append(list);
+  const add = el("div", "scard");
+  add.append(el("div", "scard-h", "+ Add MCP server"));
+  const name = inp("name");
+  const cmd = inp("command (e.g. npx -y @modelcontextprotocol/server-everything)");
+  const url = inp("remote URL (optional)");
+  const addBtn = el("button", "btn primary", "Add");
+  addBtn.onclick = () => {
+    const n = name.value.trim(); if (!n) return;
+    const msg: any = { type: "addMcp", name: n, enabled: true };
+    if (cmd.value.trim()) msg.command = cmd.value.trim().split(/\s+/);
+    if (url.value.trim()) msg.url = url.value.trim();
+    send(msg); name.value = cmd.value = url.value = "";
+  };
+  const row = el("div", "srow"); row.append(name, cmd, url, addBtn); add.append(row);
+  body.append(add);
+}
+
 // ---- websocket --------------------------------------------------------------
 function send(msg: any) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
 
@@ -549,7 +667,7 @@ export function dispatch(m: ServerMessage) {
     case "error": endStream(); blocks.push({ kind: "error", text: m.message }); renderChat(); break;
     case "checkpoints": renderCheckpoints(m.items); break;
     case "todos": todos = m.items || []; if (snap) renderRight(); break;
-    case "config": cfg = m.config; if (snap) renderRight(); break;
+    case "config": cfg = m.config; if (snap) renderRight(); renderSettingsBody(); break;
     case "done": endStream(); round = 0; if (snap) renderRight(); break;
     default: {
       // Exhaustiveness: if a new ServerMessage variant is added, TS flags this.
