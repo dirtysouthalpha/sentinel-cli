@@ -1,6 +1,6 @@
 [package]
 name = "sentinel-gui"
-version = "0.2.0"
+version = "0.3.0"
 description = "Sentinel CLI desktop GUI"
 edition = "2021"
 rust-version = "1.77"
