@@ -49,7 +49,7 @@ export function createHeaderBar(options: HeaderBarOptions): blessed.Widgets.BoxE
       `{${c.border}-fg}\u2502{/} ` +
       `${breadcrumb} ` +
       `{${c.border}-fg}\u2502{/} ` +
-      `{${c.textTertiary}-fg}${agent}{/}` +
+      `{${c.textTertiary}-fg}${agent}{/} ` +
       `{${c.border}-fg}\u2502{/} ` +
       `{${c.textTertiary}-fg}${model}{/} `
     );

@@ -12,7 +12,7 @@ import { AgentRunner } from "../core/agent-runner.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { suggestCommand } from "../core/command-search.js";
-import { searchCatalog } from "../core/command-catalog.js";
+import { searchCatalog, COMMAND_CATALOG } from "../core/command-catalog.js";
 import {
   saveWorkflow,
   listWorkflows,
@@ -506,6 +506,8 @@ export class TUIApp {
           this.setInputLine("", 0);
         }
         this.renderInput();
+      } else if (code === 9) {
+        this.completeInput(); // Tab → slash-command completion
       } else if (code === 1) {
         this.inputCursor = 0; // Ctrl+A → start of line
         this.renderInput();
@@ -573,6 +575,29 @@ export class TUIApp {
       default:
         break; // ignore unknown sequences (don't insert them)
     }
+  }
+
+  /** Shell-style Tab completion for the leading /command token. */
+  private completeInput(): void {
+    const buf = this.inputBuffer;
+    if (!buf.startsWith("/") || buf.includes(" ")) return; // only the command word
+    const partial = buf.slice(1).toLowerCase();
+    const names = COMMAND_CATALOG.map((c) => c.command.replace(/^\//, ""));
+    const matches = names.filter((n) => n.toLowerCase().startsWith(partial));
+    if (matches.length === 0) return;
+    if (matches.length === 1) {
+      this.setInputLine(`/${matches[0]} `, matches[0].length + 2);
+    } else {
+      // complete to the longest common prefix, then list the candidates
+      const lcp = matches.reduce((a, b) => {
+        let i = 0;
+        while (i < a.length && i < b.length && a[i].toLowerCase() === b[i].toLowerCase()) i++;
+        return a.slice(0, i);
+      });
+      if (lcp.length > partial.length) this.setInputLine(`/${lcp}`, lcp.length + 1);
+      this.addSystem("  " + matches.map((m) => `/${m}`).join("   "));
+    }
+    this.renderInput();
   }
 
   private setInputLine(text: string, cursor: number): void {
