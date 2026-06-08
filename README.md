@@ -74,6 +74,25 @@ The agent also has tools it drives itself: `subagent` (delegate an isolated sub-
 connected MCP tools. Project context (CLAUDE.md/AGENTS.md/package.json) and relevant
 long-term memory (when the Sentinel Prime brain MCP is connected) are auto-loaded each turn.
 
+## One package, four faces
+
+Install `sentinel-cli` once; pick how you use it — all share one engine:
+
+| Face | Command | What it is |
+|------|---------|------------|
+| **TUI** | `sentinel` | opencode-style terminal UI (interactive `/` menu, themes, history) |
+| **GUI** | `sentinel gui` | local desktop command center (block chat, inline diffs, ⌘K palette, **Settings**) |
+| **Desktop app** | `gui/src-tauri` | native **Tauri** build — spawns the engine + embeds the GUI in a real window |
+| **Headless** | `sentinel run --json` / `ask` | scriptable / CI |
+| **MCP server** | `sentinel mcp-serve` | expose Sentinel's tools to other MCP clients |
+
+Build the native desktop app: `cd gui && npm install && npm run tauri build` (needs Rust);
+the bundled exe/installer lands in `gui/src-tauri/target/release/`.
+
+Recent (omp-inspired) engine upgrades: **role-based model routing** (`router.roles`:
+default/plan/smol/commit with fallback chains) and **schema-validated subagents**
+(pass `outputSchema` to get a validated JSON object back instead of prose).
+
 ## Quick start
 
 ```bash
