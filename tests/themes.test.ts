@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { themeEngine } from "../src/tui/themes/engine.js";
 
 describe("ThemeEngine", () => {
-  it("should have 14 themes", () => {
+  it("should have 15 themes", () => {
     const themes = themeEngine.getAllThemes();
-    expect(themes).toHaveLength(14);
+    expect(themes).toHaveLength(15);
   });
 
   it("should default to cyberpunk theme", () => {

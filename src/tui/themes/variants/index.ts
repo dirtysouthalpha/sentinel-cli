@@ -407,6 +407,34 @@ export const mono: ThemeDef = {
   },
 };
 
+export const opencode: ThemeDef = {
+  name: "opencode",
+  display: "OpenCode",
+  description: "Restrained muted dark palette with a calm teal accent",
+  colors: {
+    accentPrimary: "#5FB3A1",
+    accentHover: "#4E9384",
+    accentSecondary: "#7FB685",
+    bgPrimary: "#0E0E10",
+    bgSecondary: "#141416",
+    bgTertiary: "#1C1C20",
+    textPrimary: "#D7D7D2",
+    textSecondary: "#8A8A86",
+    textTertiary: "#56565A",
+    border: "#26262B",
+    borderActive: "#5FB3A1",
+    success: "#6FB58A",
+    warning: "#C9A26A",
+    error: "#C76B6B",
+    info: "#5FB3A1",
+    cyan: "#5FB3A1",
+    lime: "#7FB685",
+    amber: "#C9A26A",
+    magenta: "#B08AA8",
+    purple: "#9785B5",
+  },
+};
+
 export const ALL_THEMES: ThemeDef[] = [
   cyberpunk,
   light,
@@ -422,4 +450,5 @@ export const ALL_THEMES: ThemeDef[] = [
   paper,
   forest,
   mono,
+  opencode,
 ];
