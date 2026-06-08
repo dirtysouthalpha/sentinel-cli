@@ -71,7 +71,7 @@ program
   .name("sentinel")
   .description("AI-powered coding CLI - The best coding CLI on the planet")
   .version(VERSION)
-  .option("--theme <theme>", "Set theme", "cyberpunk")
+  .option("--theme <theme>", "Set theme", "opencode")
   .option("--model <model>", "Set AI model")
   .option("--agent <agent>", "Set default agent")
   .option("--verbose", "Enable verbose logging")

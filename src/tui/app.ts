@@ -13,6 +13,7 @@ import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { suggestCommand } from "../core/command-search.js";
 import { searchCatalog, COMMAND_CATALOG } from "../core/command-catalog.js";
+import { renderMarkdown } from "./render-markdown.js";
 import {
   saveWorkflow,
   listWorkflows,
@@ -124,6 +125,7 @@ export class TUIApp {
 
   private transcript = "";
   private stream = "";
+  private streamRaw = ""; // un-escaped assistant text, re-rendered as markdown at end
   private streamHeaderShown = false;
 
   private cost: CostTracker = {
@@ -297,6 +299,7 @@ export class TUIApp {
 
   private startAssistant(): void {
     this.stream = "";
+    this.streamRaw = "";
     this.streamHeaderShown = false;
   }
 
@@ -306,15 +309,18 @@ export class TUIApp {
       this.transcript += `\n{${c.lime}-fg}▌ {bold}Sentinel{/}\n`;
       this.streamHeaderShown = true;
     }
-    this.stream += this.esc(token);
+    this.stream += this.esc(token); // live (plain) display while streaming
+    this.streamRaw += token; // raw text for end-of-message markdown render
     this.render();
   }
 
   private endAssistant(): void {
     if (this.streamHeaderShown) {
-      this.transcript += this.stream + "\n";
+      // Re-render the completed message with code-block / diff / inline-code formatting.
+      this.transcript += renderMarkdown(this.streamRaw, themeEngine.getBlessedColors() as unknown as Record<string, string>) + "\n";
     }
     this.stream = "";
+    this.streamRaw = "";
     this.streamHeaderShown = false;
     this.render();
   }

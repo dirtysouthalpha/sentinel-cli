@@ -83,7 +83,7 @@ export const DEFAULT_CONFIG: SentinelConfig = {
   model: "zai/glm-4.6",
   small_model: "zai/glm-4.5-air",
   provider: {},
-  theme: "cyberpunk",
+  theme: "opencode",
   custom_css: "",
   permissions: {
     bash: "ask",
