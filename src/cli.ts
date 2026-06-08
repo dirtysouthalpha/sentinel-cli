@@ -510,6 +510,13 @@ async function runMain(options: {
     process.exit(1);
   }
 
+  // The Blessed TUI owns the screen; any stderr log line corrupts the render.
+  // Silence logging once we're committed to the TUI (status is shown in-UI).
+  // `--verbose` opts back into logs for debugging (accepting some corruption).
+  if (!options.verbose) {
+    setLogLevel("silent");
+  }
+
   const app = new TUIApp({
     projectRoot: options.project,
     installRoot,
