@@ -72,14 +72,6 @@ const VERSION = "0.3.0";
  */
 const DEFAULT_MARKETPLACE_SOURCE = ".sentinel/registry.json";
 
-const BANNER = [
-  " ____             _   _            _ ",
-  "/ ___|  ___ _ __ | |_(_)_ __   ___| |",
-  "\\___ \\ / _ \\ '_ \\| __| | '_ \\ / _ \\ |",
-  " ___) |  __/ | | | |_| | | | |  __/ |",
-  "|____/ \\___|_| |_|\\__|_|_| |_|\\___|_|",
-];
-
 export interface TUIAppOptions {
   projectRoot: string;
   installRoot: string;
@@ -366,20 +358,14 @@ export class TUIApp {
 
   private printWelcome(): void {
     const c = themeEngine.getBlessedColors();
-    let s = "\n";
-    for (const line of BANNER) {
-      s += `  {${c.cyan}-fg}{bold}${line}{/}\n`;
-    }
-    s += `\n  {${c.magenta}-fg}{bold}The Best Coding CLI on the Planet{/}  {${c.textTertiary}-fg}v${VERSION}{/}\n\n`;
-
     const available = providerManager.getAvailableProviderNames();
-    if (available.length === 0) {
-      s += `  {${c.amber}-fg}No API key configured.{/} Type {${c.cyan}-fg}{bold}/connect{/} to get started.\n`;
-    } else {
-      s += `  {${c.lime}-fg}Connected{/} {${c.textTertiary}-fg}(${available.join(", ")}){/}  Just type and I handle the rest.\n`;
-    }
-    s += `  {${c.textTertiary}-fg}Type {/}{${c.cyan}-fg}/{/}{${c.textTertiary}-fg} for commands · Ctrl+T theme · Ctrl+A agent · Ctrl+M model · Ctrl+Q quit{/}\n`;
-    s += `  {${c.textTertiary}-fg}Ctrl+N new tab · Ctrl+W close tab · Ctrl+Tab next tab · Ctrl+R rename tab{/}\n\n`;
+    const status =
+      available.length === 0
+        ? `{${c.amber}-fg}no provider{/} {${c.textTertiary}-fg}— type {/}{${c.cyan}-fg}/connect{/}`
+        : `{${c.lime}-fg}●{/} {${c.textTertiary}-fg}${available.join(", ")}{/}`;
+    // Slim, opencode-style header: a one-line wordmark + a muted hint row.
+    let s = `\n  {${c.cyan}-fg}{bold}▌ sentinel{/} {${c.textTertiary}-fg}v${VERSION}{/}   ${status}\n`;
+    s += `  {${c.textTertiary}-fg}Type a message · {/}{${c.cyan}-fg}/{/}{${c.textTertiary}-fg} commands · Tab completes · ↑ history · Ctrl+Q quit{/}\n`;
     this.push(s);
     this.divider();
   }
