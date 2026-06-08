@@ -213,6 +213,25 @@ body {
 .palette .opt .cat { margin-left: auto; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-faint); }
 .palette .opt .ico { width: 18px; text-align: center; }
 
+/* ---- todos panel ---- */
+.todos-card .todo { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; padding: 3px 0; color: var(--text-dim); }
+.todos-card .todo .tk { width: 14px; text-align: center; flex-shrink: 0; color: var(--text-faint); }
+.todos-card .todo .tx { word-break: break-word; line-height: 1.4; }
+.todos-card .todo.in_progress .tk { color: var(--accent); }
+.todos-card .todo.in_progress .tx { color: var(--text); }
+.todos-card .todo.completed .tk { color: var(--good); }
+.todos-card .todo.completed .tx { color: var(--text-faint); text-decoration: line-through; }
+
+/* ---- connection banner ---- */
+.conn-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 200; text-align: center;
+  padding: 6px 12px; font-size: 12px; font-family: var(--font-mono);
+  color: #04101f; background: var(--warn); box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+.conn-banner.closed, .conn-banner.reconnecting { background: var(--warn); }
+.conn-banner.noengine { background: var(--bad); color: #fff; }
+.conn-banner.connecting { background: var(--accent); }
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 150, 210, 0.2); border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

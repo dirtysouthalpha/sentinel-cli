@@ -58,7 +58,7 @@ export interface ServeOptions {
  * `{port, token, pid}` JSON line on stdout, then never writes to stdout again so
  * a GUI can drive the engine over the socket.
  */
-export async function runServe(opts: ServeOptions): Promise<{ port: number; token: string }> {
+export async function runServe(opts: ServeOptions): Promise<{ port: number; token: string; close: () => Promise<void> }> {
   const projectRoot = opts.projectRoot;
 
   sessionManager.initialize(projectRoot);
@@ -70,7 +70,25 @@ export async function runServe(opts: ServeOptions): Promise<{ port: number; toke
   const token = randomBytes(24).toString("hex");
   const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
 
-  const ready = new Promise<{ port: number; token: string }>((resolve) => {
+  // Graceful teardown handle (used by tests and embedders); the CLI ignores it
+  // and relies on the SIGINT/SIGTERM handlers below.
+  const close = async (): Promise<void> => {
+    try {
+      await mcp.disconnect();
+    } catch {
+      /* ignore */
+    }
+    for (const client of wss.clients) {
+      try {
+        client.terminate();
+      } catch {
+        /* ignore */
+      }
+    }
+    await new Promise<void>((res) => wss.close(() => res()));
+  };
+
+  const ready = new Promise<{ port: number; token: string; close: () => Promise<void> }>((resolve) => {
     wss.on("listening", () => {
       const addr = wss.address() as AddressInfo;
       if (opts.print !== false) {
@@ -79,7 +97,7 @@ export async function runServe(opts: ServeOptions): Promise<{ port: number; toke
       // Connect MCP servers in the background so the handshake isn't blocked by a
       // slow `npx` server download; tools appear once discovery completes.
       void mcp.connect((config.mcp as Record<string, never>) || {}).catch(() => {});
-      resolve({ port: addr.port, token });
+      resolve({ port: addr.port, token, close });
     });
   });
 
