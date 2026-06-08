@@ -2,6 +2,7 @@ import "./style.css";
 import { diffLines } from "diff";
 
 // ---- protocol (mirror of src/server/protocol.ts) ----------------------------
+type PermissionMode = "yolo" | "auto" | "gated" | "plan";
 type StateSnapshot = {
   model: string; agent: string; theme: string; permissionMode: string;
   themes: { name: string; display: string }[]; models: string[]; agents: string[];
@@ -10,7 +11,34 @@ type StateSnapshot = {
   cost: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCostUSD: number; requests: number };
   providers: { name: string; available: boolean }[];
 };
-type ServerMessage = any;
+type ToolArgs = Record<string, unknown>;
+type TodoItem = { content: string; status: "pending" | "in_progress" | "completed" };
+type CheckpointItem = { id: string; tool: string; path: string; existed: boolean; timestamp: number };
+type ConfigView = {
+  providers: { name: string; hasKey: boolean; baseURL?: string; defaultModel?: string; builtin: boolean; available: boolean }[];
+  models: string[];
+  mcp: { name: string; command?: string[]; url?: string; enabled: boolean; connected: boolean }[];
+};
+// The full discriminated union — every variant must be handled in dispatch().
+type ServerMessage =
+  | { type: "hello"; version: string; state: StateSnapshot }
+  | { type: "state"; state: StateSnapshot }
+  | { type: "user"; text: string }
+  | { type: "round_start"; round: number }
+  | { type: "token"; text: string }
+  | { type: "stream_end" }
+  | { type: "usage"; promptTokens: number; completionTokens: number; totalTokens: number; estimatedCostUSD: number }
+  | { type: "tool_start"; tool: string; name: string; args: ToolArgs; argsRaw: string }
+  | { type: "tool_result"; name: string; ok: boolean; firstLine: string; full: string }
+  | { type: "round_end"; round: number; willContinue: boolean }
+  | { type: "permission_request"; tool: string; action?: string; path?: string; reason: string }
+  | { type: "done"; stopReason: string; rounds: number }
+  | { type: "system"; text: string }
+  | { type: "error"; message: string }
+  | { type: "checkpoints"; items: CheckpointItem[] }
+  | { type: "todos"; items: TodoItem[] }
+  | { type: "config"; config: ConfigView }
+  | { type: "busy"; busy: boolean };
 
 // ---- connection params (injected by Tauri, or via ?port=&token= in dev) -----
 const params = new URLSearchParams(location.search);
@@ -31,6 +59,14 @@ type Block =
 const blocks: Block[] = [];
 let pendingPerm: { tool: string; action?: string; path?: string; reason: string } | null = null;
 let pendingToolArgs = "";
+let todos: TodoItem[] = [];
+let cfg: ConfigView | null = null;
+let round = 0;
+// connection status drives the reconnect banner
+type ConnStatus = "connecting" | "open" | "reconnecting" | "closed" | "noengine";
+let connStatus: ConnStatus = "connecting";
+
+const DEV = (import.meta as any).env?.DEV ?? false;
 
 const $ = (sel: string, root: ParentNode = document) => root.querySelector(sel) as HTMLElement;
 const el = (tag: string, cls?: string, html?: string) => {
@@ -181,21 +217,49 @@ function renderRight() {
   const g = el("div", "gauge"); const i = el("i"); i.style.width = pct + "%"; g.append(i); cu.append(g);
   cu.append(el("div", "kv", `<span>window</span><span class="v">${pct}%</span>`));
   r.append(cu);
+  // todos / checklist — updated live by every `todos` server message
+  if (todos.length) r.append(renderTodos());
   // tools / mcp
   const tools = el("div", "card");
   tools.append(el("div", "ch", "⚒ Top Agents · MCP"));
   const builtins = ["file", "bash", "search", "git", "web", "patch"];
   for (const b of builtins) { const kv = el("div", "kv"); kv.append(el("span", "", b)); kv.append(el("span", "v", "built-in")); tools.append(kv); }
-  for (const m of snap!.mcpTools.slice(0, 6)) { const kv = el("div", "kv"); kv.append(el("span", "", m.tool)); kv.append(el("span", "v", "mcp:" + m.server)); tools.append(kv); }
+  // prefer config view (carries connection state); fall back to the snapshot list
+  if (cfg && cfg.mcp.length) {
+    for (const m of cfg.mcp.slice(0, 8)) {
+      const kv = el("div", "kv");
+      kv.append(el("span", "", esc(m.name)));
+      const v = el("span", "v", m.enabled ? (m.connected ? "● connected" : "○ off") : "disabled");
+      (v as HTMLElement).style.color = m.connected ? "var(--good)" : "var(--text-faint)";
+      kv.append(v); tools.append(kv);
+    }
+  } else {
+    for (const m of snap!.mcpTools.slice(0, 6)) { const kv = el("div", "kv"); kv.append(el("span", "", esc(m.tool))); kv.append(el("span", "v", "mcp:" + esc(m.server))); tools.append(kv); }
+  }
   r.append(tools);
   // status
   const st = el("div", "card");
   st.append(el("div", "ch", "◉ Status"));
   const line = el("div", "status-line");
   line.append(el("span", "d" + (busy ? " busy" : "")));
-  line.append(el("span", "", (busy ? "working" : "ready") + " · " + snap!.agent + " · " + snap!.permissionMode));
+  const work = busy ? (round > 0 ? `working · round ${round}` : "working") : "ready";
+  line.append(el("span", "", work + " · " + snap!.agent + " · " + snap!.permissionMode));
   st.append(line);
   r.append(st);
+}
+
+function renderTodos(): HTMLElement {
+  const card = el("div", "card todos-card");
+  const done = todos.filter((t) => t.status === "completed").length;
+  card.append(el("div", "ch", `☑ Todos · ${done}/${todos.length}`));
+  for (const t of todos) {
+    const row = el("div", "todo " + t.status);
+    const mark = t.status === "completed" ? "✓" : t.status === "in_progress" ? "▸" : "○";
+    row.append(el("span", "tk", mark));
+    row.append(el("span", "tx", esc(t.content)));
+    card.append(row);
+  }
+  return card;
 }
 
 function projectName() { return (w.__SENTINEL_PROJECT__ as string) || "project"; }
@@ -213,7 +277,14 @@ function renderChat() {
     chat.append(el("div", "welcome", `<div class="big">Welcome to <b>Sentinel</b></div><p>Describe a bug or feature, or start a slash command. The agent reads files, runs commands, and edits code — gated by your permission mode.</p>`));
     return;
   }
-  for (const b of blocks) chat.append(renderBlock(b));
+  let lastAssistantBody: HTMLElement | null = null;
+  for (const b of blocks) {
+    const node = renderBlock(b);
+    if (b === streaming) lastAssistantBody = node.querySelector(".body");
+    chat.append(node);
+  }
+  // Re-capture the live streaming node so subsequent tokens patch it in place.
+  streamEl = streaming ? lastAssistantBody : null;
   if (pendingPerm) chat.append(renderPerm());
   chat.scrollTop = chat.scrollHeight;
 }
@@ -395,20 +466,73 @@ function cyclePerm() {
 // ---- websocket --------------------------------------------------------------
 function send(msg: any) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
 
-function connect() {
-  if (!PORT) { $("#app").innerHTML = `<div style="display:grid;place-items:center;height:100%;color:#8295b6;font-family:monospace">No engine. Launch via the app, or open with ?port=&token=</div>`; return; }
-  ws = new WebSocket(`ws://127.0.0.1:${PORT}/?token=${TOKEN}`);
-  ws.onmessage = (e) => onMessage(JSON.parse(e.data));
-  ws.onclose = () => { busy = false; if (snap) renderRight(); };
+let reconnectAttempts = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+const MAX_MSG_BYTES = 16 * 1024 * 1024; // 16MB guard against oversized frames
+
+function setConn(status: ConnStatus) { connStatus = status; renderBanner(); }
+
+function renderBanner() {
+  let b = document.getElementById("conn-banner");
+  const text =
+    connStatus === "reconnecting" ? `Reconnecting to engine… (attempt ${reconnectAttempts})` :
+    connStatus === "closed" ? "Disconnected from engine. Retrying…" :
+    connStatus === "noengine" ? "No engine. Launch via the app, or open with ?port=&token=" :
+    connStatus === "connecting" ? "Connecting to engine…" : "";
+  if (!text) { if (b) b.remove(); return; }
+  if (!b) { b = el("div", "conn-banner"); b.id = "conn-banner"; document.body.append(b); }
+  b.className = "conn-banner " + connStatus;
+  b.textContent = text;
 }
 
-function onMessage(m: ServerMessage) {
+function connect() {
+  if (!PORT) {
+    setConn("noengine");
+    $("#app").innerHTML = `<div style="display:grid;place-items:center;height:100%;color:#8295b6;font-family:monospace">No engine. Launch via the app, or open with ?port=&token=</div>`;
+    return;
+  }
+  setConn(reconnectAttempts > 0 ? "reconnecting" : "connecting");
+  try {
+    ws = new WebSocket(`ws://127.0.0.1:${PORT}/?token=${TOKEN}`);
+  } catch {
+    scheduleReconnect();
+    return;
+  }
+  ws.onopen = () => { reconnectAttempts = 0; setConn("open"); if (snap) send({ type: "getState" }); };
+  ws.onmessage = (e) => {
+    const data = typeof e.data === "string" ? e.data : "";
+    if (!data || data.length > MAX_MSG_BYTES) return; // drop empty/oversized
+    let m: ServerMessage;
+    try { m = JSON.parse(data); } catch { if (DEV) console.warn("[sentinel] bad JSON frame", data.slice(0, 200)); return; }
+    if (!m || typeof (m as any).type !== "string") return;
+    dispatch(m);
+  };
+  ws.onerror = () => { /* onclose follows; surface there */ };
+  ws.onclose = () => { busy = false; setSendBtn(); if (snap) renderRight(); scheduleReconnect(); };
+}
+
+function scheduleReconnect() {
+  if (!PORT) return;
+  if (reconnectTimer) return;
+  setConn(reconnectAttempts === 0 ? "closed" : "reconnecting");
+  const delay = Math.min(15000, 500 * Math.pow(2, reconnectAttempts)); // 0.5s → 15s cap
+  reconnectAttempts++;
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, delay);
+}
+
+/**
+ * Single source of truth for every server -> client message. Exported so a test
+ * can feed it each ServerMessage variant. Every variant in the protocol union is
+ * handled here; unknown types are logged in dev and otherwise ignored.
+ */
+export function dispatch(m: ServerMessage) {
   switch (m.type) {
     case "hello": snap = m.state; shell(); renderAll(); renderChat(); break;
     case "state": snap = m.state; renderAll(); break;
-    case "busy": busy = m.busy; setSendBtn(); if (snap) renderRight(); break;
+    case "busy": busy = m.busy; if (!busy) round = 0; setSendBtn(); if (snap) renderRight(); break;
     case "user": blocks.push({ kind: "user", text: m.text }); renderChat(); break;
-    case "round_start": break;
+    case "round_start": round = m.round; if (snap) renderRight(); break;
+    case "round_end": round = m.round; if (snap) renderRight(); break;
     case "token": appendToken(m.text); break;
     case "stream_end": endStream(); break;
     case "tool_start":
@@ -423,16 +547,44 @@ function onMessage(m: ServerMessage) {
     case "usage": if (snap) { snap.cost.totalTokens += m.totalTokens; snap.cost.estimatedCostUSD = m.estimatedCostUSD; renderRight(); } break;
     case "system": blocks.push({ kind: "system", text: m.text }); renderChat(); break;
     case "error": endStream(); blocks.push({ kind: "error", text: m.message }); renderChat(); break;
-    case "done": endStream(); break;
+    case "checkpoints": renderCheckpoints(m.items); break;
+    case "todos": todos = m.items || []; if (snap) renderRight(); break;
+    case "config": cfg = m.config; if (snap) renderRight(); break;
+    case "done": endStream(); round = 0; if (snap) renderRight(); break;
+    default: {
+      // Exhaustiveness: if a new ServerMessage variant is added, TS flags this.
+      const _never: never = m;
+      if (DEV) console.warn("[sentinel] unhandled server message", (_never as any)?.type, _never);
+    }
   }
 }
 
-let streaming: Extract<Block, { kind: "assistant" }> | null = null;
-function appendToken(t: string) {
-  if (!streaming) { streaming = { kind: "assistant", text: "", streaming: true }; blocks.push(streaming); }
-  streaming.text += t; renderChat();
+function renderCheckpoints(items: CheckpointItem[]) {
+  if (!items.length) { blocks.push({ kind: "system", text: "No checkpoints." }); renderChat(); return; }
+  const lines = items.map((c) => `${c.existed ? "edit" : "create"} ${c.tool} → ${c.path}`);
+  blocks.push({ kind: "system", text: "Checkpoints:\n" + lines.join("\n") });
+  renderChat();
 }
-function endStream() { if (streaming) { streaming.streaming = false; streaming = null; renderChat(); } }
+
+let streaming: Extract<Block, { kind: "assistant" }> | null = null;
+let streamEl: HTMLElement | null = null; // live DOM body of the streaming block
+function appendToken(t: string) {
+  if (!t) return;
+  if (!streaming) { streaming = { kind: "assistant", text: "", streaming: true }; blocks.push(streaming); renderChat(); }
+  streaming.text += t;
+  // Update only the streaming node — avoids rebuilding the whole chat per token
+  // (which caused flicker and re-triggered the rise animation on every block).
+  if (streamEl && streamEl.isConnected) {
+    streamEl.innerHTML = esc(streaming.text) + '<span class="cursor"></span>';
+    const chat = document.getElementById("chat");
+    if (chat) chat.scrollTop = chat.scrollHeight;
+  } else {
+    renderChat();
+  }
+}
+function endStream() {
+  if (streaming) { streaming.streaming = false; streaming = null; streamEl = null; renderChat(); }
+}
 function setSendBtn() { const b = $("#send"); if (!b) return; b.textContent = busy ? "Stop ■" : "Send ➤"; b.classList.toggle("stop", busy); }
 
 connect();
