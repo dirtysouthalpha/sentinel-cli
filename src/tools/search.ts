@@ -55,7 +55,11 @@ async function searchGrep(root: string, pattern: string, include?: string, maxRe
         cmd,
         { cwd: root, timeout: 15000, shell: "powershell.exe", maxBuffer: 5 * 1024 * 1024 },
         (error, stdout) => {
-          resolve(stdout || "No results found");
+          if (error) {
+            resolve(`Search error: ${error.message}`);
+          } else {
+            resolve(stdout || "No results found");
+          }
         }
       );
     } else {
@@ -64,7 +68,11 @@ async function searchGrep(root: string, pattern: string, include?: string, maxRe
         `grep -rn${includeArg} -E "${pattern}" "${root}" 2>/dev/null | head -${maxResults}`,
         { cwd: root, timeout: 15000, maxBuffer: 5 * 1024 * 1024 },
         (error, stdout) => {
-          resolve(stdout || "No results found");
+          if (error && error.code !== 1) { // grep exits 1 when no matches — not a real error
+            resolve(`Search error: ${error.message}`);
+          } else {
+            resolve(stdout || "No results found");
+          }
         }
       );
     }

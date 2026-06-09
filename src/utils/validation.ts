@@ -13,6 +13,7 @@ export function validatePath(filePath: string): boolean {
   if (filePath.includes("..")) return false;
   if (filePath.startsWith("/")) return false;
   if (filePath.startsWith("\\")) return false;
+  if (/^[A-Za-z]:/.test(filePath)) return false;
   return true;
 }
 

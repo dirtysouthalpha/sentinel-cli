@@ -45,7 +45,7 @@ export function redact(text: string): string {
     if (name === "bearer") {
       out = out.replace(re, (m) => `Bearer ${mask(m.slice(7).trim())}`);
     } else if (name === "assignment") {
-      out = out.replace(re, (_m, key: string, sep: string, q: string, val: string) => `${key}${sep}${q}${mask(val)}${q}`);
+      out = out.replace(re, (_m, _kq: string, key: string, sep: string, q: string, val: string) => `${key}${sep}${q}${mask(val)}${q}`);
     } else {
       out = out.replace(re, (m) => mask(m));
     }
