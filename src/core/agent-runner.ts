@@ -1,5 +1,13 @@
 import { EventEmitter } from "events";
-import { AIProvider, ChatMessage, ToolCall, ToolDef, contentToText } from "../ai/types.js";
+import { AIProvider, ChatMessage, ChatResponse, ToolCall, ToolDef, contentToText } from "../ai/types.js";
+
+/** Heuristic: did the provider reject the request for being too long for the model's context? */
+function isContextOverflow(err: unknown): boolean {
+  const e = err as { status?: number; message?: string } | undefined;
+  const msg = (e?.message || String(err)).toLowerCase();
+  if (/context length|context window|too long|maximum context|prompt is too long|too many tokens|reduce the length|exceeds the (model|maximum)/.test(msg)) return true;
+  return (e?.status === 400 || e?.status === 413) && /token|context/.test(msg);
+}
 
 /**
  * Minimal interface the runner needs from a context manager. The real
@@ -16,6 +24,9 @@ export interface ContextManagerLike {
   ): void;
   getMessageCount(): number;
   getTotalTokens(): number;
+  /** Force the context under a token budget (compact + trim). Optional so simple
+   *  array-backed fakes can omit it; when present it enables overflow recovery. */
+  ensureUnder?(maxTokens: number): number;
 }
 
 export interface AgentRunnerDeps {
@@ -32,6 +43,8 @@ export interface AgentRunnerConfig {
   temperature?: number;
   maxTokens?: number;
   largeContextWarnAt?: number;
+  /** Soft cap: proactively compact the context under this before each model call. */
+  maxContextTokens?: number;
 }
 
 export interface AgentRunResult {
@@ -59,6 +72,7 @@ export interface AgentRunnerEvents {
   toolResult: (name: string, ok: boolean, firstLine: string, full: string) => void;
   roundEnd: (round: number, willContinue: boolean) => void;
   contextLarge: (count: number) => void;
+  compacted: (totalTokens: number) => void;
   runError: (err: unknown) => void;
   done: (result: AgentRunResult) => void;
 }
@@ -119,15 +133,39 @@ export class AgentRunner extends EventEmitter {
         this.emit("roundStart", round);
         completedRounds = round;
 
-        const aiMessages = this.context.toAIMessages();
+        // Proactively keep the prompt under the soft cap so it rarely overflows.
+        const softCap = this.config.maxContextTokens;
+        if (softCap && this.context.ensureUnder && this.context.getTotalTokens() > softCap) {
+          this.context.ensureUnder(softCap);
+          this.emit("compacted", this.context.getTotalTokens());
+        }
 
-        const response = await this.provider.chatStream(
-          aiMessages,
-          { model, tools: this.toolDefs, temperature, maxTokens, signal },
-          (chunk) => {
-            if (chunk.content) this.emit("token", chunk.content);
+        // Reactive recovery: if the provider rejects the prompt as too long,
+        // shrink the context and retry instead of failing the turn. This is what
+        // lets the app run forever without a restart.
+        let response: ChatResponse;
+        let compactTries = 0;
+        for (;;) {
+          try {
+            response = await this.provider.chatStream(
+              this.context.toAIMessages(),
+              { model, tools: this.toolDefs, temperature, maxTokens, signal },
+              (chunk) => {
+                if (chunk.content) this.emit("token", chunk.content);
+              }
+            );
+            break;
+          } catch (err) {
+            if (!signal?.aborted && this.context.ensureUnder && compactTries < 3 && isContextOverflow(err)) {
+              compactTries++;
+              const target = Math.max(20000, Math.floor((softCap ?? 120000) * Math.pow(0.6, compactTries)));
+              this.context.ensureUnder(target);
+              this.emit("compacted", this.context.getTotalTokens());
+              continue;
+            }
+            throw err;
           }
-        );
+        }
 
         this.emit("streamEnd", round);
 

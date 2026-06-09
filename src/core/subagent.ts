@@ -36,6 +36,20 @@ class IsolatedContext implements ContextManagerLike {
     return Math.ceil(chars / 3.5);
   }
 
+  /** Force this isolated context under a token budget so a long subagent run
+   *  (e.g. autopilot) recovers from overflow instead of wedging. */
+  ensureUnder(maxTokens: number): number {
+    const limit = Math.max(2000, maxTokens);
+    while (this.getTotalTokens() > limit && this.messages.length > 2) this.messages.shift();
+    if (this.getTotalTokens() > limit && this.messages.length) {
+      const per = Math.max(400, Math.floor((limit / this.messages.length) * 3.5));
+      for (const m of this.messages) {
+        if (m.content.length > per) m.content = m.content.slice(0, per) + "\n…[trimmed]";
+      }
+    }
+    return this.getTotalTokens();
+  }
+
   // Mirror ContextManager.toAIMessages so tool-call linkage stays provider-correct.
   toAIMessages(): ChatMessage[] {
     const out: ChatMessage[] = [];
@@ -261,7 +275,7 @@ export function createSubagentTool(deps: SubagentDeps): SubagentToolHandle {
         executeTool: deps.executeTool,
         extractToolCalls: deps.extractToolCalls,
       },
-      { model: deps.model, maxRounds: deps.maxRounds ?? 10 }
+      { model: deps.model, maxRounds: deps.maxRounds ?? 10, maxContextTokens: 120000 }
     );
     if (deps.onUsage) runner.on("usage", deps.onUsage);
 

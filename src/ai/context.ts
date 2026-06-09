@@ -144,6 +144,35 @@ export class ContextManager {
     this.compact();
   }
 
+  /**
+   * Force the conversation under `maxTokens` no matter what: compact, then
+   * hard-trim the oldest messages, then truncate remaining content as a last
+   * resort. This GUARANTEES the prompt can always shrink, so the agent recovers
+   * from an over-long context instead of wedging (no app restart needed).
+   * Returns the resulting token total.
+   */
+  ensureUnder(maxTokens: number): number {
+    const limit = Math.max(2000, maxTokens);
+    if (this.getTotalTokens() <= limit) return this.getTotalTokens();
+    this.compact();
+    // Drop the oldest messages (keep the last 2) until we fit.
+    while (this.getTotalTokens() > limit && this.messages.length > 2) {
+      this.messages.shift();
+    }
+    // Last resort: truncate each remaining message to a fair share of the budget.
+    if (this.getTotalTokens() > limit && this.messages.length > 0) {
+      const perMsgChars = Math.max(400, Math.floor((limit / this.messages.length) * 3.5));
+      for (const m of this.messages) {
+        if (m.content.length > perMsgChars) {
+          m.content = m.content.slice(0, perMsgChars) + "\n…[trimmed to fit context]";
+          m.tokenEstimate = estimateTokens(m.content);
+        }
+      }
+    }
+    log.info(`Context forced under ${limit} tokens → ${this.getTotalTokens()}`);
+    return this.getTotalTokens();
+  }
+
   getTotalTokens(): number {
     return this.messages.reduce((sum, m) => sum + (m.tokenEstimate || estimateTokens(m.content)), 0);
   }

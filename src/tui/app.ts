@@ -1496,7 +1496,7 @@ export class TUIApp {
           executeTool: topExecute,
           extractToolCalls,
         },
-        { model: runnerModel, maxRounds: agentName === "gsd" ? 30 : 15, largeContextWarnAt: 50 }
+        { model: runnerModel, maxRounds: agentName === "gsd" ? 30 : 15, largeContextWarnAt: 50, maxContextTokens: 120000 }
       );
 
       this.ac = new AbortController();
@@ -1518,6 +1518,9 @@ export class TUIApp {
       });
       runner.on("contextLarge", () =>
         this.addSystem("Context is getting large — /compact to save tokens.")
+      );
+      runner.on("compacted", (t) =>
+        this.addSystem(`↺ Auto-compressed context → ~${Math.round(t / 1000)}k tokens (no restart needed).`)
       );
       runner.on("runError", (e) => {
         this.endAssistant();

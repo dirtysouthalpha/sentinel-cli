@@ -13,7 +13,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node
 import { join, dirname } from "node:path";
 import { runAutopilot, summarizeAutopilot, type AutopilotStatus, type IterationReport, type AutopilotResult } from "./autopilot.js";
 import { runGsd, buildPhasePrompt } from "./gsd.js";
-import { resolveVerifyCommands, runVerifyCommands, workingTreeHash, type VerifyResult } from "./verify.js";
+import { resolveVerifyCommands, runVerifyCommands, workingTreeHash, gitCommitAll, type VerifyResult } from "./verify.js";
 
 /** Persisted progress so an interrupted run resumes across crashes/restarts. */
 export interface AutopilotCheckpoint {
@@ -84,6 +84,9 @@ export interface AutopilotSessionDeps {
   verify?: (commands: string[]) => Promise<VerifyResult>;
   treeHash?: () => Promise<string | null>;
   now?: () => number;
+  /** Commit the working tree after each changed iteration (atomic, revertable
+   *  history). Default: git add -A && git commit. Pass () => Promise.resolve(false) to disable. */
+  commit?: (message: string) => Promise<boolean>;
   loadCheckpoint?: () => AutopilotCheckpoint | null;
   saveCheckpoint?: (cp: AutopilotCheckpoint) => void;
   clearCheckpoint?: () => void;
@@ -121,6 +124,7 @@ export async function runAutopilotSession(deps: AutopilotSessionDeps): Promise<A
   const load = deps.loadCheckpoint ?? (() => loadCheckpointFile(projectRoot));
   const save = deps.saveCheckpoint ?? ((cp: AutopilotCheckpoint) => saveCheckpointFile(projectRoot, cp));
   const clear = deps.clearCheckpoint ?? (() => clearCheckpointFile(projectRoot));
+  const commit = deps.commit ?? ((msg: string) => gitCommitAll(projectRoot, msg));
 
   let currentGoal = goal;
   let priorReports: IterationReport[] = [];
@@ -198,6 +202,12 @@ export async function runAutopilotSession(deps: AutopilotSessionDeps): Promise<A
 
       const after = await treeHash();
       const changed = before == null || after == null ? true : before !== after;
+
+      // Per-iteration atomic commit so each step is a revertable point in history.
+      if (changed) {
+        const committed = await commit(`autopilot[${iteration}] ${summary.split("\n")[0].slice(0, 100)}`);
+        if (committed) log(`  ✓ committed iteration ${iteration}`);
+      }
 
       return { iteration, summary, checksPassed: v.passed, productionReady: reallyReady, remaining, changed };
     },

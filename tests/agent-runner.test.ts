@@ -320,6 +320,35 @@ describe("AgentRunner", () => {
     expect(emptyWithCalls!.toolCalls).toHaveLength(1);
   });
 
+  it("(recover) compacts and retries on a context-overflow error instead of failing", async () => {
+    let calls = 0;
+    const provider: AIProvider = {
+      name: "ovf",
+      chat: async () => { throw new Error("unused"); },
+      chatStream: async () => {
+        calls++;
+        if (calls === 1) throw new Error("prompt is too long: 200000 tokens > the maximum context length");
+        return { content: "ok", model: "m" } as ChatResponse;
+      },
+      isAvailable: () => true,
+    };
+    const ctx = new FakeContext();
+    let ensured = 0;
+    (ctx as unknown as { ensureUnder: (n: number) => number }).ensureUnder = (_n: number) => { ensured++; return 100; };
+    const runner = new AgentRunner(makeDeps(provider, ctx), { maxRounds: 2 });
+    const compacted: number[] = [];
+    const errors: unknown[] = [];
+    runner.on("compacted", (t) => compacted.push(t));
+    runner.on("runError", (e) => errors.push(e));
+
+    const result = await runner.run("go");
+    expect(calls).toBe(2); // failed once, retried once
+    expect(ensured).toBeGreaterThanOrEqual(1);
+    expect(compacted.length).toBeGreaterThanOrEqual(1);
+    expect(errors).toHaveLength(0); // recovered — no error surfaced
+    expect(result.finalContent).toBe("ok");
+  });
+
   it("stops cleanly with no_tool_calls when model returns plain text", async () => {
     const provider = new FakeProvider([{ content: "all done", model: "m" }]);
     const ctx = new FakeContext();

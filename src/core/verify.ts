@@ -65,6 +65,15 @@ export async function runVerifyCommands(
  * Hash of the working tree (git HEAD + porcelain) for stall detection. Returns
  * null when it's not a git repo, so the caller treats the iteration as changed.
  */
+/** Stage everything and commit, best-effort. Returns true if a commit was made
+ *  (false if nothing to commit, not a repo, or a hook rejected it). */
+export function gitCommitAll(projectRoot: string, message: string): Promise<boolean> {
+  const safe = message.replace(/["\r\n]/g, " ").slice(0, 200);
+  return new Promise((resolve) => {
+    exec(`git add -A && git commit -m "${safe}"`, { cwd: projectRoot, timeout: 60000, maxBuffer: 20 * 1024 * 1024 }, (err) => resolve(!err));
+  });
+}
+
 export function workingTreeHash(projectRoot: string): Promise<string | null> {
   return new Promise((resolve) => {
     exec(
