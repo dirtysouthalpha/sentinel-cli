@@ -1,194 +1,275 @@
 <p align="center">
-  <img src="assets/logo.svg" width="120" alt="Sentinel CLI">
+  <img src="assets/logo.svg" width="128" alt="Sentinel CLI logo">
 </p>
 
 <h1 align="center">Sentinel CLI</h1>
 
-<p align="center"><strong>An AI coding agent with a real engine — and a desktop GUI to match.</strong></p>
-
 <p align="center">
-  Multi-provider (cloud <em>and</em> local) · model router with fallback · enforced permissions + undo ·
-  MCP client <em>and</em> server · a glassmorphism desktop GUI.
+  <strong>One AI coding engine. Four faces. Any model.</strong><br>
+  A streaming agentic loop with real tools — terminal UI, desktop GUI, headless CLI, and MCP server — that runs against any cloud or local provider.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/node-%3E%3D20-3b82f6?style=flat-square" alt="node">
-  <img src="https://img.shields.io/badge/license-MIT-34d399?style=flat-square" alt="license">
-  <img src="https://img.shields.io/badge/tests-318%20passing-3b82f6?style=flat-square" alt="tests">
-  <img src="https://img.shields.io/badge/MCP-client%20%2B%20server-a78bfa?style=flat-square" alt="mcp">
+  <a href="#-quick-start"><img src="https://img.shields.io/badge/node-%3E%3D20-3b82f6?style=for-the-badge&logo=node.js&logoColor=white" alt="node >= 20"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-34d399?style=for-the-badge" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/tests-347%20passing-22c55e?style=for-the-badge" alt="347 tests passing">
+  <img src="https://img.shields.io/badge/TypeScript-ESM-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript ESM">
+  <img src="https://img.shields.io/badge/MCP-client%20%2B%20server-a78bfa?style=for-the-badge" alt="MCP client + server">
+  <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-64748b?style=for-the-badge" alt="cross-platform">
 </p>
 
 <p align="center">
-  <img src="assets/screenshot-chat.png" width="860" alt="Sentinel CLI desktop GUI">
+  <img src="assets/screenshot-chat.png" width="880" alt="Sentinel CLI desktop GUI">
 </p>
 
 ---
 
-## What is Sentinel?
+## ✨ Why Sentinel?
 
-Sentinel is a UI-agnostic coding **engine** — a streaming agentic loop with real tools (file, bash, search, git, web, patch) — exposed through **three faces** that all share the same core:
+Most "AI CLIs" are a thin wrapper around one provider's chat endpoint. **Sentinel is an engine.** The agentic loop, tools, permissions, model routing, and MCP all live in a UI-agnostic core — then it's exposed through whichever surface fits the job:
 
-| Face | Command | For |
-|------|---------|-----|
-| **Desktop GUI** | `sentinel gui` | A glassmorphism app: block-based chat, inline diffs, command palette, MCP. |
-| **Headless CLI** | `sentinel run "task" --json` | Scripts, CI, one-shot agentic tasks with a JSON event stream. |
-| **MCP server** | `sentinel mcp-serve` | Expose Sentinel's tools to Claude Desktop or any other MCP client. |
+- 🧠 **Real agentic loop** — the model reads files, runs shell commands, searches code, edits via patches, and calls MCP tools in a streaming `read → act → observe → repeat` loop until the task is done.
+- 🔌 **Any model, online or local** — Anthropic, OpenAI, Z.ai (GLM), Google Gemini, Ollama / LM Studio / llama.cpp / vLLM, or any OpenAI-compatible endpoint. Models are just `provider/model` strings.
+- 🛡️ **Guardrails that actually guard** — three permission modes, per-tool path-glob rules, and **git-backed undo** of the agent's last change.
+- 🪟 **Windows is first-class** — the bash tool runs PowerShell on Windows and the agent is told so; no POSIX assumptions baked in.
+- 🧩 **MCP both directions** — consume other MCP servers' tools inline *and* expose Sentinel's own tools as an MCP server.
 
-## Features
+> 🔒 **Security-reviewed.** The tool layer has been hardened against shell injection (search/git), SSRF (web), and path traversal (file/patch) — see [`CODE-REVIEW.md`](CODE-REVIEW.md).
 
-- **Any model, online or local.** Anthropic, OpenAI, Z.ai (GLM), Google Gemini, Ollama / LM Studio / llama.cpp / vLLM, or any OpenAI-compatible endpoint. Models are `provider/model` strings.
-- **Model router** — rule-based selection with **fallback chains** and retry/backoff (`config.router`). A bad model or a dead provider transparently falls through to the next.
-- **Enforced permissions + checkpoints.** Three modes — `yolo` / `auto` / `gated` — honor a per-tool, path-glob config. Every file edit is snapshotted, so **`undo`** reverts the agent's last change.
-- **MCP, both directions.** Connect to MCP servers (stdio + Streamable HTTP) and use their tools inline (`mcp__server__tool`); or run Sentinel itself as an MCP server.
-- **Block-based GUI** with streaming, **inline syntax-highlighted diffs**, an inline approve/deny permission prompt, a ⌘K command palette (commands · models · agents · themes · MCP tools), autocomplete (`/` `@` `mcp`), sessions/tabs, and a live model-router / cost panel.
+---
+
+## 📑 Table of Contents
+
+- [The four faces](#-the-four-faces)
+- [Quick start](#-quick-start)
+- [Providers](#-providers)
+- [Features](#-features)
+- [Commands](#-commands)
+- [Permissions &amp; undo](#-permissions--undo)
+- [Model router](#-model-router)
+- [MCP](#-mcp)
+- [Architecture](#-architecture)
+- [Develop](#-develop)
+- [License](#-license)
+
+---
+
+## 🎭 The four faces
+
+Build once; pick how you use it — all share the same engine, tools, and config:
+
+| Face | Command | What it is |
+|------|---------|------------|
+| 🖥️ **TUI** | `sentinel` | opencode-style terminal UI — interactive `/` menu, themes, history, tabs |
+| 🪟 **Desktop GUI** | `sentinel gui` | local command center: block chat, inline syntax-highlighted diffs, ⌘K palette, Settings |
+| 📦 **Native app** | `cd gui && npm run tauri build` | a **Tauri v2** window that spawns the engine and embeds the GUI |
+| ⚙️ **Headless** | `sentinel run "task" --json` | scriptable / CI one-shots with a JSON event stream |
+| 🔗 **MCP server** | `sentinel mcp-serve` | expose Sentinel's tools to Claude Desktop or any MCP client |
+
+---
+
+## 🚀 Quick start
+
+```bash
+git clone https://github.com/dirtysouthalpha/sentinel-cli.git
+cd sentinel-cli
+npm install
+npm run build
+```
+
+Configure **any one** provider (or none — local Ollama needs no key):
+
+```bash
+# Windows (PowerShell)
+$env:ZAI_API_KEY = "..."          # or ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+
+# macOS / Linux
+export ANTHROPIC_API_KEY="..."
+```
+
+Then launch whichever face you want:
+
+```bash
+# 🖥️  Interactive terminal UI
+node dist/cli.js
+
+# 🪟  Desktop GUI (build the front-end once, then serve it)
+cd gui && npm install && npm run build && cd ..
+node dist/cli.js gui
+
+# ⚙️  Headless agent — actually executes tools
+node dist/cli.js run "fix the failing test in src/foo.ts"
+node dist/cli.js run --json --permission-mode gated "refactor X"   # prompts before mutations
+
+# 🔗  Run as an MCP server (point Claude Desktop at it)
+node dist/cli.js mcp-serve
+
+# 🧙  Guided setup wizard (API keys + model)
+node dist/cli.js setup
+```
+
+**Prefer a global `sentinel` command?**
+
+- **Windows:** double-click **`install.bat`** — it builds and registers `sentinel` globally.
+- **Any OS:** `npm link` from the repo root, then just type `sentinel`.
+
+Full install / update / uninstall details in [`INSTALL.md`](INSTALL.md).
+
+---
+
+## 🔌 Providers
+
+Everywhere a model is referenced it's `provider/model` (split on the first `/`). The default is `zai/glm-4.6`.
+
+| Provider | Example model | API key |
+|----------|---------------|---------|
+| **Z.ai (GLM)** | `zai/glm-4.6` | `ZAI_API_KEY` |
+| **Anthropic** | `anthropic/claude-sonnet` | `ANTHROPIC_API_KEY` |
+| **OpenAI** | `openai/gpt-4o` | `OPENAI_API_KEY` |
+| **Google** | `gemini/gemini-2.0-flash` | `GEMINI_API_KEY` |
+| **Ollama (local)** | `ollama/llama3.1` | — *(no key)* |
+| **Any OpenAI-compatible** | `custom/<model>` | provider-specific |
+
+---
+
+## 🧰 Features
+
+**Engine**
+- **Streaming agentic loop** with native tool-calling and a fenced-block fallback parser for models that can't emit native calls.
+- **Model router** — rule-based selection with **fallback chains** and retry/backoff. A dead provider transparently falls through to the next.
+- **Role-based routing** (`router.roles`: default / plan / smol / commit) and **schema-validated subagents** — pass an `outputSchema` and get a validated JSON object back instead of prose.
+- **Auto-compacting context** — long conversations are summarized automatically so you don't hit the wall mid-task.
+
+**Tools the agent drives itself**
+- `file` · `bash` · `search` · `git` · `web` · `patch` · `browser` (Puppeteer), plus `subagent` (delegate an isolated sub-task) and `todo_write` (a live task board).
+- Project context (`CLAUDE.md` / `AGENTS.md` / `package.json`) is auto-loaded each turn.
+
+**Safety**
+- Three permission modes — `yolo` / `auto` / `gated` — honoring per-tool, path-glob rules.
+- Every file edit is snapshotted, so **`undo`** reverts the agent's last change.
+
+**Surfaces**
+- Block-based GUI with streaming, inline diffs, an approve/deny prompt, a ⌘K command palette (commands · models · agents · themes · MCP tools), autocomplete (`/` `@` `mcp`), sessions/tabs, and a live router / cost panel.
 
 <p align="center">
-  <img src="assets/screenshot-palette.png" width="430" alt="Command palette">
+  <img src="assets/screenshot-palette.png" width="440" alt="Command palette">
   &nbsp;
-  <img src="assets/screenshot-welcome.png" width="430" alt="Welcome">
+  <img src="assets/screenshot-welcome.png" width="440" alt="Welcome screen">
 </p>
 
-## Commands
+---
 
-Slash commands inside the TUI (and many as headless subcommands):
+## ⌨️ Commands
+
+Slash commands inside the TUI (many also work as headless subcommands):
 
 | Command | What it does |
 |---------|--------------|
 | `/plan [off]` | Read-only research mode — proposes a plan, blocks edits/commands |
 | `/cmd <text>` | AI command-search: natural language → a shell command |
-| `/workflow list\|save\|run\|delete` | Saved, parameterized workflows (Warp Drive) |
-| `/pipeline run <file.json>` | Deterministic multi-step pipeline (sequential + parallel groups) |
 | `/ship <task>` | Autonomous GSD: plan → implement → test → review → fix |
+| `/pipeline run <file.json>` | Deterministic multi-step pipeline (sequential + parallel groups) |
+| `/workflow list\|save\|run\|delete` | Saved, parameterized workflows |
 | `/index` · `/search <q>` | Build a repo index (TF-IDF) and semantically search it |
-| `/bg <cmd>` · `/tasks` | Run shell commands in the background; list/cancel them |
+| `/bg <cmd>` · `/tasks` | Run shell commands in the background; list / cancel them |
 | `/export [md\|html]` · `/branch` | Export or branch the current session |
 | `/usage` | Token / cost / per-tool usage metrics |
-| `/ask-prime <q>` | Ask Sentinel Prime (the Hermes agent) |
 | `/workspace list\|add\|use` | Multi-repo workspace roots (alias `/ws`) |
 | `/marketplace list\|search\|install` | Install skills / MCP servers from a registry |
 | `/permissions <mode>` · `/undo` · `/checkpoints` | Guardrails and git-backed undo |
 | `/mcp` · `/model` · `/agent` · `/theme` | Inspect MCP tools; switch model / agent / theme |
 
-The agent also has tools it drives itself: `subagent` (delegate an isolated sub-task),
-`todo_write` (a live task board), plus `file`/`bash`/`search`/`git`/`web`/`patch` and any
-connected MCP tools. Project context (CLAUDE.md/AGENTS.md/package.json) and relevant
-long-term memory (when the Sentinel Prime brain MCP is connected) are auto-loaded each turn.
+Sentinel is **markdown-extensible**: drop a `.md` into `.sentinel/commands/`, `.sentinel/agents/`, or `.sentinel/skills/` and it's picked up automatically.
 
-## One package, four faces
+---
 
-Install `sentinelcli` once; pick how you use it — all share one engine:
-
-| Face | Command | What it is |
-|------|---------|------------|
-| **TUI** | `sentinel` | opencode-style terminal UI (interactive `/` menu, themes, history) |
-| **GUI** | `sentinel gui` | local desktop command center (block chat, inline diffs, ⌘K palette, **Settings**) |
-| **Desktop app** | `gui/src-tauri` | native **Tauri** build — spawns the engine + embeds the GUI in a real window |
-| **Headless** | `sentinel run --json` / `ask` | scriptable / CI |
-| **MCP server** | `sentinel mcp-serve` | expose Sentinel's tools to other MCP clients |
-
-Build the native desktop app: `cd gui && npm install && npm run tauri build` (needs Rust);
-the bundled exe/installer lands in `gui/src-tauri/target/release/`.
-
-Recent (omp-inspired) engine upgrades: **role-based model routing** (`router.roles`:
-default/plan/smol/commit with fallback chains) and **schema-validated subagents**
-(pass `outputSchema` to get a validated JSON object back instead of prose).
-
-## Install
-
-**Windows, one click:** double-click **`install.bat`** — it builds and registers the global `sentinel` command. Then open a new terminal and type `sentinel`. Once published to npm, `npm i -g sentinelcli` works anywhere. Full details (updating, uninstalling, publishing) in [`INSTALL.md`](INSTALL.md).
-
-## Quick start
+## 🛡️ Permissions &amp; undo
 
 ```bash
-git clone https://github.com/<you>/sentinel-cli.git
-cd sentinel-cli
-npm install
-npm run build
-
-# configure a provider (any of these)
-set ZAI_API_KEY=...        # or ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
-#   ...or Ollama running locally needs no key
-
-# 1) Desktop GUI
-cd gui && npm install && npm run build && cd ..
-node dist/cli.js gui
-
-# 2) Headless agent (executes tools)
-node dist/cli.js run "fix the failing test in src/foo.ts"
-node dist/cli.js run --json --permission-mode gated "refactor X"   # gated: prompts before mutations
-
-# 3) MCP server (point Claude Desktop at it)
-node dist/cli.js mcp-serve
+sentinel run --permission-mode gated "…"          # prompt before bash / edits
+sentinel run --permission-mode gated --yes "…"    # auto-approve (headless)
+sentinel checkpoints                              # list file snapshots the agent made
+sentinel undo                                     # revert the last agent file change
 ```
 
-Or link it globally and use `sentinel` directly: `npm link`.
+In the GUI, switch modes from the palette or the `mode` pill; gated edits show an inline **Allow / Deny** with a diff.
 
-## Providers
+---
 
-| Provider | Example model | Key |
-|----------|---------------|-----|
-| Z.ai (GLM) | `zai/glm-4.6`, `zai/glm-5.1` | `ZAI_API_KEY` |
-| Anthropic | `anthropic/claude-sonnet` | `ANTHROPIC_API_KEY` |
-| OpenAI | `openai/gpt-4o` | `OPENAI_API_KEY` |
-| Google | `gemini/gemini-2.0-flash` | `GEMINI_API_KEY` |
-| Ollama (local) | `ollama/llama3.1` | — |
-| Any OpenAI-compatible | `custom/<model>` | provider-specific |
+## 🧭 Model router
 
-Add a `router` block to `sentinel.json` to auto-select and fall back:
+Add a `router` block to `sentinel.json` to auto-select models and fall back on failure:
 
 ```json
 {
   "router": {
     "default": "zai/glm-4.6",
-    "rules": [{ "match": { "agent": "gsd" }, "use": "anthropic/claude-sonnet", "fallbacks": ["zai/glm-4.6"] }],
+    "rules": [
+      { "match": { "agent": "gsd" }, "use": "anthropic/claude-sonnet", "fallbacks": ["zai/glm-4.6"] }
+    ],
     "retry": { "maxAttempts": 2, "baseDelayMs": 200, "maxDelayMs": 2000, "retryOn": [429, 500, 502, 503, 504] }
   }
 }
 ```
 
-## MCP
+---
 
-**Use other servers** — add them to `sentinel.json` under `mcp`; their tools appear as `mcp__<server>__<tool>`:
+## 🧩 MCP
+
+**Consume other servers** — add them under `mcp` in `sentinel.json`; their tools appear as `mcp__<server>__<tool>`:
 
 ```json
 { "mcp": { "everything": { "type": "local", "command": ["npx", "-y", "@modelcontextprotocol/server-everything"], "enabled": true } } }
 ```
 
-`sentinel mcp` lists discovered tools. **Be a server** — `sentinel mcp-serve` exposes Sentinel's built-in tools over stdio to any MCP client.
+`sentinel mcp` lists discovered tools (stdio + Streamable HTTP supported).
 
-## Permissions & undo
+**Be a server** — `sentinel mcp-serve` exposes Sentinel's built-in tools over stdio to any MCP client (Claude Desktop, etc.).
 
-```bash
-sentinel run --permission-mode gated "…"   # prompt before bash / edits
-sentinel run --permission-mode gated --yes "…"  # auto-approve (headless)
-sentinel checkpoints     # list file snapshots the agent made
-sentinel undo            # revert the last agent file change
-```
-In the GUI, switch modes from the palette or the `mode` pill; gated edits show an inline **Allow / Deny** with a diff.
+---
 
-## Architecture
+## 🏗️ Architecture
 
 ```
             ┌──────────── core engine (UI-agnostic) ───────────┐
 GUI  ─ws─►  │ AgentRunner · providers + router · permissions   │
 CLI  ──────►│ + checkpoints · MCP client/server · sessions     │
-MCP server ►│ · tools (file/bash/search/git/web/patch)          │
+MCP server ►│ · tools (file/bash/search/git/web/patch/browser) │
             └──────────────────────────────────────────────────┘
 ```
-The GUI talks to `sentinel serve` (a local-only WebSocket on `127.0.0.1` with a per-launch token). One engine, three faces. See [`ROADMAP-10X.md`](ROADMAP-10X.md) and [`CLAUDE.md`](CLAUDE.md).
 
-## Develop
+The agentic loop lives in the TUI orchestrator; the provider layer just streams. The GUI talks to `sentinel serve` — a **local-only** WebSocket on `127.0.0.1` with a per-launch token. One engine, every face.
+
+See [`CLAUDE.md`](CLAUDE.md) for the full code map and conventions.
+
+---
+
+## 🧪 Develop
 
 ```bash
-npm run build      # tsup -> dist (+ copies builtins into dist/builtin)
-npm run lint       # tsc --noEmit
-npm test           # vitest (318 tests)
+npm run build      # tsup -> dist/ (+ copies builtins into dist/builtin)
+npm run lint       # tsc --noEmit (type-check only — there is no ESLint)
+npm test           # vitest (347 tests)
 npm run dev        # tsup --watch
-# GUI: cd gui && npm run dev   (then open with ?port=&token= from `sentinel serve`)
+
+# Single test file / single test
+npx vitest run tests/state.test.ts
+npx vitest run -t "name of the test"
 ```
 
-> **Desktop‑native (Tauri):** `sentinel gui` runs the GUI in your browser. For a native window, a **Tauri v2 shell** is scaffolded in [`gui/src-tauri/`](gui/src-tauri/README.md) — install [Rust](https://rustup.rs), then `cd gui && npm install && npm run tauri dev`. It spawns the engine and injects the handshake automatically.
+**Conventions that matter** (enforced by the build / runtime):
+- **ESM with explicit `.js` extensions** in every relative import (source is `.ts`, but Node ESM needs the `.js`).
+- **Singletons via the exported instance / `getInstance()`** — never `new` the managers.
+- Builtin skills/commands/agents are markdown; add a `.md` and it ships on the next build.
 
-## License
+**Native desktop (Tauri v2):** `sentinel gui` runs in your browser. For a real window, install [Rust](https://rustup.rs), then `cd gui && npm install && npm run tauri dev` — it spawns the engine and injects the handshake automatically. Build artifacts land in `gui/src-tauri/target/release/`.
 
-MIT
+---
+
+## 📜 License
+
+[MIT](LICENSE) — do what you want; no warranty.
+
+<p align="center">
+  <sub>Built with TypeScript · Blessed · Puppeteer · the Model Context Protocol.</sub>
+</p>
