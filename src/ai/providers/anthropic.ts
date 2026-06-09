@@ -33,10 +33,31 @@ export class AnthropicProvider implements AIProvider {
   name = "anthropic";
   private apiKey: string;
   private baseURL: string;
+  /**
+   * True when pointed at a non-Anthropic base URL — i.e. a local OAuth router /
+   * proxy (e.g. anthropic-oauth-router on 127.0.0.1) that injects the real
+   * subscription bearer token itself. In proxy mode no API key is required, and
+   * a placeholder key is never forwarded (the proxy's auth is authoritative).
+   */
+  private proxyMode: boolean;
 
   constructor(config: ProviderConfig) {
     this.apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || "";
     this.baseURL = config.baseURL || "https://api.anthropic.com";
+    this.proxyMode = !!config.baseURL && !/(^|\/\/)([^/]*\.)?api\.anthropic\.com/i.test(this.baseURL);
+  }
+
+  /** Auth/content headers. In proxy mode, omit x-api-key (and never send the
+   *  `oauth-proxy` placeholder) so the router injects the subscription token. */
+  private headers(): Record<string, string> {
+    const h: Record<string, string> = {
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+    };
+    if (!this.proxyMode && this.apiKey && this.apiKey !== "oauth-proxy") {
+      h["x-api-key"] = this.apiKey;
+    }
+    return h;
   }
 
   private toAnthropicMessages(messages: ChatMessage[]): {
@@ -99,11 +120,7 @@ export class AnthropicProvider implements AIProvider {
 
     const response = await fetch(`${this.baseURL}/v1/messages`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: this.headers(),
       body: JSON.stringify(body),
       signal: options?.signal,
     });
@@ -176,11 +193,7 @@ export class AnthropicProvider implements AIProvider {
 
     const response = await fetch(`${this.baseURL}/v1/messages`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: this.headers(),
       body: JSON.stringify(body),
       signal: options?.signal,
     });
@@ -272,12 +285,15 @@ export class AnthropicProvider implements AIProvider {
   }
 
   isAvailable(): boolean {
-    return !!this.apiKey;
+    return this.proxyMode || !!this.apiKey;
   }
 
   private ensureClient(): void {
-    if (!this.apiKey) {
-      throw new Error("Anthropic API key not configured. Set ANTHROPIC_API_KEY or run /connect");
+    if (!this.apiKey && !this.proxyMode) {
+      throw new Error(
+        "Anthropic API key not configured. Set ANTHROPIC_API_KEY, run setup, or point " +
+          "baseURL at your OAuth router (e.g. http://127.0.0.1:8080/v1/anthropic)."
+      );
     }
   }
 }

@@ -50,20 +50,25 @@ export function createTabBar(options: TabBarOptions): blessed.Widgets.BoxElement
     for (const tab of tabs) {
       const pin = tab.pinned ? "\u{1F4CC}" : "";
       const mod = tab.modified ? "*" : "";
-      const label = `${pin}${tab.title}${mod}`;
+      // Strip blessed tag braces from the user-set title so a `{` can't corrupt
+      // the bar (and throw off click geometry for every tab after it).
+      const safeTitle = tab.title.replace(/[{}]/g, "");
+      const label = `${pin}${safeTitle}${mod}`;
 
       if (tab.active) {
-        parts.push(`{${c.bgPrimary}-fg}{${c.cyan}-fg}{bold} ${label} {/}`);
+        parts.push(`{${c.cyan}-bg}{${c.bgPrimary}-fg}{bold} ${label} {/}`);
       } else {
         parts.push(`{${c.textSecondary}-fg} ${label} {/}`);
       }
 
       const labelLen = label.length + 2;
       tabPositions.push({ id: tab.id, start: pos, end: pos + labelLen });
-      pos += labelLen + 1;
+      pos += labelLen + 1; // +1 for the 1-column separator rendered below
     }
 
-    tabBar.setContent(parts.join(`{${c.border}-fg}{/}`));
+    // A real 1-column separator so recorded tab positions match the rendered
+    // columns (the old empty `{fg}{/}` tag rendered zero width, drifting clicks).
+    tabBar.setContent(parts.join(`{${c.border}-fg}│{/}`));
     screen.render();
   }
 

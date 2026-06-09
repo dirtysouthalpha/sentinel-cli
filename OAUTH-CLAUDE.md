@@ -39,19 +39,21 @@ In your project `sentinel.json` (or `.sentinel/config.json`):
 
 ```json
 {
-  "model": "anthropic/claude-sonnet-4-20250514",
+  "model": "anthropic/claude-sonnet-4-6",
   "provider": {
     "anthropic": {
-      "apiKey": "oauth-proxy",
-      "baseURL": "http://localhost:8080/v1/anthropic"
+      "baseURL": "http://127.0.0.1:8080/v1/anthropic"
     }
   }
 }
 ```
 
-- `apiKey` is a placeholder — Sentinel requires a non-empty value, but the proxy
-  strips it and injects your real OAuth bearer token.
-- `baseURL` routes every request through the proxy. The proxy now normalizes the
+- **No `apiKey` needed.** The `anthropic` provider is now proxy-aware: when
+  `baseURL` points anywhere other than `api.anthropic.com`, it treats it as your
+  OAuth router, requires no key, and never forwards an `x-api-key` — the router's
+  injected subscription bearer token is authoritative. (A leftover
+  `"apiKey": "oauth-proxy"` placeholder still works and is also stripped.)
+- `baseURL` routes every request through the proxy. The proxy normalizes the
   path, so Sentinel's `/v1/messages` is forwarded correctly (no `/v1` doubling).
 
 ## 3. Use it

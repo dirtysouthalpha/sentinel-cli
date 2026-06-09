@@ -96,7 +96,11 @@ export class TUIApp {
   private mcpConnected = false;
   private background = new BackgroundTaskManager();
   private bgWired = false;
-  private pendingPermission?: (allow: boolean) => void;
+  // FIFO queue of permission prompts. A single resolver field would strand the
+  // first request when two gated tool calls ask concurrently (parallel pipeline
+  // steps) — the second overwrote the first, which then never resolved.
+  private permissionQueue: Array<{ label: string; reason: string; resolve: (allow: boolean) => void }> = [];
+  private permissionActive = false;
 
   // V11 semantic repo index (lite TF-IDF). Built lazily by /index or /search.
   private repoIndex?: RepoIndex;
@@ -106,6 +110,8 @@ export class TUIApp {
   private inputHistory: string[] = [];
   private historyIndex = -1; // -1 = editing a fresh line (not browsing history)
   private historyDraft = ""; // stashed in-progress line while browsing history
+  private pasting = false; // inside a bracketed-paste span (ESC[200~ … ESC[201~)
+  private pasteBuf = ""; // accumulated paste body (may span stdin chunks)
 
   // Interactive slash-command menu (opencode-style filter-as-you-type).
   private slashBox!: blessed.Widgets.BoxElement;
@@ -496,8 +502,21 @@ export class TUIApp {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
+    // Enable bracketed paste: the terminal wraps pasted text in ESC[200~…ESC[201~
+    // so we can insert it whole instead of treating each embedded newline as Enter.
+    process.stdout.write("\x1b[?2004h");
 
     process.stdin.on("data", (chunk: string) => this.onInputChunk(chunk));
+  }
+
+  /** Insert a pasted span at the caret, keeping newlines so multi-line snippets
+   *  stay intact (and never auto-submit). */
+  private insertPaste(text: string): void {
+    if (!text) return;
+    const normalized = text.replace(/\r\n?/g, "\n");
+    this.applyLine(insertText(this.line(), normalized));
+    this.maybeSlash();
+    this.renderInput();
   }
 
   /**
@@ -520,8 +539,33 @@ export class TUIApp {
           let j = i + 2;
           while (j < chunk.length && !(chunk.charCodeAt(j) >= 0x40 && chunk.charCodeAt(j) <= 0x7e)) j++;
           const seq = chunk.slice(i + 2, j + 1); // params + final
+          // Bracketed-paste markers.
+          if (seq === "200~") {
+            this.pasting = true;
+            this.pasteBuf = "";
+            i = j + 1;
+            continue;
+          }
+          if (seq === "201~") {
+            this.pasting = false;
+            this.insertPaste(this.pasteBuf);
+            this.pasteBuf = "";
+            i = j + 1;
+            continue;
+          }
+          if (this.pasting) {
+            // An escape sequence inside the paste body — keep it literal.
+            this.pasteBuf += chunk.slice(i, j + 1);
+            i = j + 1;
+            continue;
+          }
           this.handleCsi(seq);
           i = j + 1;
+          continue;
+        }
+        if (this.pasting) {
+          this.pasteBuf += ch;
+          i += 1;
           continue;
         }
         if (this.slashActive) this.hideSlash(); // lone ESC closes the slash menu
@@ -529,13 +573,22 @@ export class TUIApp {
         continue;
       }
 
+      // While pasting, accumulate every byte literally (newlines included) — no
+      // Enter/submit, no slash-menu, no editing keys until the paste ends.
+      if (this.pasting) {
+        this.pasteBuf += ch;
+        i += 1;
+        continue;
+      }
+
       // ---- permission prompt swallows the next keypress ----------------------
-      if (this.pendingPermission) {
+      if (this.permissionActive) {
         const allow = ch === "y" || ch === "Y";
-        const resolve = this.pendingPermission;
-        this.pendingPermission = undefined;
+        const current = this.permissionQueue.shift();
+        this.permissionActive = false;
         this.addSystem(allow ? "Allowed." : "Denied.");
-        resolve(allow);
+        current?.resolve(allow);
+        this.showNextPermission(); // surface the next queued request, if any
         this.renderInput();
         i += 1;
         continue;
@@ -592,7 +645,7 @@ export class TUIApp {
 
   /** Handle a CSI/SS3 sequence body (params + final byte), e.g. "A", "1;5C", "3~". */
   private handleCsi(seq: string): void {
-    if (this.pendingPermission) return;
+    if (this.permissionActive) return;
     switch (parseCsi(seq)) {
       case "up": // menu nav when open, else history
         if (this.slashActive) this.moveSlash(-1);
@@ -1316,15 +1369,28 @@ export class TUIApp {
 
   /** Interactive permission prompt: resolves when the user presses y/N. */
   private askPermission(req: PermissionRequest, reason: string): Promise<boolean> {
-    const c = themeEngine.getBlessedColors();
     const label = `${req.tool}${req.action ? `(${req.action})` : ""}`;
-    this.push(
-      `\n{${c.amber}-fg}{bold}⚠ Permission{/} allow {bold}${this.esc(label)}{/}? ` +
-        `{${c.textSecondary}-fg}[y/N] (${this.esc(reason)}){/}\n`
-    );
     return new Promise((resolve) => {
-      this.pendingPermission = resolve;
+      this.permissionQueue.push({ label, reason, resolve });
+      if (!this.permissionActive) this.showNextPermission();
     });
+  }
+
+  /** Render the prompt for the head of the permission queue (if any). */
+  private showNextPermission(): void {
+    const next = this.permissionQueue[0];
+    if (!next) {
+      this.permissionActive = false;
+      return;
+    }
+    this.permissionActive = true;
+    const c = themeEngine.getBlessedColors();
+    const more = this.permissionQueue.length > 1 ? ` {${c.textTertiary}-fg}(+${this.permissionQueue.length - 1} queued){/}` : "";
+    this.push(
+      `\n{${c.amber}-fg}{bold}⚠ Permission{/} allow {bold}${this.esc(next.label)}{/}? ` +
+        `{${c.textSecondary}-fg}[y/N] (${this.esc(next.reason)}){/}${more}\n`
+    );
+    this.renderInput();
   }
 
   private async chatWithAI(userMessage: string): Promise<void> {
@@ -1751,6 +1817,7 @@ export class TUIApp {
   destroy(): void {
     sessionManager.shutdown();
     void this.mcp.disconnect();
+    if (process.stdin.isTTY) process.stdout.write("\x1b[?2004l"); // disable bracketed paste
     if (this.screen) this.screen.destroy();
   }
 }
