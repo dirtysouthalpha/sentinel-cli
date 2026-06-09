@@ -93,6 +93,8 @@ export interface ChatOptions {
   systemPrompt?: string;
   stopSequences?: string[];
   tools?: ToolDef[];
+  /** Aborts the in-flight HTTP request (and its SSE stream) when it fires. */
+  signal?: AbortSignal;
 }
 
 export interface ProviderConfig {

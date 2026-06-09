@@ -35,6 +35,7 @@ export class OpenAIProvider implements AIProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: options?.signal,
     });
 
     if (!response.ok) {
@@ -60,6 +61,7 @@ export class OpenAIProvider implements AIProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: options?.signal,
     });
 
     if (!response.ok) {

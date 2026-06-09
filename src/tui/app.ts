@@ -552,12 +552,16 @@ export class TUIApp {
           this.maybeSlash();
         }
       } else if (code === 3) {
-        // Ctrl+C: cancel a run, else clear the line
+        // Ctrl+C: cancel a run, else clear the line. Abort the in-flight request
+        // (which now actually stops the model mid-stream) and let the run's own
+        // `finally` clear isProcessing — clearing it here would unlock the input
+        // while the aborted run is still tearing down, allowing a second
+        // concurrent run to clobber shared state.
         if (this.isProcessing) {
-          this.ac?.abort();
-          this.isProcessing = false;
-          state.set("isProcessing", false);
-          this.addSystem("Cancelled.");
+          if (this.ac) {
+            this.ac.abort();
+            this.addSystem("Cancelling…");
+          }
         } else {
           this.setInputLine("", 0);
         }
@@ -818,7 +822,10 @@ export class TUIApp {
     }
 
     if (parsed.name === "quit" || parsed.name === "exit" || parsed.name === "q") {
-      this.screen.destroy();
+      // destroy() flushes dirty sessions and disconnects MCP before exiting —
+      // a bare screen.destroy()+exit drops up to one autosave interval of
+      // history and orphans MCP child processes.
+      this.destroy();
       process.exit(0);
       return;
     }
@@ -1416,7 +1423,14 @@ export class TUIApp {
           // recall is best-effort; never block the turn on it
         }
       }
-      await runner.run(outbound, this.ac.signal);
+      const runResult = await runner.run(outbound, this.ac.signal);
+
+      // Aborting mid-stream means streamEnd never fired, leaving the assistant
+      // block open — close it and confirm the cancel.
+      if (runResult.stopReason === "aborted") {
+        this.endAssistant();
+        this.addSystem("Cancelled.");
+      }
 
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);
@@ -1441,6 +1455,7 @@ export class TUIApp {
   private async runPipelineDelegated(pipeline: Pipeline): Promise<void> {
     this.isProcessing = true;
     state.set("isProcessing", true);
+    this.ac = new AbortController(); // so Ctrl+C can cancel the pipeline mid-run
     this.renderInput();
 
     try {
@@ -1473,14 +1488,18 @@ export class TUIApp {
       const results = await runPipeline(
         pipeline,
         async (step, prior) => {
+          if (this.ac?.signal.aborted) return "ERROR: cancelled";
           const priorBlock = prior.length
             ? "Prior step results:\n" +
               prior.map((r) => `### ${r.name}\n${r.result}`).join("\n\n")
             : "";
-          return subagentTool.execute({
-            task: step.prompt,
-            context: priorBlock || undefined,
-          });
+          return subagentTool.execute(
+            {
+              task: step.prompt,
+              context: priorBlock || undefined,
+            },
+            this.ac?.signal
+          );
         },
         {
           onStepStart: (s) =>
@@ -1500,6 +1519,7 @@ export class TUIApp {
     } catch (err) {
       this.addError(err instanceof Error ? err.message : String(err));
     } finally {
+      this.ac = undefined;
       this.isProcessing = false;
       state.set("isProcessing", false);
       this.renderInput();
@@ -1516,6 +1536,7 @@ export class TUIApp {
   private async runGsdDelegated(task: string): Promise<void> {
     this.isProcessing = true;
     state.set("isProcessing", true);
+    this.ac = new AbortController(); // so Ctrl+C can cancel the GSD pipeline mid-run
     this.renderInput();
 
     try {
@@ -1548,13 +1569,17 @@ export class TUIApp {
       const results = await runGsd(
         task,
         async (phase, t, prior) => {
+          if (this.ac?.signal.aborted) return "ERROR: cancelled";
           const priorBlock = prior.length
             ? prior.map((p) => `### ${p.phase}\n${p.output}`).join("\n\n")
             : undefined;
-          return subagentTool.execute({
-            task: buildPhasePrompt(phase, t, prior),
-            context: priorBlock,
-          });
+          return subagentTool.execute(
+            {
+              task: buildPhasePrompt(phase, t, prior),
+              context: priorBlock,
+            },
+            this.ac?.signal
+          );
         },
         {
           onPhaseStart: (phase) => this.addSystem(`  • phase "${phase}"...`),
@@ -1580,6 +1605,7 @@ export class TUIApp {
     } catch (err) {
       this.addError(err instanceof Error ? err.message : String(err));
     } finally {
+      this.ac = undefined;
       this.isProcessing = false;
       state.set("isProcessing", false);
       this.renderInput();
@@ -1651,7 +1677,7 @@ export class TUIApp {
 
   private setupKeys(): void {
     this.screen.key(["C-q"], () => {
-      this.screen.destroy();
+      this.destroy(); // flush sessions + disconnect MCP before exit
       process.exit(0);
     });
 

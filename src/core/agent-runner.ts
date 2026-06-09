@@ -123,7 +123,7 @@ export class AgentRunner extends EventEmitter {
 
         const response = await this.provider.chatStream(
           aiMessages,
-          { model, tools: this.toolDefs, temperature, maxTokens },
+          { model, tools: this.toolDefs, temperature, maxTokens, signal },
           (chunk) => {
             if (chunk.content) this.emit("token", chunk.content);
           }
@@ -197,8 +197,14 @@ export class AgentRunner extends EventEmitter {
         this.emit("contextLarge", this.context.getMessageCount());
       }
     } catch (err) {
-      stopReason = "error";
-      this.emit("runError", err);
+      // Aborting the in-flight stream makes fetch throw — that's a user cancel,
+      // not a failure, so surface it as "aborted" with no scary error message.
+      if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        stopReason = "aborted";
+      } else {
+        stopReason = "error";
+        this.emit("runError", err);
+      }
     }
 
     const result: AgentRunResult = {

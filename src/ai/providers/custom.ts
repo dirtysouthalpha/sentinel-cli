@@ -39,6 +39,7 @@ export class CustomProvider implements AIProvider {
         ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
       },
       body: JSON.stringify(body),
+      signal: options?.signal,
     });
 
     if (!response.ok) {
@@ -67,6 +68,7 @@ export class CustomProvider implements AIProvider {
         ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
       },
       body: JSON.stringify(body),
+      signal: options?.signal,
     });
 
     if (!response.ok) {

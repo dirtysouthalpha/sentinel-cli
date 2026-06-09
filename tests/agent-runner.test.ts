@@ -232,6 +232,53 @@ describe("AgentRunner", () => {
     expect(doneResult).toBe(result);
   });
 
+  it("(f2) forwards the AbortSignal into chatStream options (so the network call can abort)", async () => {
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    const provider: AIProvider = {
+      name: "spy",
+      chat: async () => {
+        throw new Error("unused");
+      },
+      chatStream: async (_m: ChatMessage[], options?: ChatOptions) => {
+        seenSignal = options?.signal;
+        return { content: "done", model: "m" } as ChatResponse;
+      },
+      isAvailable: () => true,
+    };
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(makeDeps(provider, ctx), { maxRounds: 2 });
+
+    await runner.run("go", controller.signal);
+    expect(seenSignal).toBe(controller.signal);
+  });
+
+  it("(f3) treats a mid-stream AbortError as aborted, not an error (no runError)", async () => {
+    const controller = new AbortController();
+    const provider: AIProvider = {
+      name: "abrt",
+      chat: async () => {
+        throw new Error("unused");
+      },
+      chatStream: async () => {
+        controller.abort();
+        const e = new Error("The operation was aborted");
+        e.name = "AbortError";
+        throw e;
+      },
+      isAvailable: () => true,
+    };
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(makeDeps(provider, ctx), { maxRounds: 2 });
+
+    const errors: unknown[] = [];
+    runner.on("runError", (e) => errors.push(e));
+
+    const result = await runner.run("go", controller.signal);
+    expect(result.stopReason).toBe("aborted");
+    expect(errors).toHaveLength(0);
+  });
+
   it("(g) aggregates usage across rounds", async () => {
     const tc = toolCall("bash", { command: "ls" });
     const provider = new FakeProvider([

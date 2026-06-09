@@ -83,7 +83,7 @@ export interface SubagentToolHandle {
    *   lightly validates it against the schema, and returns the pretty-printed
    *   validated JSON (or a clear ERROR string on parse/validation failure).
    */
-  execute: (args: Record<string, unknown>) => Promise<string>;
+  execute: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<string>;
 }
 
 /**
@@ -230,7 +230,7 @@ export function createSubagentTool(deps: SubagentDeps): SubagentToolHandle {
     },
   };
 
-  const execute = async (args: Record<string, unknown>): Promise<string> => {
+  const execute = async (args: Record<string, unknown>, signal?: AbortSignal): Promise<string> => {
     const task = typeof args.task === "string" ? args.task.trim() : "";
     if (!task) return "ERROR: subagent requires a non-empty 'task'.";
     const extra = typeof args.context === "string" && args.context.trim() ? `\n\nContext:\n${args.context.trim()}` : "";
@@ -262,7 +262,7 @@ export function createSubagentTool(deps: SubagentDeps): SubagentToolHandle {
       { model: deps.model, maxRounds: deps.maxRounds ?? 10 }
     );
 
-    const result = await runner.run(`${task}${extra}${schemaInstruction}`);
+    const result = await runner.run(`${task}${extra}${schemaInstruction}`, signal);
 
     if (schema) {
       const raw = result.finalContent ?? "";
