@@ -13,6 +13,22 @@ import { createLogger } from "../../utils/logger.js";
 
 const log = createLogger({ prefix: "anthropic" });
 
+/**
+ * Attach the system prompt as a cacheable content block. Render order is
+ * tools -> system -> messages, so a `cache_control` breakpoint on the system
+ * block caches the (stable) tools + system prefix — the largest repeated chunk
+ * an agent re-sends every turn. Prompt caching is GA on anthropic-version
+ * 2023-06-01 (no beta header). Prefixes under the model's minimum (~1-4K tokens)
+ * silently won't cache, which is harmless. Unknown extra fields are ignored by
+ * OpenAI-shaped compatible endpoints, so this is safe behind a custom baseURL.
+ */
+function applySystemWithCache(body: Record<string, unknown>, systemText: string): void {
+  if (!systemText) return;
+  body.system = [
+    { type: "text", text: systemText, cache_control: { type: "ephemeral" } },
+  ];
+}
+
 export class AnthropicProvider implements AIProvider {
   name = "anthropic";
   private apiKey: string;
@@ -32,7 +48,11 @@ export class AnthropicProvider implements AIProvider {
 
     for (const m of messages) {
       if (m.role === "system") {
-        system = contentToText(m.content);
+        // Concatenate (don't overwrite) so a context-compaction summary that
+        // arrives as a later system message can't clobber the real system
+        // prompt — the Anthropic API takes a single `system`, last-writer-wins.
+        const text = contentToText(m.content);
+        system = system ? `${system}\n\n${text}` : text;
         continue;
       }
       if (m.role === "tool") {
@@ -61,15 +81,13 @@ export class AnthropicProvider implements AIProvider {
     const { system, messages: chatMsgs } = this.toAnthropicMessages(messages);
 
     const body: Record<string, unknown> = {
-      model: options?.model || "claude-sonnet-4-20250514",
+      model: options?.model || "claude-sonnet-4-6",
       max_tokens: options?.maxTokens || 8192,
       temperature: options?.temperature ?? 0.7,
       messages: chatMsgs,
     };
 
-    if (system || options?.systemPrompt) {
-      body.system = options?.systemPrompt || system;
-    }
+    applySystemWithCache(body, options?.systemPrompt || system);
 
     if (options?.tools && options.tools.length > 0) {
       body.tools = options.tools.map((t) => ({
@@ -138,16 +156,14 @@ export class AnthropicProvider implements AIProvider {
     const { system, messages: chatMsgs } = this.toAnthropicMessages(messages);
 
     const body: Record<string, unknown> = {
-      model: options?.model || "claude-sonnet-4-20250514",
+      model: options?.model || "claude-sonnet-4-6",
       max_tokens: options?.maxTokens || 8192,
       temperature: options?.temperature ?? 0.7,
       messages: chatMsgs,
       stream: true,
     };
 
-    if (system || options?.systemPrompt) {
-      body.system = options?.systemPrompt || system;
-    }
+    applySystemWithCache(body, options?.systemPrompt || system);
 
     if (options?.tools && options.tools.length > 0) {
       body.tools = options.tools.map((t) => ({

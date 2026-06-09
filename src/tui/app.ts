@@ -478,13 +478,14 @@ export class TUIApp {
     this.cost.completionTokens += usage.completionTokens;
     this.cost.totalTokens += usage.totalTokens;
     this.cost.requests += 1;
-    const inputCost = (usage.promptTokens / 1_000_000) * 3;
-    const outputCost = (usage.completionTokens / 1_000_000) * 15;
-    this.cost.estimatedCostUSD += inputCost + outputCost;
+    // Use real per-model pricing (not a hardcoded $3/$15) so cost is correct for
+    // the default zai/glm-4.6 and every non-Sonnet model — matches /usage.
+    const turnCost = estimateCostUSD(state.get("currentModel") || "", usage.promptTokens, usage.completionTokens);
+    this.cost.estimatedCostUSD += turnCost;
 
     const activeId = sessionManager.getActiveSessionId();
     if (activeId) {
-      sessionManager.updateSessionCost(activeId, usage.totalTokens, inputCost + outputCost);
+      sessionManager.updateSessionCost(activeId, usage.totalTokens, turnCost);
     }
 
     this.refreshStatus();

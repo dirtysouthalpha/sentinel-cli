@@ -67,7 +67,12 @@ export class ContextManager {
       messages.push({ role: "system", content: this.systemPrompt });
     }
     for (const msg of this.messages) {
-      const out: AIChatMessage = { role: msg.role, content: msg.content };
+      // Defensive: never emit a second `system` message into the model input.
+      // The real system prompt is pushed above; anything else with role
+      // "system" (e.g. a legacy compaction summary) is demoted to "user" so it
+      // can't overwrite the system prompt on Anthropic (last-system-wins).
+      const role = msg.role === "system" ? "user" : msg.role;
+      const out: AIChatMessage = { role, content: msg.content };
       const md = msg.metadata;
       if (md) {
         if (md.toolCalls) out.toolCalls = md.toolCalls as ToolCall[];
@@ -87,8 +92,19 @@ export class ContextManager {
   compact(): void {
     if (this.messages.length <= 6) return;
 
-    const recent = this.messages.slice(-6);
-    const older = this.messages.slice(0, -6);
+    // Choose the cut so the recent window never *starts* on a tool message
+    // whose owning assistant(tool_calls) turn would be summarized away. Splitting
+    // an assistant->tool pair breaks providers that require a tool message to
+    // follow its tool_calls (OpenAI 400). Walk the boundary back past any
+    // leading tool results so each kept pair stays intact.
+    let cut = this.messages.length - 6;
+    while (cut > 0 && this.messages[cut].role === "tool") {
+      cut--;
+    }
+
+    const older = this.messages.slice(0, cut);
+    const recent = this.messages.slice(cut);
+    if (older.length === 0) return;
 
     const summaryParts: string[] = [];
     let currentRole = "";
@@ -109,15 +125,18 @@ export class ContextManager {
       summaryParts.push(`${currentRole}: ${currentSummary.trim()}`);
     }
 
+    const summaryText = summaryParts.join("\n");
+    // Keep the summary as a "user" note, NOT a system message — a system-role
+    // entry here would overwrite the real system prompt on Anthropic.
     const summaryMessage: ConversationMessage = {
-      role: "system",
-      content: `[Context summary - ${older.length} earlier messages compressed]\n${summaryParts.join("\n")}`,
+      role: "user",
+      content: `[Earlier conversation summary — ${older.length} messages compacted]\n${summaryText}`,
       timestamp: Date.now(),
-      tokenEstimate: estimateTokens(summaryParts.join("\n")),
+      tokenEstimate: estimateTokens(summaryText),
     };
 
     this.messages = [summaryMessage, ...recent];
-    log.info(`Context compacted: ${older.length + 6} -> ${this.messages.length} messages`);
+    log.info(`Context compacted: ${older.length + recent.length} -> ${this.messages.length} messages`);
   }
 
   private autoCompact(): void {

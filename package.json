@@ -23,6 +23,7 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval": "node evals/run.mjs",
     "lint": "tsc --noEmit",
     "clean": "rimraf dist",
     "prepublishOnly": "npm run build"
