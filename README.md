@@ -168,6 +168,7 @@ Slash commands inside the TUI (many also work as headless subcommands):
 | `/plan [off]` | Read-only research mode — proposes a plan, blocks edits/commands |
 | `/cmd <text>` | AI command-search: natural language → a shell command |
 | `/ship <task>` | Autonomous GSD: plan → implement → test → review → fix |
+| `/autopilot <goal>` | **Set-and-forget** — loops the GSD cycle, gated on lint/test/build + a strict readiness check, until the project is production-ready (or the iteration budget runs out). Ctrl+C to stop. |
 | `/pipeline run <file.json>` | Deterministic multi-step pipeline (sequential + parallel groups) |
 | `/workflow list\|save\|run\|delete` | Saved, parameterized workflows |
 | `/index` · `/search <q>` | Build a repo index (TF-IDF) and semantically search it |

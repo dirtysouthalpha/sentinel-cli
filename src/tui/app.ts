@@ -14,6 +14,7 @@ import { renderMarkdown } from "./render-markdown.js";
 import { expandMentions } from "../core/mentions.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
+import { runAutopilot, summarizeAutopilot, type IterationReport } from "../core/autopilot.js";
 import { buildIndex, search as searchRepoIndex, RepoIndex } from "../core/repo-index.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { createHeaderBar } from "./header-bar.js";
@@ -56,7 +57,7 @@ import { getConfigManager } from "../core/config.js";
 import { buildAbout } from "../core/about.js";
 import { checkForUpdate } from "../core/update-check.js";
 import { createLogger } from "../utils/logger.js";
-import { writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
 
 const log = createLogger({ prefix: "tui" });
@@ -1260,6 +1261,23 @@ export class TUIApp {
       return;
     }
 
+    // /autopilot — fully autonomous "ralph loop": runs the GSD cycle over and
+    // over (each iteration verified by a deterministic gate + a strict model
+    // gate) until the project is production-ready, the iteration budget runs
+    // out, or it stalls. Set-and-forget; Ctrl+C stops it.
+    if (parsed.name === "autopilot" || parsed.name === "auto") {
+      const goal = parsed.args.join(" ").trim();
+      if (!goal) {
+        this.addSystem(
+          "Usage: /autopilot <goal>  — autonomously grind until the project is production-ready.\n" +
+            "  e.g. /autopilot make the CLI feature-complete with tests, docs, and a clean build"
+        );
+        return;
+      }
+      await this.runAutonomous(goal);
+      return;
+    }
+
     if (parsed.name === "ask-prime") {
       await handleAskPrime(this.commandHost(), parsed.args);
       return;
@@ -1676,6 +1694,205 @@ export class TUIApp {
       state.set("isProcessing", false);
       this.renderInput();
     }
+  }
+
+  /**
+   * Fully autonomous "ralph loop". Repeatedly runs the GSD cycle on the goal and
+   * gates each iteration on BOTH a deterministic check (lint/test/build) and a
+   * strict model verdict, feeding remaining work back into the next iteration.
+   * Keeps going until production-ready, the iteration budget is spent, or it
+   * stalls (stops changing anything). Cancellable with Ctrl+C.
+   */
+  private async runAutonomous(goal: string): Promise<void> {
+    this.isProcessing = true;
+    state.set("isProcessing", true);
+    this.ac = new AbortController();
+    this.renderInput();
+
+    try {
+      const config = getConfigManager().getAll();
+      const ap = config.autopilot ?? { maxIterations: 10, maxStalls: 2 };
+      const maxIterations = Math.max(1, ap.maxIterations ?? 10);
+      const maxStalls = Math.max(1, ap.maxStalls ?? 2);
+      const agentName = state.get("currentAgent");
+
+      if (!this.mcpConnected) {
+        this.mcpConnected = true;
+        try {
+          await this.mcp.connect((config.mcp as Record<string, never>) || {});
+        } catch {
+          // non-fatal: continue with built-in tools only
+        }
+      }
+
+      const { subagentTool } = buildAgentBase({
+        config,
+        model: state.get("currentModel"),
+        agent: agentName,
+        mcp: this.mcp,
+        permissionMode: this.permissionMode,
+        projectRoot: this.projectRoot,
+        ask: (req, reason) => this.askPermission(req, reason),
+      });
+
+      const verifyCommands = await this.resolveVerifyCommands(ap.verifyCommands);
+      this.addSystem(
+        `🤖 {bold}Autopilot engaged.{/} Grinding toward production-ready ` +
+          `(up to ${maxIterations} iterations; gate: ${verifyCommands.length ? verifyCommands.join(" && ") : "model-only"}). ` +
+          `Ctrl+C to stop.`
+      );
+
+      let currentGoal = goal;
+
+      const result = await runAutopilot(
+        async (iteration): Promise<IterationReport> => {
+          this.addSystem(`\n━━━ Autopilot iteration ${iteration}/${maxIterations} ━━━`);
+          const before = await this.workingTreeHash();
+
+          // 1) Run a full GSD cycle on the current goal.
+          const phases = await runGsd(
+            currentGoal,
+            async (phase, t, prior) => {
+              if (this.ac?.signal.aborted) return "ERROR: cancelled";
+              return subagentTool.execute(
+                { task: buildPhasePrompt(phase, t, prior) },
+                this.ac?.signal
+              );
+            },
+            { onPhaseStart: (ph) => this.addSystem(`  • ${ph}...`) }
+          );
+          const cycleSummary = phases
+            .map((p) => `${p.phase}: ${p.output.split("\n")[0].slice(0, 160)}`)
+            .join("\n");
+
+          // 2) Deterministic gate.
+          const verify = await this.runVerifyCommands(verifyCommands);
+          this.addSystem(`  ${verify.passed ? "✓ checks PASS" : "✗ checks FAIL"} — ${verify.summary}`);
+
+          // 3) Strict model gate (schema-validated).
+          let productionReady = false;
+          let remaining: string[] = [];
+          let summary = cycleSummary;
+          try {
+            const verdictRaw = await subagentTool.execute(
+              {
+                task:
+                  `You are the AUTOPILOT PRODUCTION GATE for the project at ${this.projectRoot}.\n\n` +
+                  `GOAL:\n${goal}\n\nLatest build cycle:\n${cycleSummary}\n\n` +
+                  `Deterministic checks: ${verify.passed ? "ALL PASSED" : "FAILED — " + verify.summary}\n\n` +
+                  `Decide STRICTLY whether the goal is fully delivered and production-ready. Production-ready ` +
+                  `means: the goal is completely met, all checks pass, there are NO TODOs/stubs/placeholders and ` +
+                  `no known bugs. If ANY of that is untrue it is NOT production-ready — list every remaining work ` +
+                  `item concretely and actionably so the next iteration can finish it.`,
+                outputSchema: {
+                  type: "object",
+                  required: ["productionReady", "remaining", "summary"],
+                  properties: {
+                    productionReady: { type: "boolean" },
+                    remaining: { type: "array", items: { type: "string" } },
+                    summary: { type: "string" },
+                  },
+                },
+              },
+              this.ac?.signal
+            );
+            const verdict = JSON.parse(verdictRaw) as { productionReady?: boolean; remaining?: unknown; summary?: string };
+            productionReady = !!verdict.productionReady;
+            remaining = Array.isArray(verdict.remaining) ? verdict.remaining.map(String) : [];
+            summary = verdict.summary || cycleSummary;
+          } catch {
+            remaining = ["production gate did not return a usable verdict — continuing"];
+          }
+
+          // Strict: the model's "ready" only counts if the checks actually pass.
+          const reallyReady = productionReady && verify.passed;
+          this.addSystem(
+            `  gate: ${reallyReady ? "PRODUCTION-READY" : "not yet"}${remaining.length ? ` — ${remaining.length} item(s) remaining` : ""}`
+          );
+
+          // Feed the gap back into the next iteration's goal.
+          if (!reallyReady && remaining.length) {
+            currentGoal =
+              `${goal}\n\nStill required to be production-ready — complete ALL of it:\n- ` + remaining.join("\n- ");
+          } else if (!reallyReady && !verify.passed) {
+            currentGoal = `${goal}\n\nThe verification checks are failing:\n${verify.summary}\nFix them.`;
+          }
+
+          const after = await this.workingTreeHash();
+          const changed = before == null || after == null ? true : before !== after;
+
+          return { iteration, summary, checksPassed: verify.passed, productionReady: reallyReady, remaining, changed };
+        },
+        { maxIterations, maxStalls },
+        () => !!this.ac?.signal.aborted
+      );
+
+      this.addSystem("\n" + summarizeAutopilot(result));
+      const activeId = sessionManager.getActiveSessionId();
+      if (activeId) sessionManager.markDirty(activeId);
+    } catch (err) {
+      this.addError(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.ac = undefined;
+      this.isProcessing = false;
+      state.set("isProcessing", false);
+      this.renderInput();
+    }
+  }
+
+  /** Deterministic verify commands: config override, else lint/test/build
+   *  detected from the project's package.json scripts. */
+  private async resolveVerifyCommands(override?: string[]): Promise<string[]> {
+    if (override && override.length) return override;
+    try {
+      const pkgPath = join(this.projectRoot, "package.json");
+      if (!existsSync(pkgPath)) return [];
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
+      const scripts = pkg.scripts ?? {};
+      const cmds: string[] = [];
+      if (scripts.lint) cmds.push("npm run lint");
+      if (scripts.test) cmds.push("npm test");
+      if (scripts.build) cmds.push("npm run build");
+      return cmds;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Run the verify commands; passes only if every one exits 0. */
+  private async runVerifyCommands(commands: string[]): Promise<{ passed: boolean; summary: string }> {
+    if (!commands.length) return { passed: true, summary: "no verify commands configured" };
+    const parts: string[] = [];
+    let passed = true;
+    for (const cmd of commands) {
+      if (this.ac?.signal.aborted) return { passed: false, summary: "cancelled" };
+      const code = await this.shExitCode(cmd);
+      parts.push(`${cmd} → ${code === 0 ? "ok" : `exit ${code}`}`);
+      if (code !== 0) passed = false;
+    }
+    return { passed, summary: parts.join("; ") };
+  }
+
+  /** Run a shell command in the project root; resolve its exit code. */
+  private shExitCode(cmd: string): Promise<number> {
+    return new Promise((resolveCode) => {
+      exec(cmd, { cwd: this.projectRoot, timeout: 600000, maxBuffer: 20 * 1024 * 1024 }, (err) => {
+        const c = err as (Error & { code?: number }) | null;
+        resolveCode(c && typeof c.code === "number" ? c.code : c ? 1 : 0);
+      });
+    });
+  }
+
+  /** Hash of the working tree (git HEAD + porcelain) for stall detection.
+   *  Returns null when it's not a git repo so the caller treats it as changed. */
+  private workingTreeHash(): Promise<string | null> {
+    return new Promise((resolveHash) => {
+      exec(
+        "git rev-parse HEAD && git status --porcelain",
+        { cwd: this.projectRoot, timeout: 30000, maxBuffer: 20 * 1024 * 1024 },
+        (err, stdout) => resolveHash(err ? null : stdout)
+      );
+    });
   }
 
   private truncateArgs(argsStr: string): string {

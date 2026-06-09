@@ -13,6 +13,8 @@ export { sessionManager } from "./core/session-manager.js";
 export { compressToolOutput, compressMessages, getCompressionStats } from "./ai/compression.js";
 export { detectProject, getProjectIcon } from "./core/project-detector.js";
 export { evaluateCheck, evaluateTask, summarize } from "./core/eval.js";
+export { runAutopilot, isComplete, summarizeAutopilot } from "./core/autopilot.js";
+export type { AutopilotStatus, IterationReport, AutopilotOptions, AutopilotResult } from "./core/autopilot.js";
 export type { EvalCheck, EvalTask, EvalContext, CheckResult, TaskResult, EvalSummary } from "./core/eval.js";
 export { getToolDefinitions, executeToolCall, parseToolCallsFromContent } from "./tools/tool-executor.js";
 export { AgentRunner } from "./core/agent-runner.js";

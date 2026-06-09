@@ -20,6 +20,17 @@ export interface SentinelConfig {
   headroom?: HeadroomConfig;
   ui?: UIConfig;
   hooks?: HooksConfig;
+  autopilot?: AutopilotConfig;
+}
+
+export interface AutopilotConfig {
+  /** Hard safety cap on iterations of the autonomous loop. */
+  maxIterations: number;
+  /** Give up after this many consecutive iterations that change nothing. */
+  maxStalls: number;
+  /** Shell commands run each iteration as the deterministic production gate.
+   *  When omitted, the runner auto-detects lint/test/build from package.json. */
+  verifyCommands?: string[];
 }
 
 export interface ProviderConfig {
@@ -101,4 +112,5 @@ export const DEFAULT_CONFIG: SentinelConfig = {
   share: "manual",
   autoupdate: "notify",
   snapshot: true,
+  autopilot: { maxIterations: 10, maxStalls: 2 },
 };

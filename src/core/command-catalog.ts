@@ -22,6 +22,7 @@ export const COMMAND_CATALOG: PaletteCommand[] = [
   { command: "/workflow", description: "Saved workflows: list | save | run | delete" },
   { command: "/pipeline", description: "Run a deterministic JSON pipeline of agent steps" },
   { command: "/ship", description: "Autonomous GSD: plan → implement → test → review → fix" },
+  { command: "/autopilot", description: "Set-and-forget: loop GSD until the project is production-ready" },
   { command: "/index", description: "Build a semantic index of the repo (TF-IDF, local)" },
   { command: "/search", description: "Semantic search the repo index for relevant files" },
   { command: "/bg", description: "Run a shell command in the background" },
