@@ -76,6 +76,34 @@ describe("runAutopilot", () => {
     expect(run).toHaveBeenCalledTimes(1); // maxIterations clamped to 1
     expect(result.status).toBe("stalled"); // maxStalls clamped to 1, iter 1 made no change
   });
+
+  it("resumes from priorReports, continuing iteration numbering and the stall counter", async () => {
+    const prior = [report({ iteration: 1, changed: false })]; // already one stall
+    const run = vi.fn(async (i: number) => report({ iteration: i, changed: false }));
+    const result = await runAutopilot(run, { maxIterations: 10, maxStalls: 2, priorReports: prior });
+    expect(run).toHaveBeenCalledTimes(1); // one more stall → 2 in a row
+    expect(result.status).toBe("stalled");
+    expect(result.iterations).toBe(2);
+  });
+
+  it("preflight stops the loop early as budget_exhausted", async () => {
+    let calls = 0;
+    const run = vi.fn(async (i: number) => report({ iteration: i, changed: true }));
+    const result = await runAutopilot(run, {
+      maxIterations: 10,
+      maxStalls: 5,
+      preflight: () => (++calls > 2 ? "budget_exhausted" : null),
+    });
+    expect(result.status).toBe("budget_exhausted");
+    expect(run).toHaveBeenCalledTimes(2); // ran twice, stopped before the 3rd
+  });
+
+  it("calls onIteration after each iteration (for checkpointing)", async () => {
+    const lengths: number[] = [];
+    const run = vi.fn(async (i: number) => report({ iteration: i, changed: true, checksPassed: i >= 2, productionReady: i >= 2 }));
+    await runAutopilot(run, { maxIterations: 5, maxStalls: 5, onIteration: (r) => lengths.push(r.length) });
+    expect(lengths).toEqual([1, 2]);
+  });
 });
 
 describe("summarizeAutopilot", () => {

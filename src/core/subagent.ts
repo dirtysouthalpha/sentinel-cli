@@ -66,6 +66,8 @@ export interface SubagentDeps {
   /** Base system prompt fragment; the subagent framing is appended to it. */
   systemPrompt?: string;
   maxRounds?: number;
+  /** Token-usage sink for each model call the subagent makes (cost accounting). */
+  onUsage?: (u: { promptTokens: number; completionTokens: number; totalTokens: number }) => void;
 }
 
 const DEFAULT_SUBAGENT_PROMPT =
@@ -261,6 +263,7 @@ export function createSubagentTool(deps: SubagentDeps): SubagentToolHandle {
       },
       { model: deps.model, maxRounds: deps.maxRounds ?? 10 }
     );
+    if (deps.onUsage) runner.on("usage", deps.onUsage);
 
     const result = await runner.run(`${task}${extra}${schemaInstruction}`, signal);
 

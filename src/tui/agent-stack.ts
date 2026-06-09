@@ -10,6 +10,8 @@ import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { MCPManager } from "../mcp/manager.js";
 import { SentinelConfig } from "../core/types.js";
+import { usageTracker } from "../core/usage-tracker.js";
+import { estimateCostUSD } from "../core/pricing.js";
 
 export interface AgentBaseOptions {
   config: SentinelConfig;
@@ -71,6 +73,8 @@ export function buildAgentBase(opts: AgentBaseOptions) {
     extractToolCalls,
     model: runnerModel,
     systemPrompt: buildSystemPrompt(agent, projectRoot),
+    // Record subagent token cost so /usage and the autopilot cost ceiling see it.
+    onUsage: (u) => usageTracker.recordCostUSD(estimateCostUSD(model, u.promptTokens, u.completionTokens)),
   });
 
   return { provider, runnerModel, mcpAware, execute, childToolDefs, subagentTool };

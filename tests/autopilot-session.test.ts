@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runAutopilotSession, type RunSubagentFn } from "../src/core/autopilot-session.js";
+import { runAutopilotSession, type RunSubagentFn, type AutopilotCheckpoint } from "../src/core/autopilot-session.js";
 
 /**
  * Drives the FULL autonomous orchestration end-to-end with fakes — GSD cycle,
@@ -102,5 +102,44 @@ describe("runAutopilotSession", () => {
     expect(result.status).toBe("max_iterations");
     expect(result.reports[0].productionReady).toBe(false);
     expect(result.reports[0].remaining.length).toBeGreaterThan(0);
+  });
+
+  it("checkpoints after each iteration and resumes from a saved checkpoint", async () => {
+    const saved: AutopilotCheckpoint[] = [];
+    const a1 = makeSubagent([{ productionReady: false, remaining: ["x"], summary: "s1" }]);
+    await runAutopilotSession({
+      goal: "g", projectRoot: "/tmp", maxIterations: 1, maxStalls: 5,
+      runSubagent: a1.run, log: () => {},
+      verify: async () => ({ passed: false, summary: "f" }),
+      treeHash: (() => { let n = 0; return async () => `h${n++}`; })(),
+      saveCheckpoint: (cp) => saved.push(cp), loadCheckpoint: () => null, clearCheckpoint: () => {},
+    });
+    expect(saved.length).toBe(1);
+    expect(saved[0].reports.length).toBe(1);
+
+    const a2 = makeSubagent([{ productionReady: true, remaining: [], summary: "done" }]);
+    const r2 = await runAutopilotSession({
+      goal: "g", projectRoot: "/tmp", maxIterations: 5, maxStalls: 5, resume: true,
+      runSubagent: a2.run, log: () => {},
+      verify: async () => ({ passed: true, summary: "ok" }),
+      treeHash: (() => { let n = 0; return async () => `r${n++}`; })(),
+      loadCheckpoint: () => saved[saved.length - 1], saveCheckpoint: () => {}, clearCheckpoint: () => {},
+    });
+    expect(r2.status).toBe("production_ready");
+    expect(r2.iterations).toBe(2); // 1 prior + 1 new
+  });
+
+  it("stops on the time ceiling (budget_exhausted)", async () => {
+    let t = 0;
+    const a = makeSubagent([{ productionReady: false, remaining: ["x"], summary: "s" }]);
+    const r = await runAutopilotSession({
+      goal: "g", projectRoot: "/tmp", maxIterations: 10, maxStalls: 9, maxMinutes: 1,
+      now: () => { t += 120000; return t; }, // 2 min per check → over the 1-min ceiling
+      runSubagent: a.run, log: () => {},
+      verify: async () => ({ passed: false, summary: "f" }),
+      treeHash: async () => "h",
+      loadCheckpoint: () => null, saveCheckpoint: () => {}, clearCheckpoint: () => {},
+    });
+    expect(r.status).toBe("budget_exhausted");
   });
 });

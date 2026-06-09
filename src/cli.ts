@@ -38,6 +38,8 @@ import { runMcpServer } from "./mcp/server.js";
 import { runServe } from "./server/serve.js";
 import { launchGui } from "./server/gui-launcher.js";
 import { runAutopilotSession, summarizeAutopilot } from "./core/autopilot-session.js";
+import { usageTracker } from "./core/usage-tracker.js";
+import { estimateCostUSD } from "./core/pricing.js";
 import { writeRouterConfig, routerStartHelp, probeRouter, DEFAULT_ROUTER_URL } from "./core/router-connect.js";
 import { setLogLevel, createLogger } from "./utils/logger.js";
 
@@ -362,6 +364,9 @@ program
   .option("--project <path>", "Project root directory")
   .option("--max-iterations <n>", "Max autopilot iterations")
   .option("--max-stalls <n>", "Consecutive no-change iterations before stopping")
+  .option("--max-minutes <n>", "Stop after this many wall-clock minutes")
+  .option("--max-cost <usd>", "Stop after this estimated spend (USD)")
+  .option("--resume", "Resume a prior interrupted run for the same goal")
   .action(async (goal, opts, command) => {
     const merged = command.optsWithGlobals();
     const projectRoot = merged.project || opts.project || process.cwd();
@@ -399,6 +404,7 @@ program
     const engine = new PermissionEngine("yolo", config.permissions as any, projectRoot);
     const checkpoints = new CheckpointManager(projectRoot);
     const guardedExecute = createGuardedExecutor({ engine, checkpoints, baseExecute: mcpAware, ask: async () => true });
+    const costModel = explicitModel || config.model;
     const subagentTool = createSubagentTool({
       provider,
       toolDefs,
@@ -406,6 +412,7 @@ program
       extractToolCalls,
       model: modelName,
       systemPrompt: buildSystemPrompt(agentName, projectRoot),
+      onUsage: (u) => usageTracker.recordCostUSD(estimateCostUSD(costModel, u.promptTokens, u.completionTokens)),
     });
 
     const ap = config.autopilot ?? { maxIterations: 10, maxStalls: 2 };
@@ -426,6 +433,10 @@ program
         maxIterations,
         maxStalls,
         verifyCommands: ap.verifyCommands,
+        maxMinutes: opts.maxMinutes ? parseFloat(opts.maxMinutes) : ap.maxMinutes,
+        maxCostUSD: opts.maxCost ? parseFloat(opts.maxCost) : ap.maxCostUSD,
+        costSpent: () => usageTracker.snapshot().estimatedCostUSD,
+        resume: !!opts.resume,
         runSubagent: (args, sig) => subagentTool.execute(args, sig),
         signal: ac.signal,
         log: (m) => console.log(m),

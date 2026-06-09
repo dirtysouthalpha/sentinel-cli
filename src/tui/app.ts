@@ -1771,6 +1771,10 @@ export class TUIApp {
         maxIterations,
         maxStalls,
         verifyCommands: ap.verifyCommands,
+        maxMinutes: ap.maxMinutes,
+        maxCostUSD: ap.maxCostUSD,
+        costSpent: () => usageTracker.snapshot().estimatedCostUSD,
+        resume: true, // auto-resume a prior interrupted run for the same goal
         runSubagent: (args, sig) => subagentTool.execute(args, sig),
         signal: this.ac.signal,
         log: (m) => this.addSystem(m),

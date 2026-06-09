@@ -9,9 +9,51 @@
  * tree hash) are injected, which keeps the whole orchestration unit-testable
  * end-to-end with fakes — no network, no subprocess.
  */
-import { runAutopilot, summarizeAutopilot, type IterationReport, type AutopilotResult } from "./autopilot.js";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { runAutopilot, summarizeAutopilot, type AutopilotStatus, type IterationReport, type AutopilotResult } from "./autopilot.js";
 import { runGsd, buildPhasePrompt } from "./gsd.js";
 import { resolveVerifyCommands, runVerifyCommands, workingTreeHash, type VerifyResult } from "./verify.js";
+
+/** Persisted progress so an interrupted run resumes across crashes/restarts. */
+export interface AutopilotCheckpoint {
+  goal: string;
+  currentGoal: string;
+  reports: IterationReport[];
+}
+
+/** Default checkpoint location for a project. */
+export function checkpointPath(projectRoot: string): string {
+  return join(projectRoot, ".sentinel", "autopilot.json");
+}
+
+function loadCheckpointFile(projectRoot: string): AutopilotCheckpoint | null {
+  try {
+    const p = checkpointPath(projectRoot);
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, "utf8")) as AutopilotCheckpoint;
+  } catch {
+    return null;
+  }
+}
+
+function saveCheckpointFile(projectRoot: string, cp: AutopilotCheckpoint): void {
+  try {
+    const p = checkpointPath(projectRoot);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, JSON.stringify(cp, null, 2));
+  } catch {
+    // best-effort — never let a failed checkpoint write abort the run
+  }
+}
+
+function clearCheckpointFile(projectRoot: string): void {
+  try {
+    rmSync(checkpointPath(projectRoot), { force: true });
+  } catch {
+    // ignore
+  }
+}
 
 /** Runs one subagent task; forwards the abort signal. Returns the subagent's
  *  final text (or pretty JSON when an outputSchema is supplied). */
@@ -30,9 +72,21 @@ export interface AutopilotSessionDeps {
   runSubagent: RunSubagentFn;
   signal?: AbortSignal;
   log: (msg: string) => void;
+  /** Stop once cumulative cost (via costSpent) reaches this many USD. */
+  maxCostUSD?: number;
+  /** Stop once this many wall-clock minutes have elapsed. */
+  maxMinutes?: number;
+  /** Cumulative spend so far (USD). Required for the cost ceiling to apply. */
+  costSpent?: () => number;
+  /** Resume from a saved checkpoint for this goal if one exists. */
+  resume?: boolean;
   /** Test seams (default to the real implementations). */
   verify?: (commands: string[]) => Promise<VerifyResult>;
   treeHash?: () => Promise<string | null>;
+  now?: () => number;
+  loadCheckpoint?: () => AutopilotCheckpoint | null;
+  saveCheckpoint?: (cp: AutopilotCheckpoint) => void;
+  clearCheckpoint?: () => void;
 }
 
 const GATE_SCHEMA = {
@@ -63,15 +117,37 @@ export async function runAutopilotSession(deps: AutopilotSessionDeps): Promise<A
   const commands = resolveVerifyCommands(projectRoot, deps.verifyCommands);
   const verify = deps.verify ?? ((cmds: string[]) => runVerifyCommands(projectRoot, cmds, isAborted));
   const treeHash = deps.treeHash ?? (() => workingTreeHash(projectRoot));
+  const now = deps.now ?? (() => globalThis.Date.now());
+  const load = deps.loadCheckpoint ?? (() => loadCheckpointFile(projectRoot));
+  const save = deps.saveCheckpoint ?? ((cp: AutopilotCheckpoint) => saveCheckpointFile(projectRoot, cp));
+  const clear = deps.clearCheckpoint ?? (() => clearCheckpointFile(projectRoot));
+
+  let currentGoal = goal;
+  let priorReports: IterationReport[] = [];
+  if (deps.resume) {
+    const cp = load();
+    if (cp && cp.goal === goal && cp.reports.length) {
+      priorReports = cp.reports;
+      currentGoal = cp.currentGoal || goal;
+      log(`Resuming autopilot from checkpoint: ${cp.reports.length} prior iteration(s).`);
+    }
+  }
+
+  // Cost/time ceiling: checked before each iteration.
+  const startMs = now();
+  const preflight = (): AutopilotStatus | null => {
+    if (deps.maxMinutes && (now() - startMs) / 60000 >= deps.maxMinutes) return "budget_exhausted";
+    if (deps.maxCostUSD && deps.costSpent && deps.costSpent() >= deps.maxCostUSD) return "budget_exhausted";
+    return null;
+  };
 
   log(
     `Autopilot: grinding toward production-ready (up to ${maxIterations} iterations; ` +
-      `gate: ${commands.length ? commands.join(" && ") : "model-only"}).`
+      `gate: ${commands.length ? commands.join(" && ") : "model-only"}` +
+      `${deps.maxMinutes ? `; ≤${deps.maxMinutes}min` : ""}${deps.maxCostUSD ? `; ≤$${deps.maxCostUSD}` : ""}).`
   );
 
-  let currentGoal = goal;
-
-  return runAutopilot(
+  const result = await runAutopilot(
     async (iteration): Promise<IterationReport> => {
       log(`\n━━━ Autopilot iteration ${iteration}/${maxIterations} ━━━`);
       const before = await treeHash();
@@ -125,9 +201,20 @@ export async function runAutopilotSession(deps: AutopilotSessionDeps): Promise<A
 
       return { iteration, summary, checksPassed: v.passed, productionReady: reallyReady, remaining, changed };
     },
-    { maxIterations, maxStalls },
+    {
+      maxIterations,
+      maxStalls,
+      priorReports,
+      preflight,
+      // Persist after every iteration so a crash/Ctrl+C can resume with --resume.
+      onIteration: (reports) => save({ goal, currentGoal, reports }),
+    },
     isAborted
   );
+
+  // On success the work is done — drop the checkpoint so a later run starts fresh.
+  if (result.status === "production_ready") clear();
+  return result;
 }
 
 export { summarizeAutopilot };

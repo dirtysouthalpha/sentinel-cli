@@ -31,6 +31,10 @@ export interface AutopilotConfig {
   /** Shell commands run each iteration as the deterministic production gate.
    *  When omitted, the runner auto-detects lint/test/build from package.json. */
   verifyCommands?: string[];
+  /** Stop once this many wall-clock minutes have elapsed (0/undefined = no limit). */
+  maxMinutes?: number;
+  /** Stop once estimated cost reaches this many USD (0/undefined = no limit). */
+  maxCostUSD?: number;
 }
 
 export interface ProviderConfig {

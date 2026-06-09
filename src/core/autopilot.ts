@@ -13,7 +13,8 @@ export type AutopilotStatus =
   | "production_ready"
   | "max_iterations"
   | "stalled"
-  | "aborted";
+  | "aborted"
+  | "budget_exhausted";
 
 /** What one iteration of the loop reports back. */
 export interface IterationReport {
@@ -35,6 +36,21 @@ export interface AutopilotOptions {
   maxIterations: number;
   /** Consecutive no-change iterations tolerated before declaring a stall (>=1). */
   maxStalls: number;
+  /** Reports from a prior interrupted run to resume from (iteration numbering and
+   *  the stall counter continue from here). */
+  priorReports?: IterationReport[];
+  /** Called after each iteration with the full reports list — for checkpointing. */
+  onIteration?: (reports: IterationReport[]) => void | Promise<void>;
+  /** Checked before each iteration; return a terminal status (e.g. budget_exhausted)
+   *  to stop the loop early. */
+  preflight?: () => AutopilotStatus | null;
+}
+
+/** Count consecutive no-change iterations at the tail (for resuming the stall counter). */
+function trailingStalls(reports: IterationReport[]): number {
+  let n = 0;
+  for (let i = reports.length - 1; i >= 0 && !reports[i].changed; i--) n++;
+  return n;
 }
 
 export interface AutopilotResult {
@@ -61,28 +77,26 @@ export async function runAutopilot(
 ): Promise<AutopilotResult> {
   const maxIterations = Math.max(1, Math.floor(options.maxIterations));
   const maxStalls = Math.max(1, Math.floor(options.maxStalls));
-  const reports: IterationReport[] = [];
-  let stalls = 0;
+  const reports: IterationReport[] = [...(options.priorReports ?? [])];
+  let stalls = trailingStalls(reports);
+  const done = (status: AutopilotStatus): AutopilotResult => ({ status, iterations: reports.length, reports });
 
-  for (let i = 1; i <= maxIterations; i++) {
-    if (isAborted()) {
-      return { status: "aborted", iterations: reports.length, reports };
-    }
+  for (let i = reports.length + 1; i <= maxIterations; i++) {
+    if (isAborted()) return done("aborted");
+    const early = options.preflight?.();
+    if (early) return done(early);
 
     const report = await runIteration(i, reports.slice());
     reports.push(report);
+    await options.onIteration?.(reports.slice());
 
-    if (isComplete(report)) {
-      return { status: "production_ready", iterations: i, reports };
-    }
+    if (isComplete(report)) return done("production_ready");
 
     stalls = report.changed ? 0 : stalls + 1;
-    if (stalls >= maxStalls) {
-      return { status: "stalled", iterations: i, reports };
-    }
+    if (stalls >= maxStalls) return done("stalled");
   }
 
-  return { status: "max_iterations", iterations: reports.length, reports };
+  return done("max_iterations");
 }
 
 /** One-line human summary of a finished run, for surfacing in the UI/logs. */
@@ -98,5 +112,7 @@ export function summarizeAutopilot(result: AutopilotResult): string {
       return `■ Stopped by you after ${result.iterations} iteration(s).`;
     case "max_iterations":
       return `🔁 Hit the ${result.iterations}-iteration budget without reaching production-ready. Remaining:\n- ${remaining.join("\n- ") || "(unspecified)"}`;
+    case "budget_exhausted":
+      return `💸 Stopped after ${result.iterations} iteration(s) — cost/time ceiling reached. Resume with --resume. Remaining:\n- ${remaining.join("\n- ") || "(unspecified)"}`;
   }
 }
