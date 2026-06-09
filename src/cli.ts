@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { resolve } from "path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { TUIApp } from "./tui/app.js";
 import { getConfigManager } from "./core/config.js";
@@ -36,6 +37,8 @@ import { createMcpAwareExecutor } from "./mcp/mcp-executor.js";
 import { runMcpServer } from "./mcp/server.js";
 import { runServe } from "./server/serve.js";
 import { launchGui } from "./server/gui-launcher.js";
+import { runAutopilotSession, summarizeAutopilot } from "./core/autopilot-session.js";
+import { writeRouterConfig, routerStartHelp, probeRouter, DEFAULT_ROUTER_URL } from "./core/router-connect.js";
 import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
@@ -43,9 +46,10 @@ const log = createLogger({ prefix: "cli" });
 const VERSION = "0.3.0";
 
 function getInstallRoot(): string {
-  return resolve(
-    new URL("..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
-  );
+  // fileURLToPath handles percent-encoding (spaces) and drive-letter casing on
+  // Windows — a raw `.pathname` breaks global installs under paths like
+  // "C:\Users\John Doe\..." (builtins then silently fail to load).
+  return resolve(fileURLToPath(new URL("..", import.meta.url)));
 }
 
 function loadRegistries(installRoot: string, skillPaths: string[]): void {
@@ -348,6 +352,116 @@ program
       result.stopReason === "no_tool_calls" ? 0 :
       result.stopReason === "aborted" ? 130 :
       result.stopReason === "max_rounds" ? 3 : 1;
+  });
+
+program
+  .command("autopilot <goal>")
+  .description("Set-and-forget: autonomously loop the GSD cycle until the project is production-ready")
+  .option("--model <model>", "AI model to use (provider/model)")
+  .option("--agent <agent>", "Agent to use (default: gsd)")
+  .option("--project <path>", "Project root directory")
+  .option("--max-iterations <n>", "Max autopilot iterations")
+  .option("--max-stalls <n>", "Consecutive no-change iterations before stopping")
+  .action(async (goal, opts, command) => {
+    const merged = command.optsWithGlobals();
+    const projectRoot = merged.project || opts.project || process.cwd();
+    const config = getConfigManager(projectRoot).load();
+    providerManager.initializeFromConfig(config.provider as any);
+    toolManager.initialize(projectRoot);
+    loadRegistries(getInstallRoot(), config.skills.paths);
+
+    const explicitModel = merged.model as string | undefined;
+    const agentName = opts.agent || "gsd";
+
+    let provider;
+    let modelName: string | undefined;
+    if (config.router && !explicitModel) {
+      provider = new RoutedProvider(config.router, agentName);
+      modelName = undefined;
+    } else {
+      const model = explicitModel || config.model;
+      const parts = model.split("/");
+      modelName = parts.slice(1).join("/") || undefined;
+      const single = providerManager.getProvider(parts[0]);
+      if (!single || !single.isAvailable()) {
+        console.error(`Provider "${parts[0]}" not available. Run "sentinel setup" or "sentinel connect", or set an API key.`);
+        process.exitCode = 1;
+        return;
+      }
+      provider = single;
+    }
+
+    const mcp = new MCPManager();
+    await mcp.connect((config.mcp as any) || {});
+    const toolDefs = [...getToolDefinitions(), ...mcp.getToolDefs()];
+    const mcpAware = createMcpAwareExecutor(mcp, executeToolCall);
+    // Autonomous => yolo (no human in the loop). Checkpoints still snapshot edits.
+    const engine = new PermissionEngine("yolo", config.permissions as any, projectRoot);
+    const checkpoints = new CheckpointManager(projectRoot);
+    const guardedExecute = createGuardedExecutor({ engine, checkpoints, baseExecute: mcpAware, ask: async () => true });
+    const subagentTool = createSubagentTool({
+      provider,
+      toolDefs,
+      executeTool: guardedExecute,
+      extractToolCalls,
+      model: modelName,
+      systemPrompt: buildSystemPrompt(agentName, projectRoot),
+    });
+
+    const ap = config.autopilot ?? { maxIterations: 10, maxStalls: 2 };
+    const maxIterations = opts.maxIterations ? parseInt(opts.maxIterations, 10) : Math.max(1, ap.maxIterations ?? 10);
+    const maxStalls = opts.maxStalls ? parseInt(opts.maxStalls, 10) : Math.max(1, ap.maxStalls ?? 2);
+
+    const ac = new AbortController();
+    process.once("SIGINT", () => {
+      console.error("\n[autopilot] stopping after the current step…");
+      ac.abort();
+    });
+
+    let result;
+    try {
+      result = await runAutopilotSession({
+        goal,
+        projectRoot,
+        maxIterations,
+        maxStalls,
+        verifyCommands: ap.verifyCommands,
+        runSubagent: (args, sig) => subagentTool.execute(args, sig),
+        signal: ac.signal,
+        log: (m) => console.log(m),
+      });
+    } finally {
+      await mcp.disconnect();
+    }
+    console.log("\n" + summarizeAutopilot(result));
+    process.exitCode =
+      result.status === "production_ready" ? 0 :
+      result.status === "aborted" ? 130 :
+      result.status === "stalled" ? 4 : 3;
+  });
+
+program
+  .command("connect [target]")
+  .description("Configure Claude over your OAuth router (keyless). target: claude (default)")
+  .option("--url <url>", "Router base URL", DEFAULT_ROUTER_URL)
+  .action(async (target, opts) => {
+    const t = (target || "claude").toLowerCase();
+    if (t !== "claude") {
+      console.error(`Unknown connect target "${t}". Supported: claude`);
+      process.exitCode = 1;
+      return;
+    }
+    const url = opts.url || DEFAULT_ROUTER_URL;
+    const path = writeRouterConfig(url);
+    console.log(`✓ Configured Claude via OAuth router (keyless) → ${url}`);
+    console.log(`  Saved to ${path}`);
+    const probe = await probeRouter(url);
+    if (probe.reachable) {
+      console.log(`✓ Router reachable — ${probe.detail}. Run "sentinel" and use a Claude model.`);
+    } else {
+      console.log(`! Router not reachable yet (${probe.detail}).`);
+      console.log(routerStartHelp());
+    }
   });
 
 program
