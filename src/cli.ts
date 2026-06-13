@@ -22,6 +22,8 @@ import { getToolDefinitions, executeToolCall } from "./tools/tool-executor.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import { extractToolCalls } from "./core/tool-call-extractor.js";
 import { buildSystemPrompt } from "./core/system-prompt.js";
+import { compactionBudget } from "./core/context-window.js";
+import { runDiagnostics, formatDiagnostics } from "./core/diagnostics.js";
 import { usageTracker } from "./core/usage-tracker.js";
 import { expandMentions } from "./core/mentions.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "./core/brain-recall.js";
@@ -309,6 +311,28 @@ program
         toolDefs: [...toolDefs, subagentTool.def, todoTool.def],
         executeTool: topExecute,
         extractToolCalls,
+        runVerification: async () => {
+          const cmd = autoCfg.verificationCommands?.[0];
+          const r = await runDiagnostics(projectRoot, cmd ? { command: cmd } : {});
+          return { ok: r.ok, output: formatDiagnostics(r.diagnostics) };
+        },
+        compactContext: async () => {
+          if (contextManager.getContextUtilization() < 0.8) return false;
+          await contextManager.compactWithLLM(async (texts) => {
+            const resp = await provider.chatStream(
+              [{
+                role: "user",
+                content:
+                  "Summarize this conversation excerpt concisely. Preserve the task/goal, " +
+                  "decisions made, files changed, and any unresolved problems; omit chit-chat.\n\n" +
+                  texts.join("\n"),
+              }],
+              { model: modelName, temperature: 0.3, maxTokens: 400 }
+            );
+            return resp.content || "";
+          });
+          return true;
+        },
       },
       {
         model: modelName,
@@ -318,6 +342,8 @@ program
         stuckThreshold: autoCfg.stuckThreshold || 3,
         budgetUSD: autoCfg.budgetUSD || 0,
         getEstimatedCost: () => usageTracker.snapshot().estimatedCostUSD,
+        verifyOnComplete: isAutonomous && autoCfg.verifyOnComplete !== false,
+        maxVerifyRetries: autoCfg.maxVerifyRetries,
       }
     );
 
@@ -368,6 +394,7 @@ program
           // best-effort
         }
       }
+      contextManager.setMaxTokens(compactionBudget(modelName || ""));
       result = await runner.run(outboundTask, ac.signal);
     } finally {
       await mcp.disconnect();
