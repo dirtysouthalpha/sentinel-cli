@@ -4,6 +4,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { getConfigManager } from "../core/config.js";
 import { state } from "../core/state.js";
 import { estimateCostUSD } from "../core/pricing.js";
+import { compactionBudget } from "../core/context-window.js";
+import { runDiagnostics, formatDiagnostics } from "../core/diagnostics.js";
 import { providerManager } from "../ai/provider.js";
 import { RoutedProvider } from "../ai/routed-provider.js";
 import { getToolDefinitions, executeToolCall } from "../tools/tool-executor.js";
@@ -392,6 +394,28 @@ class Connection {
           toolDefs: [...childToolDefs, subagentTool.def, todoTool.def],
           executeTool: topExecute,
           extractToolCalls,
+          runVerification: async () => {
+            const cmd = autoCfg.verificationCommands?.[0];
+            const r = await runDiagnostics(this.projectRoot, cmd ? { command: cmd } : {});
+            return { ok: r.ok, output: formatDiagnostics(r.diagnostics) };
+          },
+          compactContext: async () => {
+            if (cm.getContextUtilization() < 0.8) return false;
+            await cm.compactWithLLM(async (texts) => {
+              const resp = await provider.chatStream(
+                [{
+                  role: "user",
+                  content:
+                    "Summarize this conversation excerpt concisely. Preserve the task/goal, " +
+                    "decisions made, files changed, and any unresolved problems; omit chit-chat.\n\n" +
+                    texts.join("\n"),
+                }],
+                { model: modelName, temperature: 0.3, maxTokens: 400 }
+              );
+              return resp.content || "";
+            });
+            return true;
+          },
         },
         {
           model: modelName,
@@ -402,6 +426,8 @@ class Connection {
           stuckThreshold: autoCfg.stuckThreshold || 3,
           budgetUSD: autoCfg.budgetUSD || 0,
           getEstimatedCost: () => this.cost.estimatedCostUSD,
+          verifyOnComplete: isAutonomous && autoCfg.verifyOnComplete !== false,
+          maxVerifyRetries: autoCfg.maxVerifyRetries,
         }
       );
 
@@ -439,6 +465,7 @@ class Connection {
           // best-effort
         }
       }
+      cm.setMaxTokens(compactionBudget(state.get("currentModel")));
       const result = await runner.run(outbound, this.ac.signal);
       this.send({ type: "done", stopReason: result.stopReason, rounds: result.rounds });
       this.touchSession((id) => sessionManager.markDirty(id));
