@@ -16,9 +16,19 @@ export class StuckDetector {
   }
 
   isStuck(): boolean {
-    if (this.history.length < this.threshold) return false;
-    const tail = this.history.slice(-this.threshold);
-    return tail.every((fp) => fp === tail[0]);
+    const n = this.history.length;
+    // Exact repeat: the last `threshold` calls are all identical.
+    if (n >= this.threshold) {
+      const tail = this.history.slice(-this.threshold);
+      if (tail.every((fp) => fp === tail[0])) return true;
+    }
+    // Two-cycle oscillation: A, B, A, B — bouncing between two calls without
+    // progress (e.g. read X, edit X, read X, edit X with the same args).
+    if (n >= 4) {
+      const [a, b, c, d] = this.history.slice(-4);
+      if (a === c && b === d && a !== b) return true;
+    }
+    return false;
   }
 
   reset(): void {
