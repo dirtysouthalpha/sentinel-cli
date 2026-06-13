@@ -161,7 +161,10 @@ export class ContextManager {
   }
 
   getTotalTokens(): number {
-    return this.messages.reduce((sum, m) => sum + (m.tokenEstimate || estimateTokens(m.content)), 0);
+    // Include the system prompt — it's sent on every request, so omitting it
+    // makes compaction trigger late and under-reports context utilization.
+    const sys = this.systemPrompt ? estimateTokens(this.systemPrompt) : 0;
+    return sys + this.messages.reduce((sum, m) => sum + (m.tokenEstimate || estimateTokens(m.content)), 0);
   }
 
   getMessageCount(): number {

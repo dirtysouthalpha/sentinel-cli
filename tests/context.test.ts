@@ -1,0 +1,34 @@
+import { describe, it, expect } from "vitest";
+import { ContextManager } from "../src/ai/context.js";
+
+describe("ContextManager token accounting", () => {
+  it("counts the system prompt in the token total", () => {
+    const cm = new ContextManager("t1");
+    const before = cm.getTotalTokens();
+    expect(before).toBe(0);
+
+    cm.setSystemPrompt("x".repeat(3500)); // ~1000 tokens at chars/3.5
+    const afterSys = cm.getTotalTokens();
+    expect(afterSys).toBeGreaterThan(900);
+
+    cm.addMessage("user", "y".repeat(350)); // ~100 more tokens
+    expect(cm.getTotalTokens()).toBeGreaterThan(afterSys);
+  });
+
+  it("reflects the system prompt in context utilization", () => {
+    const cm = new ContextManager("t2");
+    expect(cm.getContextUtilization()).toBe(0);
+    cm.setSystemPrompt("z".repeat(35000)); // ~10k tokens
+    expect(cm.getContextUtilization()).toBeGreaterThan(0);
+  });
+
+  it("compacts when many messages exceed the token budget", () => {
+    const cm = new ContextManager("t3");
+    // Each message ~ a lot of chars; push enough to cross the 120k-token budget.
+    for (let i = 0; i < 60; i++) {
+      cm.addMessage("user", "w".repeat(8000)); // ~2286 tokens each
+    }
+    // After auto-compaction the message count collapses well below what was added.
+    expect(cm.getMessageCount()).toBeLessThan(60);
+  });
+});
