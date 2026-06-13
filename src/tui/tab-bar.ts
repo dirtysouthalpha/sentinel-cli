@@ -38,7 +38,7 @@ export function createTabBar(options: TabBarOptions): blessed.Widgets.BoxElement
 
   function render(): void {
     if (tabs.length === 0) {
-      tabBar.setContent(` {${c.textTertiary}-fg}No tabs — Ctrl+N to create{/}`);
+      tabBar.setContent(` {${c.cyan}-fg}◈ SENTINEL{/}  {${c.textTertiary}-fg}Ctrl+N new tab{/}`);
       screen.render();
       return;
     }

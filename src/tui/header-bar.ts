@@ -1,7 +1,7 @@
 import blessed from "blessed";
 import { themeEngine } from "./themes/engine.js";
 import { state } from "../core/state.js";
-import { basename, sep } from "path";
+import { basename } from "path";
 
 export interface HeaderBarOptions {
   screen: blessed.Widgets.Screen;
@@ -19,39 +19,31 @@ export function createHeaderBar(options: HeaderBarOptions): blessed.Widgets.BoxE
     width: "100%",
     height: 1,
     style: {
-      bg: c.bgSecondary,
+      bg: c.bgTertiary,
       fg: c.textSecondary,
     },
     tags: true,
   });
 
-  function getBreadcrumb(): string {
-    const cwd = state.get("currentWorkingDir") || projectRoot;
-    const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
-    const displayParts = parts.slice(-3);
-    const projectName = displayParts[0] || basename(projectRoot);
-    const rest = displayParts.slice(1);
-    const breadcrumb = rest.length > 0
-      ? `{${c.cyan}-fg}${projectName}{/} {${c.textTertiary}-fg}\u203A{/} ` +
-        rest.map((p) => `{${c.textSecondary}-fg}${p}{/}`).join(` {${c.textTertiary}-fg}\u203A{/} `)
-      : `{${c.cyan}-fg}${projectName}{/}`;
-    return breadcrumb;
-  }
-
   function render(): void {
+    const c2 = themeEngine.getBlessedColors();
     const title = state.get("sessionTitle") || "Session 1";
-    const breadcrumb = getBreadcrumb();
-    const model = state.get("currentModel").split("/").pop() || "";
-    const agent = state.get("currentAgent");
+    const model = (state.get("currentModel") as string).split("/").pop() || "";
+    const agent = state.get("currentAgent") as string;
+
+    const cwd = (state.get("currentWorkingDir") as string) || projectRoot;
+    const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
+    // show last 2 path segments
+    const dirDisplay = parts.slice(-2).join("/") || basename(projectRoot);
+
+    const sep = `  {${c2.border}-fg}▌{/}  `;
 
     headerBar.setContent(
-      ` {${c.amber}-fg}\u25CF{/} {bold}${title}{/} ` +
-      `{${c.border}-fg}\u2502{/} ` +
-      `${breadcrumb} ` +
-      `{${c.border}-fg}\u2502{/} ` +
-      `{${c.textTertiary}-fg}${agent}{/} ` +
-      `{${c.border}-fg}\u2502{/} ` +
-      `{${c.textTertiary}-fg}${model}{/} `
+      ` {${c2.cyan}-fg}{bold}◈{/}  ` +
+      `{bold}${title}{/}` +
+      `${sep}{${c2.textTertiary}-fg}${dirDisplay}{/}` +
+      `${sep}{${c2.accent || c2.cyan}-fg}${agent}{/}` +
+      `${sep}{${c2.textSecondary}-fg}${model}{/} `
     );
     screen.render();
   }
@@ -62,6 +54,5 @@ export function createHeaderBar(options: HeaderBarOptions): blessed.Widgets.BoxE
   state.subscribe("currentWorkingDir", render);
 
   render();
-
   return headerBar;
 }

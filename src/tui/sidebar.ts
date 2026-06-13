@@ -10,14 +10,16 @@ export function createSidebar(screen: blessed.Widgets.Screen): blessed.Widgets.B
 
   const sidebar = blessed.box({
     parent: screen,
-    top: 1,
+    top: 3,
     right: 0,
-    width: 26,
-    bottom: 3,
+    width: 28,
+    bottom: 5,
+    hidden: true,          // hidden by default — toggle with Ctrl+S or /sidebar
     style: {
       bg: c.bgSecondary,
       fg: c.textPrimary,
     },
+    border: { type: "line" },
     tags: true,
     scrollable: true,
     mouse: true,
@@ -32,15 +34,18 @@ export function createSidebar(screen: blessed.Widgets.Screen): blessed.Widgets.B
     const currentTheme = themeEngine.getTheme();
 
     const lines: string[] = [
-      `{${c.accent}-fg}{bold}◈ COMMAND CENTER{/}`,
+      `{${c.cyan}-fg}{bold} ◈ COMMAND CENTER{/}`,
+      `{${c.border}-fg}${"─".repeat(24)}{/}`,
       "",
-      `{${c.textTertiary}-fg}── AGENTS ──────────{/}`,
+      `{${c.textTertiary}-fg} AGENTS{/}`,
     ];
 
     for (const agent of agents) {
       const active = agent.name === currentAgent;
-      const marker = active ? `{${c.cyan}-fg}▸{/}` : " ";
-      const name = active ? `{${c.accent}-fg}{bold}${agent.name}{/bold}{/${c.accent}-fg}}` : `{${c.textSecondary}-fg}${agent.name}{/${c.textSecondary}-fg}}`;
+      const marker = active ? `{${c.cyan}-fg}▸{/}` : `{${c.textTertiary}-fg}·{/}`;
+      const name = active
+        ? `{${c.accent || c.cyan}-fg}{bold}${agent.name}{/}`
+        : `{${c.textSecondary}-fg}${agent.name}{/}`;
       lines.push(` ${marker} ${name}`);
     }
 
@@ -49,10 +54,13 @@ export function createSidebar(screen: blessed.Widgets.Screen): blessed.Widgets.B
     }
 
     lines.push("");
-    lines.push(`{${c.textTertiary}-fg}── SKILLS ──────────{/}`);
+    lines.push(`{${c.textTertiary}-fg} SKILLS (${skills.length}){/}`);
 
-    for (const skill of skills.slice(0, 8)) {
-      lines.push(` {${c.textTertiary}-fg}·{/} {${c.textSecondary}-fg}${skill.name}{/${c.textSecondary}-fg}}`);
+    for (const skill of skills.slice(0, 10)) {
+      lines.push(` {${c.textTertiary}-fg}·{/} {${c.textSecondary}-fg}${skill.name}{/}`);
+    }
+    if (skills.length > 10) {
+      lines.push(`   {${c.textTertiary}-fg}+${skills.length - 10} more{/}`);
     }
 
     if (skills.length === 0) {
@@ -60,8 +68,10 @@ export function createSidebar(screen: blessed.Widgets.Screen): blessed.Widgets.B
     }
 
     lines.push("");
-    lines.push(`{${c.textTertiary}-fg}── THEME ───────────{/}`);
-    lines.push(` {${c.cyan}-fg}◈{/} {bold}${currentTheme.display}{/bold}`);
+    lines.push(`{${c.textTertiary}-fg} THEME{/}`);
+    lines.push(` {${c.cyan}-fg}◈{/} {bold}${currentTheme.display}{/}`);
+    lines.push("");
+    lines.push(`{${c.textTertiary}-fg} Ctrl+S to close{/}`);
 
     sidebar.setContent(lines.join("\n"));
     screen.render();
@@ -73,7 +83,7 @@ export function createSidebar(screen: blessed.Widgets.Screen): blessed.Widgets.B
   events.on("agent:switched", renderSidebar);
   events.on("theme:changed", renderSidebar);
 
-  sidebar.key(["escape"], () => {
+  sidebar.key(["escape", "C-s"], () => {
     sidebar.hide();
     screen.render();
   });

@@ -3,6 +3,7 @@ import { themeEngine } from "./themes/engine.js";
 import { state } from "../core/state.js";
 import { events } from "../core/events.js";
 import { providerManager } from "../ai/provider.js";
+import { ProviderError } from "../ai/errors.js";
 import { ContextManager } from "../ai/context.js";
 import { commandRegistry } from "../commands/registry.js";
 import { parseCommand, resolveTemplate } from "../commands/loader.js";
@@ -14,6 +15,14 @@ import { buildSystemPrompt } from "../core/system-prompt.js";
 import { suggestCommand } from "../core/command-search.js";
 import { searchCatalog, COMMAND_CATALOG } from "../core/command-catalog.js";
 import { renderMarkdown } from "./render-markdown.js";
+// Phase 1: extracted TUI modules
+import { InputHandler } from "./input-handler.js";
+import { ChatRenderer } from "./chat-renderer.js";
+import { CommandPalette } from "./command-palette.js";
+// Phase 2: LSP integration
+import { lspToolDef, executeLsp } from "../tools/lsp.js";
+// Phase 3: todo panel
+import { TodoPanel } from "./todo-panel.js";
 import {
   saveWorkflow,
   listWorkflows,
@@ -61,10 +70,11 @@ import { checkForUpdate } from "../core/update-check.js";
 import { createLogger } from "../utils/logger.js";
 import { writeFileSync, readFileSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
+import { createSidebar } from "./sidebar.js";
 
 const log = createLogger({ prefix: "tui" });
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 /**
  * Default marketplace registry source for `/marketplace` (V15). A project-local
@@ -111,30 +121,23 @@ export class TUIApp {
   // V11 semantic repo index (lite TF-IDF). Built lazily by /index or /search.
   private repoIndex?: RepoIndex;
 
-  private inputBuffer = "";
-  private inputCursor = 0; // caret position within inputBuffer
-  private inputHistory: string[] = [];
-  private historyIndex = -1; // -1 = editing a fresh line (not browsing history)
-  private historyDraft = ""; // stashed in-progress line while browsing history
-
-  // Interactive slash-command menu (opencode-style filter-as-you-type).
-  private slashBox!: blessed.Widgets.BoxElement;
-  private slashActive = false;
-  private slashItems: { command: string; description: string }[] = [];
-  private slashIndex = 0;
-
-  private transcript = "";
-  private stream = "";
-  private streamRaw = ""; // un-escaped assistant text, re-rendered as markdown at end
-  private streamHeaderShown = false;
-
-  private cost: CostTracker = {
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
-    requests: 0,
-    estimatedCostUSD: 0,
-  };
+  // Phase 1: extracted modules
+  private inputHandler = new InputHandler({
+    onSubmit: (msg) => this.handleInput(msg),
+    onCancel: () => { this.ac?.abort(); this.isProcessing = false; state.set("isProcessing", false); this.renderer.addSystem("Cancelled."); },
+    onPermissionKey: (allow) => { if (this.pendingPermission) { this.pendingPermission(allow); this.pendingPermission = undefined; this.renderer.addSystem(allow ? "Allowed." : "Denied."); } },
+    hasPendingPermission: () => !!this.pendingPermission,
+  });
+  private renderer = new ChatRenderer();
+  private palette = new CommandPalette({
+    onCommand: (name) => this.handleInput(name),
+    onTheme: (name) => { themeEngine.setTheme(name); state.set("currentTheme", name); this.renderer.addSystem(`Theme → ${themeEngine.getTheme().display}`); },
+    onAgent: (name) => { state.set("currentAgent", name); events.emit("agent:switched", name); this.renderer.addSystem(`Agent → ${name}`); },
+    onModel: (name) => { state.set("currentModel", name); events.emit("model:changed", name); this.renderer.addSystem(`Model → ${name}`); },
+  });
+  // Phase 3: todo panel
+  private todoPanel?: TodoPanel;
+  private sidebarWidget?: blessed.Widgets.BoxElement;
 
   constructor(options: TUIAppOptions) {
     this.projectRoot = options.projectRoot;
@@ -174,12 +177,23 @@ export class TUIApp {
       projectRoot: this.projectRoot,
     });
 
-    this.chat = blessed.box({
+    // ── accent line beneath header (visual separation) ──────────────────────
+    blessed.box({
       parent: this.screen,
       top: 2,
       left: 0,
       width: "100%",
-      bottom: 4,
+      height: 1,
+      tags: false,
+      style: { bg: c.cyan, fg: c.cyan },
+    });
+
+    this.chat = blessed.box({
+      parent: this.screen,
+      top: 3,
+      left: 0,
+      width: "100%",
+      bottom: 5,
       scrollable: true,
       alwaysScroll: true,
       mouse: true,
@@ -187,12 +201,23 @@ export class TUIApp {
       vi: true,
       tags: true,
       wrap: true,
-      padding: { left: 2, right: 2, top: 0, bottom: 0 },
+      padding: { left: 2, right: 3, top: 0, bottom: 0 },
       scrollbar: {
-        ch: " ",
-        style: { bg: c.border },
+        ch: "▌",
+        style: { fg: c.border, bg: c.bgPrimary },
       },
       style: { bg: c.bgPrimary, fg: c.textPrimary },
+    });
+
+    // ── separator above input area ───────────────────────────────────────────
+    blessed.box({
+      parent: this.screen,
+      bottom: 4,
+      left: 0,
+      width: "100%",
+      height: 1,
+      tags: false,
+      style: { bg: c.border, fg: c.border },
     });
 
     this.input = blessed.box({
@@ -202,11 +227,10 @@ export class TUIApp {
       bottom: 1,
       height: 3,
       tags: true,
-      border: { type: "line" },
+      padding: { left: 2, top: 1 },
       style: {
-        bg: c.bgPrimary,
+        bg: c.bgSecondary,
         fg: c.textPrimary,
-        border: { fg: c.border },
       },
     });
 
@@ -217,19 +241,20 @@ export class TUIApp {
       width: "100%",
       height: 1,
       tags: true,
-      style: { bg: c.bgSecondary, fg: c.textSecondary },
+      style: { bg: c.bgTertiary, fg: c.textSecondary },
     });
 
-    // Interactive slash-command menu: a hidden overlay just above the input.
-    this.slashBox = blessed.box({
+    // Slash-command autocomplete overlay just above the input
+    const slashBox = blessed.box({
       parent: this.screen,
       left: 1,
-      width: "70%",
-      bottom: 4,
-      height: 3,
+      width: "75%",
+      bottom: 5,
+      height: 8,
       hidden: true,
       tags: true,
       border: { type: "line" },
+      scrollable: true,
       style: {
         bg: c.bgSecondary,
         fg: c.textPrimary,
@@ -237,133 +262,65 @@ export class TUIApp {
       },
     });
 
-    this.printWelcome();
-    this.setupRawInput();
-    this.setupKeys();
-    this.refreshStatus();
-    this.renderInput();
+    // Phase 1: wire extracted modules
+    this.renderer.init(this.chat, this.status, this.screen);
+    this.renderer.setVersion(VERSION);
+    this.inputHandler.init(this.input, this.screen, slashBox);
+    this.palette.init(this.screen);
+    // Sidebar (hidden by default, Ctrl+S to toggle)
+    this.sidebarWidget = createSidebar(this.screen);
+    // Phase 3: todo panel
+    const todoTool = createTodoTool();
+    this.todoPanel = new TodoPanel({ screen: this.screen, store: todoTool.store });
 
-    state.subscribe("currentAgent", () => this.refreshStatus());
-    state.subscribe("currentModel", () => this.refreshStatus());
-    state.subscribe("isProcessing", () => this.refreshStatus());
-    state.subscribe("compressionStats", () => this.refreshStatus());
-    events.on("theme:changed", () => this.applyTheme());
+    this.renderer.printWelcome(providerManager.getAvailableProviderNames());
+    this.inputHandler.start();
+    this.setupKeys();
+    this.renderer.refreshStatus();
+    this.inputHandler.render();
+
+    state.subscribe("currentAgent", () => this.renderer.refreshStatus());
+    state.subscribe("currentModel", () => this.renderer.refreshStatus());
+    state.subscribe("isProcessing", () => this.renderer.refreshStatus());
+    state.subscribe("compressionStats", () => this.renderer.refreshStatus());
+    events.on("theme:changed", () => this.renderer.applyTheme(this.chat, this.input));
+
+    // Populate tab bar with the already-created session.
+    this.tabManager.refresh();
 
     this.screen.render();
     log.info("TUI started");
   }
 
-  private esc(s: string): string {
-    // Single pass — a two-step replace corrupts "{" into "{open{close}".
-    return s.replace(/[{}]/g, (ch) => (ch === "{" ? "{open}" : "{close}"));
-  }
-
-  private render(): void {
-    this.chat.setContent(this.transcript + this.stream);
-    this.chat.setScrollPerc(100);
-    this.screen.render();
-  }
-
-  private push(block: string): void {
-    this.transcript += block;
-    this.render();
-  }
-
-  private renderInput(): void {
-    const c = themeEngine.getBlessedColors();
-    if (this.isProcessing) {
-      this.input.setContent(`{${c.textTertiary}-fg}  working… press Ctrl+C to cancel{/}`);
-    } else if (this.inputBuffer.length === 0) {
-      this.input.setContent(
-        `{${c.cyan}-fg}❯{/} {${c.textTertiary}-fg}Message Sentinel, or / for commands{/}`
-      );
-    } else {
-      // Render the caret as an inverse cell at its real position within the line.
-      const cur = Math.max(0, Math.min(this.inputCursor, this.inputBuffer.length));
-      const before = this.esc(this.inputBuffer.slice(0, cur));
-      const atChar = cur < this.inputBuffer.length ? this.esc(this.inputBuffer[cur]) : " ";
-      const after = cur < this.inputBuffer.length ? this.esc(this.inputBuffer.slice(cur + 1)) : "";
-      this.input.setContent(`{${c.cyan}-fg}❯{/} ${before}{inverse}${atChar}{/inverse}${after}`);
-    }
-    this.screen.render();
-  }
-
-  private addUser(text: string): void {
-    const c = themeEngine.getBlessedColors();
-    const body = this.esc(text)
-      .split("\n")
-      .map((l) => `{${c.cyan}-fg}▌{/} ${l}`)
-      .join("\n");
-    this.push(`\n{${c.cyan}-fg}▌ {bold}You{/}\n${body}\n`);
-  }
-
-  private startAssistant(): void {
-    this.stream = "";
-    this.streamRaw = "";
-    this.streamHeaderShown = false;
-  }
-
-  private streamAssistant(token: string): void {
-    const c = themeEngine.getBlessedColors();
-    if (!this.streamHeaderShown) {
-      this.transcript += `\n{${c.lime}-fg}▌ {bold}Sentinel{/}\n`;
-      this.streamHeaderShown = true;
-    }
-    this.stream += this.esc(token); // live (plain) display while streaming
-    this.streamRaw += token; // raw text for end-of-message markdown render
-    this.render();
-  }
-
-  private endAssistant(): void {
-    if (this.streamHeaderShown) {
-      // Re-render the completed message with code-block / diff / inline-code formatting.
-      this.transcript += renderMarkdown(this.streamRaw, themeEngine.getBlessedColors() as unknown as Record<string, string>) + "\n";
-    }
-    this.stream = "";
-    this.streamRaw = "";
-    this.streamHeaderShown = false;
-    this.render();
-  }
-
-  private addTool(name: string, args: string, ok: boolean, firstLine: string): void {
-    const c = themeEngine.getBlessedColors();
-    const mark = ok ? `{${c.lime}-fg}✓{/}` : `{${c.error}-fg}✗{/}`;
-    const a = this.esc(args).replace(/\s+/g, " ").slice(0, 60);
-    const fl = this.esc(firstLine).slice(0, 80);
-    this.push(
-      `  ${mark} {${c.amber}-fg}${name}{/} {${c.textTertiary}-fg}${a}{/}` +
-        (fl ? `  {${c.textTertiary}-fg}${fl}{/}` : "") +
-        "\n"
-    );
-  }
-
-  private addSystem(text: string): void {
-    const c = themeEngine.getBlessedColors();
-    const body = text
-      .split("\n")
-      .map((l) => `{${c.textSecondary}-fg}${this.esc(l)}{/}`)
-      .join("\n");
-    this.push(`\n${body}\n`);
-  }
-
-  /** Register the one-time background-task completion notifier. */
+  // ---- forwarding wrappers (Phase 1: delegates to extracted modules) -------
+  private esc(s: string): string { return s.replace(/[{}]/g, (ch) => (ch === "{" ? "{open}" : "{close}")); }
+  private render(): void { this.renderer.render(); }
+  private push(block: string): void { this.renderer.push(block); }
+  private renderInput(): void { this.inputHandler.render(this.isProcessing); }
+  private addUser(text: string): void { this.renderer.addUser(text); }
+  private startAssistant(): void { this.renderer.startAssistant(); }
+  private streamAssistant(token: string): void { this.renderer.streamAssistant(token); }
+  private endAssistant(): void { this.renderer.endAssistant(); }
+  private addTool(name: string, args: string, ok: boolean, firstLine: string): void { this.renderer.addTool(name, args, ok, firstLine); }
+  private addSystem(text: string): void { this.renderer.addSystem(text); }
+  private addError(text: string): void { this.renderer.addError(text); }
+  private divider(): void { this.renderer.divider(); }
+  private printWelcome(): void { this.renderer.printWelcome(providerManager.getAvailableProviderNames()); }
+  private refreshStatus(): void { this.renderer.refreshStatus(); }
+  private applyTheme(): void { this.renderer.applyTheme(this.chat, this.input); this.inputHandler.render(); }
+  private updateCost(usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined): void { this.renderer.updateCost(usage); }
+  private setupRawInput(): void { /* delegated to InputHandler */ }
+  private renderInputDefault(): void { this.inputHandler.render(this.isProcessing); }
   private wireBackground(): void {
     if (this.bgWired) return;
     this.bgWired = true;
     this.background.onUpdate((t) => {
       if (t.status === "running") return;
       const mark = t.status === "done" ? "✓" : t.status === "error" ? "✗" : "∅";
-      const detail =
-        t.status === "done"
-          ? (t.result || "").split("\n").slice(0, 10).join("\n")
-          : t.status === "error"
-            ? t.error || ""
-            : "";
+      const detail = t.status === "done" ? (t.result || "").split("\n").slice(0, 10).join("\n") : t.status === "error" ? t.error || "" : "";
       this.addSystem(`${mark} bg #${t.id} ${t.status}: ${t.label}${detail ? `\n${detail}` : ""}`);
     });
   }
-
-  /** Run a shell command detached; the AbortSignal kills the process on cancel. */
   private runShell(command: string, signal: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
       const isWindows = process.platform === "win32";
@@ -376,357 +333,12 @@ export class TUIApp {
     });
   }
 
-  private addError(text: string): void {
-    const c = themeEngine.getBlessedColors();
-    this.push(`\n{${c.error}-fg}{bold}✗ ${this.esc(text)}{/}\n`);
-  }
-
-  private divider(): void {
-    const c = themeEngine.getBlessedColors();
-    this.push(`{${c.border}-fg}${"─".repeat(60)}{/}\n`);
-  }
-
-  private printWelcome(): void {
-    const c = themeEngine.getBlessedColors();
-    const available = providerManager.getAvailableProviderNames();
-    const status =
-      available.length === 0
-        ? `{${c.amber}-fg}no provider{/} {${c.textTertiary}-fg}— type {/}{${c.cyan}-fg}/connect{/}`
-        : `{${c.lime}-fg}●{/} {${c.textTertiary}-fg}${available.join(", ")}{/}`;
-    // Slim, opencode-style header: a one-line wordmark + a muted hint row.
-    let s = `\n  {${c.cyan}-fg}{bold}▌ sentinel{/} {${c.textTertiary}-fg}v${VERSION}{/}   ${status}\n`;
-    s += `  {${c.textTertiary}-fg}Type a message · {/}{${c.cyan}-fg}/{/}{${c.textTertiary}-fg} commands · Tab completes · ↑ history · Ctrl+Q quit{/}\n`;
-    this.push(s);
-    this.divider();
-  }
-
-  private refreshStatus(): void {
-    const c = themeEngine.getBlessedColors();
-    const agent = state.get("currentAgent");
-    const model = state.get("currentModel");
-    const processing = state.get("isProcessing");
-    const theme = themeEngine.getTheme();
-    const compressionStats = state.get("compressionStats");
-    const cm = this.getContextManager();
-
-    const dot = processing ? `{${c.amber}-fg}{bold}WORKING{/}` : `{${c.lime}-fg}{bold}READY{/}`;
-    const modelName = model.split("/").pop() || model;
-    const sep = `  {${c.border}-fg}│{/}  `;
-    const cost =
-      this.cost.requests > 0
-        ? `${this.cost.totalTokens.toLocaleString()} tok · $${this.cost.estimatedCostUSD.toFixed(4)}`
-        : `${cm.getMessageCount()} msgs`;
-
-    const compression = compressionStats.savingsPercent > 0
-      ? `{${c.border}-fg}│{/}  {${c.lime}-fg}${compressionStats.savingsPercent}% compressed{/}`
-      : "";
-
-    const tabs = `Tabs: ${sessionManager.getSessionCount()}`;
-
-    this.status.setContent(
-      ` ${dot}${sep}${agent}${sep}${modelName}${sep}${theme.display}${sep}{${c.textTertiary}-fg}${cost}{/}${sep}${compression}  {${c.textTertiary}-fg}${tabs}{/} `
-    );
-    this.screen.render();
-  }
-
-  private applyTheme(): void {
-    const c = themeEngine.getBlessedColors();
-    this.chat.style.bg = c.bgPrimary;
-    this.chat.style.fg = c.textPrimary;
-    this.input.style.bg = c.bgPrimary;
-    (this.input.style as Record<string, unknown>).border = { fg: c.border };
-    this.status.style.bg = c.bgSecondary;
-    this.refreshStatus();
-    this.renderInput();
-  }
-
-  private updateCost(
-    usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined
-  ): void {
-    if (!usage) return;
-    this.cost.promptTokens += usage.promptTokens;
-    this.cost.completionTokens += usage.completionTokens;
-    this.cost.totalTokens += usage.totalTokens;
-    this.cost.requests += 1;
-    const inputCost = (usage.promptTokens / 1_000_000) * 3;
-    const outputCost = (usage.completionTokens / 1_000_000) * 15;
-    this.cost.estimatedCostUSD += inputCost + outputCost;
-
-    const activeId = sessionManager.getActiveSessionId();
-    if (activeId) {
-      sessionManager.updateSessionCost(activeId, usage.totalTokens, inputCost + outputCost);
-    }
-
-    this.refreshStatus();
-  }
-
-  private setupRawInput(): void {
-    if (!process.stdin.isTTY) return;
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.setEncoding("utf8");
-
-    process.stdin.on("data", (chunk: string) => this.onInputChunk(chunk));
-  }
-
-  /**
-   * Parse a raw stdin chunk into key actions. Handles ESC/CSI sequences (arrows,
-   * Home/End, Delete) as cursor/history actions instead of inserting their bytes,
-   * plus inline line editing (insert/delete at the caret). This replaces the old
-   * byte-by-byte loop that leaked `[A`/`[D` into the buffer.
-   */
-  private onInputChunk(chunk: string): void {
-    let i = 0;
-    while (i < chunk.length) {
-      const ch = chunk[i];
-      const code = ch.charCodeAt(0);
-
-      // ---- escape / CSI / SS3 sequences -------------------------------------
-      if (code === 27) {
-        const next = chunk[i + 1];
-        if (next === "[" || next === "O") {
-          // Consume until the final byte (0x40–0x7e).
-          let j = i + 2;
-          while (j < chunk.length && !(chunk.charCodeAt(j) >= 0x40 && chunk.charCodeAt(j) <= 0x7e)) j++;
-          const seq = chunk.slice(i + 2, j + 1); // params + final
-          this.handleCsi(seq);
-          i = j + 1;
-          continue;
-        }
-        if (this.slashActive) this.hideSlash(); // lone ESC closes the slash menu
-        i += 1;
-        continue;
-      }
-
-      // ---- permission prompt swallows the next keypress ----------------------
-      if (this.pendingPermission) {
-        const allow = ch === "y" || ch === "Y";
-        const resolve = this.pendingPermission;
-        this.pendingPermission = undefined;
-        this.addSystem(allow ? "Allowed." : "Denied.");
-        resolve(allow);
-        this.renderInput();
-        i += 1;
-        continue;
-      }
-
-      if (code === 13 || code === 10) {
-        if (this.slashActive) this.acceptSlash(); // Enter selects from the menu
-        else this.submit();
-      } else if (code === 127 || code === 8) {
-        // backspace: delete char before the caret
-        if (this.inputCursor > 0) {
-          this.inputBuffer = this.inputBuffer.slice(0, this.inputCursor - 1) + this.inputBuffer.slice(this.inputCursor);
-          this.inputCursor -= 1;
-          this.renderInput();
-          this.maybeSlash();
-        }
-      } else if (code === 3) {
-        // Ctrl+C: cancel a run, else clear the line
-        if (this.isProcessing) {
-          this.ac?.abort();
-          this.isProcessing = false;
-          state.set("isProcessing", false);
-          this.addSystem("Cancelled.");
-        } else {
-          this.setInputLine("", 0);
-        }
-        this.hideSlash();
-        this.renderInput();
-      } else if (code === 9) {
-        if (this.slashActive) this.acceptSlash(); // Tab selects from the menu
-        else this.completeInput();
-      } else if (code === 1) {
-        this.inputCursor = 0; // Ctrl+A → start of line
-        this.renderInput();
-      } else if (code === 5) {
-        this.inputCursor = this.inputBuffer.length; // Ctrl+E → end of line
-        this.renderInput();
-      } else if (code === 21) {
-        this.setInputLine("", 0); // Ctrl+U → clear line
-        this.hideSlash();
-        this.renderInput();
-      } else if (code >= 32) {
-        // printable: insert at caret (handles pasted runs char-by-char)
-        this.inputBuffer = this.inputBuffer.slice(0, this.inputCursor) + ch + this.inputBuffer.slice(this.inputCursor);
-        this.inputCursor += 1;
-        this.renderInput();
-        this.maybeSlash();
-      }
-      i += 1;
-    }
-  }
-
-  /** Handle a CSI/SS3 sequence body (params + final byte), e.g. "A", "1;5C", "3~". */
-  private handleCsi(seq: string): void {
-    if (this.pendingPermission) return;
-    const final = seq.slice(-1);
-    switch (final) {
-      case "A": // up → menu nav when open, else history
-        if (this.slashActive) this.moveSlash(-1);
-        else this.recallHistory(-1);
-        break;
-      case "B": // down → menu nav when open, else history
-        if (this.slashActive) this.moveSlash(1);
-        else this.recallHistory(1);
-        break;
-      case "C": // right
-        if (this.inputCursor < this.inputBuffer.length) {
-          this.inputCursor += 1;
-          this.renderInput();
-        }
-        break;
-      case "D": // left
-        if (this.inputCursor > 0) {
-          this.inputCursor -= 1;
-          this.renderInput();
-        }
-        break;
-      case "H": // Home
-        this.inputCursor = 0;
-        this.renderInput();
-        break;
-      case "F": // End
-        this.inputCursor = this.inputBuffer.length;
-        this.renderInput();
-        break;
-      case "~": // Home(1) / End(4) / Delete(3) variants
-        if (seq.startsWith("1") || seq.startsWith("7")) {
-          this.inputCursor = 0;
-          this.renderInput();
-        } else if (seq.startsWith("4") || seq.startsWith("8")) {
-          this.inputCursor = this.inputBuffer.length;
-          this.renderInput();
-        } else if (seq.startsWith("3")) {
-          if (this.inputCursor < this.inputBuffer.length) {
-            this.inputBuffer = this.inputBuffer.slice(0, this.inputCursor) + this.inputBuffer.slice(this.inputCursor + 1);
-            this.renderInput();
-          }
-        }
-        break;
-      default:
-        break; // ignore unknown sequences (don't insert them)
-    }
-  }
-
-  /** Shell-style Tab completion for the leading /command token. */
-  private completeInput(): void {
-    const buf = this.inputBuffer;
-    if (!buf.startsWith("/") || buf.includes(" ")) return; // only the command word
-    const partial = buf.slice(1).toLowerCase();
-    const names = COMMAND_CATALOG.map((c) => c.command.replace(/^\//, ""));
-    const matches = names.filter((n) => n.toLowerCase().startsWith(partial));
-    if (matches.length === 0) return;
-    if (matches.length === 1) {
-      this.setInputLine(`/${matches[0]} `, matches[0].length + 2);
-    } else {
-      // complete to the longest common prefix, then list the candidates
-      const lcp = matches.reduce((a, b) => {
-        let i = 0;
-        while (i < a.length && i < b.length && a[i].toLowerCase() === b[i].toLowerCase()) i++;
-        return a.slice(0, i);
-      });
-      if (lcp.length > partial.length) this.setInputLine(`/${lcp}`, lcp.length + 1);
-      this.addSystem("  " + matches.map((m) => `/${m}`).join("   "));
-    }
-    this.renderInput();
-  }
-
-  /** Show/refresh or hide the slash menu based on the current buffer. */
-  private maybeSlash(): void {
-    if (this.inputBuffer.startsWith("/") && !this.inputBuffer.includes(" ")) this.updateSlash();
-    else this.hideSlash();
-  }
-
-  private updateSlash(): void {
-    const c = themeEngine.getBlessedColors();
-    this.slashItems = searchCatalog(this.inputBuffer.slice(1)).slice(0, 8);
-    if (this.slashItems.length === 0) {
-      this.hideSlash();
-      return;
-    }
-    this.slashIndex = this.slashActive ? Math.min(this.slashIndex, this.slashItems.length - 1) : 0;
-    const lines = this.slashItems.map((it, i) => {
-      const name = it.command.padEnd(14);
-      return i === this.slashIndex
-        ? `{${c.accent || c.cyan}-fg}{bold}❯ ${name}{/} {${c.textSecondary}-fg}${this.esc(it.description)}{/}`
-        : `  {${c.textPrimary}-fg}${name}{/} {${c.textTertiary}-fg}${this.esc(it.description)}{/}`;
-    });
-    this.slashBox.height = this.slashItems.length + 2;
-    this.slashBox.setContent(lines.join("\n"));
-    this.slashBox.show();
-    this.slashBox.setFront();
-    this.slashActive = true;
-    this.screen.render();
-  }
-
-  private hideSlash(): void {
-    if (!this.slashActive) return;
-    this.slashActive = false;
-    this.slashBox.hide();
-    this.screen.render();
-  }
-
-  private moveSlash(dir: number): void {
-    if (!this.slashActive || this.slashItems.length === 0) return;
-    this.slashIndex = (this.slashIndex + dir + this.slashItems.length) % this.slashItems.length;
-    this.updateSlash();
-  }
-
-  /** Fill the input with the highlighted command (ready for args / Enter to run). */
-  private acceptSlash(): void {
-    const it = this.slashItems[this.slashIndex];
-    this.hideSlash();
-    if (!it) return;
-    const cmd = it.command.split(/\s/)[0];
-    this.setInputLine(`${cmd} `, cmd.length + 1);
-    this.renderInput();
-  }
-
-  private setInputLine(text: string, cursor: number): void {
-    this.inputBuffer = text;
-    this.inputCursor = Math.max(0, Math.min(cursor, text.length));
-  }
-
-  /** Step through input history (dir -1 = older, +1 = newer). */
-  private recallHistory(dir: number): void {
-    if (this.inputHistory.length === 0) return;
-    if (this.historyIndex === -1) {
-      if (dir > 0) return; // already on the fresh line
-      this.historyDraft = this.inputBuffer;
-      this.historyIndex = this.inputHistory.length - 1;
-    } else {
-      this.historyIndex += dir;
-    }
-    if (this.historyIndex >= this.inputHistory.length) {
-      this.historyIndex = -1;
-      this.setInputLine(this.historyDraft, this.historyDraft.length);
-    } else if (this.historyIndex < 0) {
-      this.historyIndex = 0;
-      this.setInputLine(this.inputHistory[0], this.inputHistory[0].length);
-    } else {
-      const v = this.inputHistory[this.historyIndex];
-      this.setInputLine(v, v.length);
-    }
-    this.renderInput();
-  }
-
-  private submit(): void {
-    if (this.isProcessing) return;
-    const msg = this.inputBuffer.trim();
-    this.setInputLine("", 0);
-    this.historyIndex = -1;
-    this.historyDraft = "";
-    this.renderInput();
-    if (!msg) return;
-    if (this.inputHistory[this.inputHistory.length - 1] !== msg) this.inputHistory.push(msg);
-    this.addUser(msg);
-    void this.handleInput(msg);
-  }
 
   private async handleInput(input: string): Promise<void> {
     if (input === "/") {
-      this.showSlashMenu();
+      // Open the full command palette instead of dumping a text wall
+      this.palette.open();
+      this.inputHandler.clearLine();
       return;
     }
     if (input.startsWith("/")) {
@@ -807,8 +419,8 @@ export class TUIApp {
     }
 
     if (parsed.name === "clear") {
-      this.transcript = "";
-      this.stream = "";
+      this.renderer.setTranscript("");
+      this.renderer.clearStream();
       this.printWelcome();
       this.addSystem("Cleared.");
       return;
@@ -836,14 +448,15 @@ export class TUIApp {
     }
 
     if (parsed.name === "cost") {
+      const cost = this.renderer.getCost();
       this.addSystem(
         [
           "Session cost:",
-          `  Prompt:     ${this.cost.promptTokens.toLocaleString()} tokens`,
-          `  Completion: ${this.cost.completionTokens.toLocaleString()} tokens`,
-          `  Total:      ${this.cost.totalTokens.toLocaleString()} tokens`,
-          `  Requests:   ${this.cost.requests}`,
-          `  Est. cost:  $${this.cost.estimatedCostUSD.toFixed(4)}`,
+          `  Prompt:     ${cost.promptTokens.toLocaleString()} tokens`,
+          `  Completion: ${cost.completionTokens.toLocaleString()} tokens`,
+          `  Total:      ${cost.totalTokens.toLocaleString()} tokens`,
+          `  Requests:   ${cost.requests}`,
+          `  Est. cost:  $${cost.estimatedCostUSD.toFixed(4)}`,
         ].join("\n")
       );
       return;
@@ -1961,6 +1574,13 @@ export class TUIApp {
         ? createHookAwareExecutor(config.hooks, parentExecute, defaultRunShell)
         : parentExecute;
 
+      const autoCfg: import("../core/types.js").AutonomousConfig = config.autonomous || {
+        enabled: false, maxRounds: 15, budgetUSD: 0, selfEvaluation: true,
+        completionDetection: true, stuckDetection: true, stuckThreshold: 3,
+        verificationCommands: [],
+      };
+      const isAutonomous = autoCfg.enabled && agentName === "gsd";
+
       const runner = new AgentRunner(
         {
           provider,
@@ -1969,7 +1589,16 @@ export class TUIApp {
           executeTool: topExecute,
           extractToolCalls,
         },
-        { model: runnerModel, maxRounds: agentName === "gsd" ? 30 : 15, largeContextWarnAt: 50 }
+        {
+          model: runnerModel,
+          maxRounds: isAutonomous ? (autoCfg.maxRounds || 50) : (agentName === "gsd" ? 30 : 15),
+          largeContextWarnAt: 50,
+          selfEvaluation: isAutonomous && autoCfg.selfEvaluation !== false,
+          stuckDetection: isAutonomous && autoCfg.stuckDetection !== false,
+          stuckThreshold: autoCfg.stuckThreshold || 3,
+          budgetUSD: autoCfg.budgetUSD || 0,
+          getEstimatedCost: () => usageTracker.snapshot().estimatedCostUSD,
+        }
       );
 
       this.ac = new AbortController();
@@ -1996,6 +1625,14 @@ export class TUIApp {
         this.endAssistant();
         this.addError(e instanceof Error ? e.message : String(e));
       });
+      runner.on("selfEvaluation", (a) => this.addSystem(`Self-eval: ${a}`));
+      runner.on("taskComplete", (r) => this.addSystem(`Task complete: ${r}`));
+      runner.on("budgetExceeded", (c, b) =>
+        this.addSystem(`Budget exceeded: $${c.toFixed(4)} / $${b.toFixed(2)}`)
+      );
+      runner.on("stuckDetected", (name, n) =>
+        this.addSystem(`Stuck on ${name} (${n}x) — trying different approach`)
+      );
 
       // V2: expand @file / @url mentions into the message before the agent runs.
       let outbound = await expandMentions(userMessage, this.projectRoot);
@@ -2014,7 +1651,20 @@ export class TUIApp {
       if (activeId) sessionManager.markDirty(activeId);
     } catch (err) {
       this.endAssistant();
-      this.addError(err instanceof Error ? err.message : String(err));
+      // Auto-switch to small_model on persistent rate limits so the next message works
+      if (err instanceof ProviderError && err.status === 429) {
+        const cfg = getConfigManager().getAll();
+        const fallback = cfg.small_model as string | undefined;
+        const current = state.get("currentModel");
+        if (fallback && fallback !== current) {
+          this.addSystem(`Rate limited on ${current}. Switching to ${fallback} — your next message will use the fallback model.`);
+          state.set("currentModel", fallback);
+        } else {
+          this.addError(`Rate limited on ${current}. Try again in a few minutes or switch models with /model.`);
+        }
+      } else {
+        this.addError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       this.ac = undefined;
       this.isProcessing = false;
@@ -2268,36 +1918,38 @@ export class TUIApp {
       projectRoot: this.projectRoot,
     });
     this.tabManager.refresh();
-    this.transcript = "";
-    this.stream = "";
+    this.renderer.setTranscript("");
+    this.renderer.clearStream();
     this.printWelcome();
     this.addSystem(`Tab "${session.title}" created.`);
   }
 
   private onTabSwitch(session: Session): void {
-    this.transcript = "";
-    this.stream = "";
+    this.renderer.setTranscript("");
+    this.renderer.clearStream();
 
+    let rebuilt = "";
     const msgs = session.contextManager.getMessages();
     for (const msg of msgs) {
       const c = themeEngine.getBlessedColors();
       if (msg.role === "user") {
-        this.transcript += `\n{${c.cyan}-fg}{bold}You{/}\n${this.esc(msg.content)}\n`;
+        rebuilt += `\n{${c.cyan}-fg}{bold}You{/}\n${this.esc(msg.content)}\n`;
       } else if (msg.role === "assistant") {
-        this.transcript += `\n{${c.lime}-fg}{bold}Sentinel{/}\n${this.esc(msg.content)}\n`;
+        rebuilt += `\n{${c.lime}-fg}{bold}Sentinel{/}\n${this.esc(msg.content)}\n`;
       } else if (msg.role === "tool") {
         const firstLine = msg.content.split("\n")[0].slice(0, 200);
-        this.transcript += `{${c.textTertiary}-fg}${this.esc(firstLine)}{/}\n`;
+        rebuilt += `{${c.textTertiary}-fg}${this.esc(firstLine)}{/}\n`;
       }
     }
+    this.renderer.setTranscript(rebuilt);
 
-    this.cost = {
+    this.renderer.setCost({
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
       requests: 0,
       estimatedCostUSD: session.cost.estimatedCostUSD,
-    };
+    });
 
     this.refreshStatus();
     this.render();
@@ -2311,8 +1963,8 @@ export class TUIApp {
     if (activeSession) {
       this.onTabSwitch(activeSession);
     } else {
-      this.transcript = "";
-      this.stream = "";
+      this.renderer.setTranscript("");
+      this.renderer.clearStream();
       this.printWelcome();
     }
   }
@@ -2342,8 +1994,27 @@ export class TUIApp {
       this.tabManager.renameCurrentTab();
     });
 
+    // Ctrl+P — command palette (VS Code-style)
     this.screen.key(["C-p"], () => {
-      this.tabManager.togglePinCurrent();
+      if (this.palette.isOpen()) this.palette.close();
+      else this.palette.open();
+    });
+    // Ctrl+K — also opens palette (legacy binding)
+    this.screen.key(["C-k"], () => {
+      if (this.palette.isOpen()) this.palette.close();
+      else this.palette.open();
+    });
+
+    // Ctrl+S — toggle sidebar
+    this.screen.key(["C-s"], () => {
+      if (!this.sidebarWidget) return;
+      if (this.sidebarWidget.hidden) {
+        this.sidebarWidget.show();
+        this.sidebarWidget.focus();
+      } else {
+        this.sidebarWidget.hide();
+      }
+      this.screen.render();
     });
 
     this.screen.key(["C-t"], () => {
@@ -2361,20 +2032,32 @@ export class TUIApp {
       this.addSystem(`Agent → ${next}`);
     });
 
+    // Ctrl+M — cycle through configured models
     this.screen.key(["C-m"], () => {
-      const models = [
-        "zai/glm-4.6",
-        "zai/glm-5.1",
-        "anthropic/claude-sonnet",
-        "anthropic/claude-haiku",
-        "openai/gpt-4o",
-        "ollama/llama3",
-      ];
+      const cfg = getConfigManager().getAll();
+      const providerModels: string[] = [];
+      const providers = cfg.provider as Record<string, { models?: Record<string, unknown> }> | undefined;
+      if (providers) {
+        for (const [pname, pcfg] of Object.entries(providers)) {
+          if (pcfg?.models) {
+            for (const mname of Object.keys(pcfg.models)) {
+              providerModels.push(`${pname}/${mname}`);
+            }
+          }
+        }
+      }
+      if (providerModels.length === 0) return;
       const cur = state.get("currentModel");
-      const next = models[(models.indexOf(cur) + 1) % models.length];
+      const idx = providerModels.indexOf(cur);
+      const next = providerModels[(idx + 1) % providerModels.length];
       state.set("currentModel", next);
       events.emit("model:changed", next);
       this.addSystem(`Model → ${next}`);
+    });
+
+    // F4 — todo panel
+    this.screen.key(["f4"], () => {
+      if (this.todoPanel) this.todoPanel.toggle();
     });
 
     this.screen.on("resize", () => this.render());
