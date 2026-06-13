@@ -25,6 +25,46 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
+/**
+ * SSRF guard: block requests to loopback, private, and link-local (cloud
+ * metadata) hosts. Covers IP literals and obvious local hostnames — not a
+ * defense against DNS rebinding, but stops the common internal-fetch case.
+ */
+export function isBlockedHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  if (!h) return true;
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  if (h === "::1" || h === "0.0.0.0") return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = +m[1], b = +m[2];
+    if (a === 0 || a === 127) return true;                 // this-host / loopback
+    if (a === 10) return true;                             // private
+    if (a === 192 && b === 168) return true;               // private
+    if (a === 172 && b >= 16 && b <= 31) return true;      // private
+    if (a === 169 && b === 254) return true;               // link-local + metadata
+  }
+  if (h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")) return true; // IPv6 LL/ULA
+  return false;
+}
+
+/** Validate a URL for fetching; returns an error string or null if allowed. */
+export function checkFetchUrl(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `Invalid URL: ${url}`;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return `Blocked scheme "${parsed.protocol}" — only http(s) is allowed.`;
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    return `Blocked host "${parsed.hostname}" (loopback/private/link-local). Use bash if you genuinely need a local request.`;
+  }
+  return null;
+}
+
 export function createWebTool(): ToolDef {
   return {
     name: "web",
@@ -37,6 +77,11 @@ export function createWebTool(): ToolDef {
     execute: async (args): Promise<ToolResult> => {
       const url = args.url as string;
       const format = (args.format as string) || "text";
+
+      const blocked = checkFetchUrl(url);
+      if (blocked) {
+        return { success: false, output: "", error: blocked };
+      }
 
       try {
         const headers: Record<string, string> = {
