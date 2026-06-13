@@ -120,6 +120,41 @@ export class ContextManager {
     log.info(`Context compacted: ${older.length + 6} -> ${this.messages.length} messages`);
   }
 
+  async compactWithLLM(
+    summarize: (texts: string[]) => Promise<string>
+  ): Promise<void> {
+    if (this.messages.length <= 6) return;
+
+    try {
+      const recent = this.messages.slice(-6);
+      const older = this.messages.slice(0, -6);
+
+      // Split older messages into blocks of up to 5
+      const summaries: ConversationMessage[] = [];
+      for (let i = 0; i < older.length; i += 5) {
+        const block = older.slice(i, i + 5);
+        const texts = block.map(
+          (m) => `[${m.role}] ${m.content.slice(0, 300)}`
+        );
+        const summary = await summarize(texts);
+        summaries.push({
+          role: "system",
+          content: `[LLM summary — ${block.length} messages]\n${summary}`,
+          timestamp: block[block.length - 1].timestamp,
+          tokenEstimate: estimateTokens(summary),
+        });
+      }
+
+      this.messages = [...summaries, ...recent];
+      log.info(
+        `Context compacted with LLM: ${older.length + 6} -> ${this.messages.length} messages`
+      );
+    } catch (err) {
+      log.warn(`LLM compaction failed, falling back to compact(): ${String(err)}`);
+      this.compact();
+    }
+  }
+
   private autoCompact(): void {
     log.info(`Auto-compacting context (tokens: ${this.getTotalTokens()})`);
     this.compact();

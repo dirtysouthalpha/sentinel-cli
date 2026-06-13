@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 
 /**
@@ -94,6 +95,52 @@ export async function expandMentions(
         );
       } catch (err) {
         blocks.push(`@${mention} (url): [failed to fetch: ${String(err)}]`);
+      }
+    } else if (mention.startsWith("symbol:")) {
+      // @symbol:name — search for the symbol in TS/JS files
+      const symbolName = mention.slice("symbol:".length);
+      if (!symbolName) {
+        blocks.push(`@${mention}: [empty symbol name]`);
+        continue;
+      }
+      try {
+        const result = execSync(
+          `grep -rn "${symbolName}" --include="*.ts" --include="*.js" -m 50 .`,
+          { cwd: projectRoot, encoding: "utf8", timeout: 10_000 }
+        );
+        const lines = result.split("\n").slice(0, 500);
+        const body =
+          lines.length >= 500
+            ? lines.join("\n") + "\n... (truncated at 500 lines)"
+            : lines.join("\n");
+        blocks.push(`@${mention} (symbol):\n${body}`);
+      } catch {
+        blocks.push(`@${mention} (symbol): [no matches found]`);
+      }
+    } else if (mention === "problems") {
+      // @problems — run tsc diagnostics
+      try {
+        const raw = execSync("npx tsc --noEmit 2>&1", {
+          cwd: projectRoot,
+          encoding: "utf8",
+          timeout: 30_000,
+        });
+        const lines = raw.split("\n").slice(0, 500);
+        const body =
+          lines.length >= 500
+            ? lines.join("\n") + "\n... (truncated at 500 lines)"
+            : lines.join("\n");
+        blocks.push(`@problems (diagnostics):\n${body}`);
+      } catch (err) {
+        // execSync throws on non-zero exit — stdout is in err.stdout
+        const output =
+          (err as { stdout?: string }).stdout ?? String(err);
+        const lines = output.split("\n").slice(0, 500);
+        const body =
+          lines.length >= 500
+            ? lines.join("\n") + "\n... (truncated at 500 lines)"
+            : lines.join("\n");
+        blocks.push(`@problems (diagnostics):\n${body}`);
       }
     } else {
       const path = isAbsolute(mention) ? mention : resolve(projectRoot, mention);
