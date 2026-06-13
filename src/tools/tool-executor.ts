@@ -2,6 +2,7 @@ import { toolManager } from "./index.js";
 import { ChatMessage, ToolCall, ToolDef as AIToolDef } from "../ai/types.js";
 import { ToolDef } from "./types.js";
 import { compressToolOutput } from "../ai/compression.js";
+import { getConfigManager } from "../core/config.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "tool-exec" });
@@ -207,10 +208,16 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ChatMessage> 
       : `ERROR: ${result.error || "Unknown error"}\n${result.output}`;
 
     let output = rawOutput;
-    try {
-      output = await compressToolOutput(rawOutput, name);
-    } catch {
-      // compression failed, use raw output
+    // Honor the headroom config (the compressToolOutput flag was previously
+    // ignored — compression always ran regardless of settings).
+    const hr = getConfigManager().getAll().headroom;
+    const compressionOn = !hr || (hr.enabled !== false && hr.compressToolOutput !== false);
+    if (compressionOn) {
+      try {
+        output = await compressToolOutput(rawOutput, name);
+      } catch {
+        // compression failed, use raw output
+      }
     }
 
     return {
