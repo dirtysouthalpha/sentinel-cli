@@ -2,10 +2,19 @@ import { ToolDef, ToolResult } from "./types.js";
 import { LspManager } from "../core/lsp-manager.js";
 
 let manager: LspManager | null = null;
+let exitHookInstalled = false;
 
 function getManager(): LspManager {
   if (!manager) {
     manager = new LspManager();
+    // Servers stay warm for the whole session (so diagnostics/references work
+    // across calls); tear them down once when the process exits — no orphans.
+    if (!exitHookInstalled) {
+      exitHookInstalled = true;
+      process.once("exit", () => manager?.killAll());
+      process.once("SIGINT", () => { manager?.killAll(); process.exit(130); });
+      process.once("SIGTERM", () => { manager?.killAll(); process.exit(143); });
+    }
   }
   return manager;
 }
@@ -63,58 +72,56 @@ export async function executeLsp(
   const newName = args.newName as string | undefined;
   const query = args.query as string | undefined;
 
-  // Auto-connect on first action
+  // Auto-connect on first action. Servers then stay warm for the session
+  // (torn down by the process exit hook in getManager), so successive calls
+  // reuse the same language server and its loaded document state.
   if (!mgr["initialized"]) {
     await mgr.connect(DEFAULT_SERVERS);
   }
 
-  try {
-    let result: unknown;
+  let result: unknown;
 
-    switch (action) {
-      case "diagnostics":
-        if (!file) throw new Error("file is required for diagnostics");
-        result = await mgr.diagnostics(file);
-        break;
-      case "definition":
-        if (!file || line == null || character == null)
-          throw new Error("file, line, and character are required for definition");
-        result = await mgr.definition(file, line, character);
-        break;
-      case "references":
-        if (!file || line == null || character == null)
-          throw new Error("file, line, and character are required for references");
-        result = await mgr.references(file, line, character);
-        break;
-      case "hover":
-        if (!file || line == null || character == null)
-          throw new Error("file, line, and character are required for hover");
-        result = await mgr.hover(file, line, character);
-        break;
-      case "symbols":
-        if (!query) throw new Error("query is required for symbols");
-        result = await mgr.symbols(query);
-        break;
-      case "rename":
-        if (!file || line == null || character == null || !newName)
-          throw new Error("file, line, character, and newName are required for rename");
-        result = await mgr.rename(file, line, character, newName);
-        break;
-      case "code_actions":
-        if (!file || line == null || character == null)
-          throw new Error("file, line, and character are required for code_actions");
-        result = await mgr.codeActions(file, line, character);
-        break;
-      default:
-        throw new Error(
-          `Unknown action "${action}". Use: diagnostics, definition, references, hover, symbols, rename, code_actions`
-        );
-    }
-
-    return formatResult(action, result);
-  } finally {
-    await mgr.shutdown();
+  switch (action) {
+    case "diagnostics":
+      if (!file) throw new Error("file is required for diagnostics");
+      result = await mgr.diagnostics(file);
+      break;
+    case "definition":
+      if (!file || line == null || character == null)
+        throw new Error("file, line, and character are required for definition");
+      result = await mgr.definition(file, line, character);
+      break;
+    case "references":
+      if (!file || line == null || character == null)
+        throw new Error("file, line, and character are required for references");
+      result = await mgr.references(file, line, character);
+      break;
+    case "hover":
+      if (!file || line == null || character == null)
+        throw new Error("file, line, and character are required for hover");
+      result = await mgr.hover(file, line, character);
+      break;
+    case "symbols":
+      if (!query) throw new Error("query is required for symbols");
+      result = await mgr.symbols(query);
+      break;
+    case "rename":
+      if (!file || line == null || character == null || !newName)
+        throw new Error("file, line, character, and newName are required for rename");
+      result = await mgr.rename(file, line, character, newName);
+      break;
+    case "code_actions":
+      if (!file || line == null || character == null)
+        throw new Error("file, line, and character are required for code_actions");
+      result = await mgr.codeActions(file, line, character);
+      break;
+    default:
+      throw new Error(
+        `Unknown action "${action}". Use: diagnostics, definition, references, hover, symbols, rename, code_actions`
+      );
   }
+
+  return formatResult(action, result);
 }
 
 function formatResult(action: string, result: unknown): string {
