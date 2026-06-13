@@ -129,9 +129,12 @@ export async function parseOpenAIStream(
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6).trim();
-          if (data === "[DONE]") continue;
+        // The space after "data:" is optional in SSE; some OpenAI-compatible
+        // endpoints emit "data:{...}". Handle both, or content is silently lost.
+        const trimmed = line.trimStart();
+        if (trimmed.startsWith("data:")) {
+          const data = trimmed.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
 
           try {
             const parsed = JSON.parse(data);
