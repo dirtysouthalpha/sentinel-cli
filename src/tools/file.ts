@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdir
 import { join, resolve, dirname, basename } from "path";
 import { createHash } from "crypto";
 import { ToolDef, ToolResult } from "./types.js";
+import { replaceLineBlock } from "./edit-match.js";
 
 function diff(oldText: string, newText: string): string {
   const oldLines = oldText.split("\n");
@@ -99,74 +100,6 @@ function resolveTarget(
  * content plus the matched old text (for diffs), or a descriptive error the
  * model can act on.
  */
-function findBlocks(
-  fileLines: string[],
-  searchBlock: string[],
-  eq: (a: string, b: string) => boolean
-): number[] {
-  const starts: number[] = [];
-  for (let i = 0; i + searchBlock.length <= fileLines.length; i++) {
-    let hit = true;
-    for (let j = 0; j < searchBlock.length; j++) {
-      if (!eq(fileLines[i + j], searchBlock[j])) { hit = false; break; }
-    }
-    if (hit) starts.push(i);
-  }
-  return starts;
-}
-
-function applySearch(
-  content: string,
-  oldText: string,
-  replaceText: string,
-  strictWhitespace: boolean
-): { ok: true; newContent: string; oldText: string; line: number } | { ok: false; error: string } {
-  // Line-aligned block matching (not raw substring) so a search for `foo();`
-  // matches a whole line, never a fragment inside `  foo();` or `if(foo());`.
-  const fileLines = content.split("\n");
-  const searchBlock = oldText.split("\n");
-
-  const splice = (start: number) => {
-    const matchedOld = fileLines.slice(start, start + searchBlock.length).join("\n");
-    const newContent = [
-      ...fileLines.slice(0, start),
-      ...replaceText.split("\n"),
-      ...fileLines.slice(start + searchBlock.length),
-    ].join("\n");
-    return { ok: true as const, newContent, oldText: matchedOld, line: start + 1 };
-  };
-
-  // 1) Exact line match — require uniqueness, or the wrong copy could be edited.
-  const exact = findBlocks(fileLines, searchBlock, (a, b) => a === b);
-  if (exact.length === 1) return splice(exact[0]);
-  if (exact.length > 1) {
-    return {
-      ok: false,
-      error: `Ambiguous edit: the search text appears ${exact.length} times. Include more surrounding lines so it uniquely identifies one location.`,
-    };
-  }
-
-  if (strictWhitespace) {
-    return { ok: false, error: "Exact text not found (strictWhitespace is on). Check the content and whitespace." };
-  }
-
-  // 2) Whitespace-tolerant fallback: compare lines ignoring leading/trailing
-  //    whitespace (handles indentation drift, trailing spaces, CRLF). Still
-  //    requires a unique match before touching the file.
-  const norm = (s: string) => s.replace(/^\s+/, "").replace(/\s+$/, "");
-  const tolerant = findBlocks(fileLines, searchBlock, (a, b) => norm(a) === norm(b));
-  if (tolerant.length === 0) {
-    return { ok: false, error: "Text not found in file. Check the content and surrounding lines." };
-  }
-  if (tolerant.length > 1) {
-    return {
-      ok: false,
-      error: `Ambiguous edit: ${tolerant.length} whitespace-insensitive matches. Include more surrounding lines to disambiguate.`,
-    };
-  }
-  return splice(tolerant[0]);
-}
-
 /** Compute the edited content for any target, or a descriptive error. */
 function computeEdit(
   content: string,
@@ -189,7 +122,7 @@ function computeEdit(
     return { ok: true, newContent, oldText: target.oldText, line: target.line };
   }
 
-  return applySearch(content, target.oldText, replaceText, strictWhitespace);
+  return replaceLineBlock(content, target.oldText, replaceText, strictWhitespace);
 }
 
 export function createFileTool(projectRoot: string): ToolDef {

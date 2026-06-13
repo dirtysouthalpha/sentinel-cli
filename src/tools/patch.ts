@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { ToolDef, ToolResult } from "./types.js";
+import { replaceLineBlock } from "./edit-match.js";
 
 interface PatchOperation {
   oldText: string;
@@ -34,15 +35,16 @@ export function createPatchTool(projectRoot: string): ToolDef {
         const replaceAll = args.all as boolean;
 
         if (!content.includes(oldText)) {
-          const lines = content.split("\n");
-          const firstLine = oldText.split("\n")[0];
-          const matches = lines.filter((l) => l.trim() === firstLine.trim());
-          if (matches.length > 0) {
-            return {
-              success: false,
-              output: "",
-              error: `Exact match not found, but similar line exists. Make sure whitespace matches exactly.\nFound ${matches.length} similar line(s).`,
-            };
+          // Exact substring missing — fall back to whitespace-tolerant line
+          // matching (handles indentation drift), the same matcher the file
+          // edit tool uses. Single-replace only; replaceAll stays exact.
+          if (!replaceAll) {
+            const r = replaceLineBlock(content, oldText, newText, false);
+            if (r.ok) {
+              writeFileSync(filePath, r.newContent, "utf-8");
+              return { success: true, output: `Patched ${filePath} at line ${r.line} (whitespace-tolerant match)` };
+            }
+            return { success: false, output: "", error: r.error };
           }
           return { success: false, output: "", error: "Text not found in file" };
         }
