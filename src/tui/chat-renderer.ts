@@ -3,6 +3,7 @@ import { themeEngine } from "./themes/engine.js";
 import { state } from "../core/state.js";
 import { sessionManager } from "../core/session-manager.js";
 import { renderMarkdown } from "./render-markdown.js";
+import { estimateCostUSD } from "../core/pricing.js";
 
 export interface CostTracker {
   promptTokens: number;
@@ -203,13 +204,14 @@ export class ChatRenderer {
     this.cost.completionTokens += usage.completionTokens;
     this.cost.totalTokens += usage.totalTokens;
     this.cost.requests += 1;
-    const inputCost = (usage.promptTokens / 1_000_000) * 3;
-    const outputCost = (usage.completionTokens / 1_000_000) * 15;
-    this.cost.estimatedCostUSD += inputCost + outputCost;
+    // Per-model pricing so the status bar / persisted session cost match the
+    // model actually in use (e.g. glm-4.6 via proxy), not a hardcoded $3/$15.
+    const callCost = estimateCostUSD(state.get("currentModel"), usage.promptTokens, usage.completionTokens);
+    this.cost.estimatedCostUSD += callCost;
 
     const activeId = sessionManager.getActiveSessionId();
     if (activeId) {
-      sessionManager.updateSessionCost(activeId, usage.totalTokens, inputCost + outputCost);
+      sessionManager.updateSessionCost(activeId, usage.totalTokens, callCost);
     }
     this.refreshStatus();
   }

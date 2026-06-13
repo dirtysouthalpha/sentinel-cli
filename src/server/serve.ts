@@ -3,6 +3,7 @@ import type { AddressInfo } from "net";
 import { WebSocketServer, WebSocket } from "ws";
 import { getConfigManager } from "../core/config.js";
 import { state } from "../core/state.js";
+import { estimateCostUSD } from "../core/pricing.js";
 import { providerManager } from "../ai/provider.js";
 import { RoutedProvider } from "../ai/routed-provider.js";
 import { getToolDefinitions, executeToolCall } from "../tools/tool-executor.js";
@@ -495,9 +496,11 @@ class Connection {
     this.cost.completionTokens += u.completionTokens;
     this.cost.totalTokens += u.totalTokens;
     this.cost.requests += 1;
-    this.cost.estimatedCostUSD += (u.promptTokens / 1_000_000) * 3 + (u.completionTokens / 1_000_000) * 15;
+    // Per-model pricing so headless/server cost matches the active model.
+    const callCost = estimateCostUSD(state.get("currentModel"), u.promptTokens, u.completionTokens);
+    this.cost.estimatedCostUSD += callCost;
     const id = sessionManager.getActiveSessionId();
-    if (id) sessionManager.updateSessionCost(id, u.totalTokens, (u.promptTokens / 1_000_000) * 3 + (u.completionTokens / 1_000_000) * 15);
+    if (id) sessionManager.updateSessionCost(id, u.totalTokens, callCost);
   }
 
   private touchSession(fn: (id: string) => void): void {
