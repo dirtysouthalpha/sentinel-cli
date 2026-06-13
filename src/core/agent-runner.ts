@@ -1,5 +1,8 @@
 import { EventEmitter } from "events";
 import { AIProvider, ChatMessage, ToolCall, ToolDef, contentToText } from "../ai/types.js";
+import { evaluateRound, EvalResult } from "./self-evaluator.js";
+import { StuckDetector } from "./stuck-detector.js";
+import { BudgetEnforcer } from "./budget-enforcer.js";
 
 /**
  * Minimal interface the runner needs from a context manager. The real
@@ -32,12 +35,18 @@ export interface AgentRunnerConfig {
   temperature?: number;
   maxTokens?: number;
   largeContextWarnAt?: number;
+  selfEvaluation?: boolean;
+  completionDetection?: boolean;
+  stuckDetection?: boolean;
+  stuckThreshold?: number;
+  budgetUSD?: number;
+  getEstimatedCost?: () => number;
 }
 
 export interface AgentRunResult {
   rounds: number;
   finalContent: string;
-  stopReason: "no_tool_calls" | "max_rounds" | "aborted" | "error";
+  stopReason: "no_tool_calls" | "max_rounds" | "aborted" | "error" | "task_complete" | "stuck" | "budget_exceeded";
   usage: {
     promptTokens: number;
     completionTokens: number;
@@ -61,6 +70,10 @@ export interface AgentRunnerEvents {
   contextLarge: (count: number) => void;
   runError: (err: unknown) => void;
   done: (result: AgentRunResult) => void;
+  selfEvaluation: (assessment: string) => void;
+  taskComplete: (reason: string) => void;
+  budgetExceeded: (cost: number, budget: number) => void;
+  stuckDetected: (toolName: string, count: number) => void;
 }
 
 /**
@@ -75,6 +88,9 @@ export class AgentRunner extends EventEmitter {
   private readonly executeTool: (tc: ToolCall) => Promise<ChatMessage>;
   private readonly extract: (content: string) => ToolCall[] | null;
   private readonly config: AgentRunnerConfig;
+  private readonly stuckDetector: StuckDetector;
+  private readonly budgetEnforcer: BudgetEnforcer | null;
+  private consecutiveStuckCount = 0;
 
   constructor(deps: AgentRunnerDeps, config: AgentRunnerConfig) {
     super();
@@ -84,6 +100,10 @@ export class AgentRunner extends EventEmitter {
     this.executeTool = deps.executeTool;
     this.extract = deps.extractToolCalls;
     this.config = config;
+    this.stuckDetector = new StuckDetector(config.stuckThreshold ?? 3);
+    this.budgetEnforcer = config.budgetUSD
+      ? new BudgetEnforcer(config.budgetUSD, config.getEstimatedCost ?? (() => 0))
+      : null;
   }
 
   // ---- typed event overloads -------------------------------------------------
@@ -116,6 +136,12 @@ export class AgentRunner extends EventEmitter {
           break;
         }
 
+        if (this.budgetEnforcer?.isExceeded()) {
+          stopReason = "budget_exceeded";
+          this.emit("budgetExceeded", this.config.getEstimatedCost?.() ?? 0, this.config.budgetUSD!);
+          break;
+        }
+
         this.emit("roundStart", round);
         completedRounds = round;
 
@@ -145,8 +171,6 @@ export class AgentRunner extends EventEmitter {
             ? response.toolCalls
             : this.extract(response.content);
 
-        // GUARD: add the assistant message when there is content OR tool calls.
-        // Empty content + tool calls is normal (OpenAI/Anthropic) — never skip.
         if (response.content || (toolCalls && toolCalls.length)) {
           this.context.addMessage("assistant", response.content || "", { toolCalls });
         }
@@ -159,23 +183,50 @@ export class AgentRunner extends EventEmitter {
           break;
         }
 
-        // Run the tool loop, THEN emit roundEnd after it.
-        for (const tc of toolCalls!) {
-          if (signal?.aborted) {
-            stopReason = "aborted";
-            break;
-          }
+        // Batch tool calls with concurrency cap and same-file serialization
+        const MAX_CONCURRENT = 4;
+        const batches: ToolCall[][] = [];
+        let currentBatch: ToolCall[] = [];
+        const writtenPaths = new Set<string>();
 
-          this.emit("toolStart", tc.name, tc.arguments);
-          const resultMsg = await this.executeTool(tc);
-          const resultText = contentToText(resultMsg.content);
-          const ok = !resultText.startsWith("ERROR");
-          const firstLine = resultText.split("\n")[0].slice(0, 200);
-          this.emit("toolResult", tc.name, ok, firstLine, resultText);
-          this.context.addMessage("tool", `[Tool: ${resultMsg.name}]\n${resultText}`, {
-            toolCallId: tc.id,
-            name: tc.name,
-          });
+        for (const tc of toolCalls!) {
+          const args = (() => { try { return JSON.parse(tc.arguments); } catch { return {}; } })();
+          const path = String(args.path || args.file || args.destination || "");
+          const conflicts = path && writtenPaths.has(path);
+          if (conflicts || currentBatch.length >= MAX_CONCURRENT) {
+            if (currentBatch.length) batches.push(currentBatch);
+            currentBatch = [tc];
+            writtenPaths.clear();
+            if (path) writtenPaths.add(path);
+          } else {
+            currentBatch.push(tc);
+            if (path) writtenPaths.add(path);
+          }
+        }
+        if (currentBatch.length) batches.push(currentBatch);
+
+        for (const batch of batches) {
+          if (signal?.aborted) { stopReason = "aborted"; break; }
+
+          const settled = await Promise.allSettled(batch.map((tc) => this.executeSingleTool(tc, signal)));
+
+          for (let ri = 0; ri < settled.length; ri++) {
+            const r = settled[ri];
+            const tc = batch[ri];
+
+            if (this.config.stuckDetection) {
+              this.stuckDetector.record(tc);
+            }
+
+            if (r.status === "rejected") {
+              this.emit("toolResult", tc.name, false, String(r.reason), String(r.reason));
+              this.context.addMessage("tool", `[Tool: ${tc.name}]\nERROR: ${r.reason}`, { toolCallId: tc.id, name: tc.name });
+            } else {
+              const { name, ok, firstLine, resultText } = r.value;
+              this.emit("toolResult", name, ok, firstLine, resultText);
+              this.context.addMessage("tool", `[Tool: ${name}]\n${resultText}`, { toolCallId: tc.id, name });
+            }
+          }
         }
 
         this.emit("roundEnd", round, !signal?.aborted);
@@ -185,8 +236,58 @@ export class AgentRunner extends EventEmitter {
           break;
         }
 
-        // If we just used the final allowed round and still want to continue,
-        // we'll exit the loop on the next iteration check — mark max_rounds.
+        // Stuck detection
+        if (this.config.stuckDetection && this.stuckDetector.isStuck()) {
+          this.consecutiveStuckCount++;
+          const stuckToolName = toolCalls![0]?.name || "unknown";
+          this.emit("stuckDetected", stuckToolName, this.config.stuckThreshold ?? 3);
+
+          if (this.consecutiveStuckCount >= 2) {
+            stopReason = "stuck";
+            break;
+          }
+
+          // Inject recovery hint and let the model try once more
+          this.context.addMessage("user",
+            "You appear stuck repeating the same operation. " +
+            "Try a completely different approach. If the task cannot progress further, " +
+            "respond with TASK_COMPLETE or TASK_STUCK."
+          );
+          this.stuckDetector.reset();
+          continue;
+        }
+
+        this.consecutiveStuckCount = 0;
+
+        // Self-evaluation
+        if (this.config.selfEvaluation) {
+          const evalOutcome = await evaluateRound(
+            this.context.toAIMessages(),
+            this.provider,
+            model
+          );
+
+          if (evalOutcome.usage) {
+            usage.promptTokens += evalOutcome.usage.promptTokens;
+            usage.completionTokens += evalOutcome.usage.completionTokens;
+            usage.totalTokens += evalOutcome.usage.totalTokens;
+            this.emit("usage", evalOutcome.usage);
+          }
+
+          this.emit("selfEvaluation", evalOutcome.assessment);
+
+          if (evalOutcome.result === "complete") {
+            stopReason = "task_complete";
+            this.emit("taskComplete", "self_evaluation");
+            break;
+          }
+          if (evalOutcome.result === "stuck") {
+            stopReason = "stuck";
+            this.emit("taskComplete", "stuck_detected");
+            break;
+          }
+        }
+
         if (round === maxRounds) {
           stopReason = "max_rounds";
         }
@@ -209,5 +310,16 @@ export class AgentRunner extends EventEmitter {
     };
     this.emit("done", result);
     return result;
+  }
+
+  /** Execute a single tool call, returning structured result for batch processing. */
+  private async executeSingleTool(tc: ToolCall, signal?: AbortSignal): Promise<{ name: string; ok: boolean; firstLine: string; resultText: string }> {
+    if (signal?.aborted) throw new Error("aborted");
+    this.emit("toolStart", tc.name, tc.arguments);
+    const resultMsg = await this.executeTool(tc);
+    const resultText = contentToText(resultMsg.content);
+    const ok = !resultText.startsWith("ERROR");
+    const firstLine = resultText.split("\n")[0].slice(0, 200);
+    return { name: tc.name, ok, firstLine, resultText };
   }
 }
