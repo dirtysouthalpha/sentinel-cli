@@ -149,11 +149,24 @@ export function createFileTool(projectRoot: string): ToolDef {
               return { success: false, output: "", error: `File not found: ${path}` };
             }
             const raw = readFileSync(path, encoding);
+
+            // Binary guard: NUL bytes almost never occur in text. Refuse rather
+            // than dumping mojibake into the model's context.
+            if (/\u0000/.test(raw.slice(0, 8000))) {
+              const bytes = statSync(path).size;
+              return {
+                success: false,
+                output: "",
+                error: `Binary file (${bytes} bytes) — not shown as text. Use bash/git if you need to inspect it.`,
+              };
+            }
+
             const offset = args.offset as number | undefined; // 1-based start line
             const limit = args.limit as number | undefined;   // max lines to return
             const lines = raw.split("\n");
             const total = lines.length;
             const DEFAULT_MAX_LINES = 2000;
+            const MAX_CHARS = 100_000; // ~28k tokens; also catches minified one-liners
 
             let start = 0;
             let end = total;
@@ -169,17 +182,25 @@ export function createFileTool(projectRoot: string): ToolDef {
               windowed = true;
             }
 
-            const slice = lines.slice(start, end).join("\n");
-            if (!windowed) {
+            let slice = lines.slice(start, end).join("\n");
+
+            // Character cap: line-windowing can't bound a minified single line.
+            let charCapped = false;
+            if (slice.length > MAX_CHARS) {
+              slice = slice.slice(0, MAX_CHARS);
+              charCapped = true;
+            }
+
+            if (!windowed && !charCapped) {
               return { success: true, output: slice };
             }
+            const notes: string[] = [];
+            if (windowed) notes.push(`showing lines ${start + 1}-${end} of ${total}`);
+            if (charCapped) notes.push(`truncated to ${MAX_CHARS} chars (long/minified content)`);
             return {
               success: true,
-              output:
-                slice +
-                `\n\n[showing lines ${start + 1}-${end} of ${total}. ` +
-                `Use action:read with offset/limit to read other parts.]`,
-              data: { totalLines: total, start: start + 1, end },
+              output: slice + `\n\n[${notes.join("; ")}. Use action:read with offset/limit to read other parts.]`,
+              data: { totalLines: total, start: start + 1, end, charCapped },
             };
           }
           case "write": {

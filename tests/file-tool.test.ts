@@ -147,6 +147,23 @@ describe("file tool — edit robustness", () => {
       expect(res.output).toMatch(/showing lines 10-12 of 100/);
     });
 
+    it("refuses to dump a binary file as text", async () => {
+      const f = seed("bin.dat", "abc");
+      // Overwrite with bytes containing NUL.
+      writeFileSync(join(dir, f), Buffer.from([0x89, 0x50, 0x00, 0x4e, 0x47, 0x0a]));
+      const res = await tool.execute({ action: "read", path: f });
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/binary file/i);
+    });
+
+    it("char-caps a minified single-line file that line-windowing can't bound", async () => {
+      const f = seed("min.js", "x".repeat(250_000)); // one logical line
+      const res = await tool.execute({ action: "read", path: f });
+      expect(res.success).toBe(true);
+      expect(res.output.length).toBeLessThan(250_000);
+      expect(res.output).toMatch(/minified|truncated to 100000 chars/i);
+    });
+
     it("caps an oversized file read and says so", async () => {
       const big = Array.from({ length: 2500 }, (_, i) => `L${i + 1}`).join("\n");
       const f = seed("big.ts", big);
