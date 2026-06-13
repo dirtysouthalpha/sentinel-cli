@@ -1,4 +1,4 @@
-import { exec, execFile } from "child_process";
+import { execFile } from "child_process";
 import { readdirSync, statSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import { ToolDef, ToolResult } from "./types.js";
@@ -59,11 +59,18 @@ export async function searchGrep(root: string, pattern: string, include?: string
       const includeFilter = include ? `-Include ${sq(include)}` : "";
       // Drop matches whose path crosses a noise dir (e.g. \node_modules\).
       const noiseRe = sq(NOISE_DIRS.map((d) => `[\\\\/]${d}[\\\\/]`).join("|"));
-      const cmd = `Get-ChildItem -Path ${sq(root)} -Recurse ${includeFilter} -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch ${noiseRe} } | Select-String -Pattern ${sq(pattern)} | Select-Object -First ${maxResults} | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line)" }`;
+      // Build output with string concatenation, not an interpolated "..." —
+      // keeping the command free of double quotes so it survives as a single
+      // -Command argument to execFile (no Windows quote-escaping hazard).
+      const cmd = `Get-ChildItem -Path ${sq(root)} -Recurse ${includeFilter} -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch ${noiseRe} } | Select-String -Pattern ${sq(pattern)} | Select-Object -First ${maxResults} | ForEach-Object { $_.Path + ':' + $_.LineNumber + ': ' + $_.Line }`;
 
-      exec(
-        cmd,
-        { cwd: root, timeout: 15000, shell: "powershell.exe", maxBuffer: 5 * 1024 * 1024 },
+      // execFile with explicit flags (not exec+shell) so we can pass -NoProfile:
+      // loading the user's PowerShell profile adds ~1.4s to every search and can
+      // alter output. -NonInteractive guarantees a prompt can never hang us.
+      execFile(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", cmd],
+        { cwd: root, timeout: 15000, maxBuffer: 5 * 1024 * 1024, windowsHide: true },
         (error, stdout) => {
           if (error) {
             resolve(`Search error: ${error.message}`);
