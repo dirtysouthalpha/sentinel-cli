@@ -72,7 +72,8 @@ const defaultRun: NonNullable<RunDiagnosticsOptions["run"]> = (cmd, cwd) =>
   new Promise((resolve) => {
     const isWindows = process.platform === "win32";
     const shell = isWindows ? "powershell.exe" : undefined;
-    exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024, shell }, (error, stdout, stderr) => {
+    // 2-minute cap so a hung type-check can't freeze the agent's verify gate.
+    exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024, shell, timeout: 120_000 }, (error, stdout, stderr) => {
       resolve({
         stdout: stdout || "",
         stderr: stderr || "",
