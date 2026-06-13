@@ -34,6 +34,15 @@ export class ContextManager {
     this.systemPrompt = prompt;
   }
 
+  /** Set the compaction token budget (typically derived from the model's window). */
+  setMaxTokens(n: number): void {
+    if (n > 0) this.maxTokens = n;
+  }
+
+  getMaxTokens(): number {
+    return this.maxTokens;
+  }
+
   getSystemPrompt(): string {
     return this.systemPrompt;
   }

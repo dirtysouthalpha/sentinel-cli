@@ -65,6 +65,7 @@ import { BackgroundTaskManager } from "../core/background.js";
 import { usageTracker } from "../core/usage-tracker.js";
 import { runDiagnostics, formatDiagnostics } from "../core/diagnostics.js";
 import { estimateCostUSD } from "../core/pricing.js";
+import { compactionBudget } from "../core/context-window.js";
 import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
@@ -1379,6 +1380,8 @@ export class TUIApp {
           // recall is best-effort; never block the turn on it
         }
       }
+      // Size the compaction budget to the model's actual context window.
+      cm.setMaxTokens(compactionBudget(runnerModel || state.get("currentModel")));
       await runner.run(outbound, this.ac.signal);
 
       const activeId = sessionManager.getActiveSessionId();
