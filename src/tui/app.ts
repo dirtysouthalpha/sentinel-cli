@@ -45,6 +45,14 @@ import { loadAttachment } from "../core/attachments.js";
 import { buildVisionMessage } from "../core/vision.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
+import {
+  SlashHandlerContext,
+  handleWorkspaceCommand,
+  handleTeamCommand,
+  handleExportCommand,
+  handleBranchCommand,
+  handleTabsCommand,
+} from "./slash-handlers.js";
 import { sessionManager, Session } from "../core/session-manager.js";
 import { RoutedProvider } from "../ai/routed-provider.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "../core/permissions.js";
@@ -62,13 +70,10 @@ import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
 import { fetchRegistry, searchRegistry, installEntry } from "../core/marketplace.js";
-import { exportSessionMarkdown, exportSessionHtml } from "../core/session-export.js";
-import { WorkspaceStore } from "../core/workspace.js";
-import { TeamStore } from "../core/team.js";
 import { buildAbout } from "../core/about.js";
 import { checkForUpdate } from "../core/update-check.js";
 import { createLogger } from "../utils/logger.js";
-import { writeFileSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
 import { createSidebar } from "./sidebar.js";
 
@@ -311,6 +316,18 @@ export class TUIApp {
   private updateCost(usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined): void { this.renderer.updateCost(usage); }
   private setupRawInput(): void { /* delegated to InputHandler */ }
   private renderInputDefault(): void { this.inputHandler.render(this.isProcessing); }
+
+  /** Build the narrow context the extracted leaf slash-handlers operate on. */
+  private slashCtx(): SlashHandlerContext {
+    return {
+      projectRoot: this.projectRoot,
+      addSystem: (t) => this.addSystem(t),
+      addError: (t) => this.addError(t),
+      tabManager: this.tabManager,
+      createNewTab: () => this.createNewTab(),
+      onTabClose: (id) => this.onTabClose(id),
+    };
+  }
   private wireBackground(): void {
     if (this.bgWired) return;
     this.bgWired = true;
@@ -438,12 +455,12 @@ export class TUIApp {
     }
 
     if (parsed.name === "export") {
-      this.handleExportCommand(parsed.args);
+      handleExportCommand(this.slashCtx(), parsed.args);
       return;
     }
 
     if (parsed.name === "branch") {
-      this.handleBranchCommand();
+      handleBranchCommand(this.slashCtx());
       return;
     }
 
@@ -692,7 +709,7 @@ export class TUIApp {
     }
 
     if (parsed.name === "tabs") {
-      this.handleTabsCommand(parsed.args);
+      handleTabsCommand(this.slashCtx(), parsed.args);
       return;
     }
 
@@ -994,12 +1011,12 @@ export class TUIApp {
     }
 
     if (parsed.name === "workspace" || parsed.name === "ws") {
-      this.handleWorkspaceCommand(parsed.args);
+      handleWorkspaceCommand(this.slashCtx(), parsed.args);
       return;
     }
 
     if (parsed.name === "team") {
-      this.handleTeamCommand(parsed.args);
+      handleTeamCommand(this.slashCtx(), parsed.args);
       return;
     }
 
@@ -1116,176 +1133,6 @@ export class TUIApp {
     this.addSystem(usage);
   }
 
-  /**
-   * /workspace (alias /ws) — track several project roots (V18).
-   * Subcommands: list | add [path] | remove <path> | use <path>.
-   * `use` records the active root for the *next* session/tab — it does NOT
-   * hot-swap the running projectRoot.
-   */
-  private handleWorkspaceCommand(args: string[]): void {
-    const sub = (args[0] || "list").toLowerCase();
-    let store: WorkspaceStore;
-    try {
-      store = new WorkspaceStore();
-    } catch (err) {
-      this.addError(`Workspace error: ${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-
-    if (sub === "list") {
-      const roots = store.listRoots();
-      const active = store.getActive();
-      if (roots.length === 0) {
-        this.addSystem(
-          "No workspace roots yet. Add one with /workspace add [path] (defaults to this project)."
-        );
-        return;
-      }
-      let msg = "Workspace roots:\n";
-      for (const r of roots) msg += `  ${r === active ? "→" : " "} ${r}\n`;
-      this.addSystem(msg.trimEnd());
-      return;
-    }
-
-    if (sub === "add") {
-      const path = args.slice(1).join(" ").trim() || this.projectRoot;
-      try {
-        const root = store.addRoot(path);
-        this.addSystem(`Added workspace root: ${root}`);
-      } catch (err) {
-        this.addError(`Failed to add root: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (sub === "remove" || sub === "rm") {
-      const path = args.slice(1).join(" ").trim();
-      if (!path) {
-        this.addSystem("Usage: /workspace remove <path>");
-        return;
-      }
-      const removed = store.removeRoot(path);
-      this.addSystem(removed ? `Removed workspace root: ${path}` : `Not a tracked root: ${path}`);
-      return;
-    }
-
-    if (sub === "use") {
-      const path = args.slice(1).join(" ").trim();
-      if (!path) {
-        this.addSystem("Usage: /workspace use <path>");
-        return;
-      }
-      try {
-        const root = store.setActive(path);
-        this.addSystem(
-          `Active workspace root → ${root}\nThis affects the next session / new tab — your current session keeps its project root.`
-        );
-      } catch (err) {
-        this.addError(`Failed to set active root: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    this.addSystem(
-      "Usage: /workspace <list | add [path] | remove <path> | use <path>>  (alias: /ws)"
-    );
-  }
-
-  /**
-   * /team — a shared team manifest (V10): a team name, a shared extension
-   * registry, and a roster of members. The registry URL doubles as a
-   * /marketplace source so the whole team installs the same skills/MCP servers.
-   * Subcommands: info (default) | name <n> | registry <url> | add <member> | remove <member>.
-   */
-  private handleTeamCommand(args: string[]): void {
-    const sub = (args[0] || "info").toLowerCase();
-    let store: TeamStore;
-    try {
-      store = new TeamStore();
-    } catch (err) {
-      this.addError(`Team error: ${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-
-    if (sub === "info") {
-      const team = store.get();
-      let msg = "Team:\n";
-      msg += `  name:     ${team.name || "(unset)"}\n`;
-      msg += `  registry: ${team.registry || "(unset)"}\n`;
-      const members = team.members || [];
-      if (members.length === 0) {
-        msg += "  members:  (none) — add with /team add <member>";
-      } else {
-        msg += `  members:  ${members.length}\n`;
-        for (const m of members) msg += `    - ${m}\n`;
-        msg = msg.trimEnd();
-      }
-      this.addSystem(msg);
-      return;
-    }
-
-    if (sub === "name") {
-      const name = args.slice(1).join(" ").trim();
-      if (!name) {
-        this.addSystem("Usage: /team name <name>");
-        return;
-      }
-      try {
-        store.setName(name);
-        this.addSystem(`Team name → ${name}`);
-      } catch (err) {
-        this.addError(`Failed to set team name: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (sub === "registry") {
-      const url = args.slice(1).join(" ").trim();
-      if (!url) {
-        this.addSystem("Usage: /team registry <url>");
-        return;
-      }
-      try {
-        store.setRegistry(url);
-        this.addSystem(
-          `Team registry → ${url}\nUse it as a /marketplace source, e.g. /marketplace list ${url}`
-        );
-      } catch (err) {
-        this.addError(`Failed to set team registry: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (sub === "add") {
-      const member = args.slice(1).join(" ").trim();
-      if (!member) {
-        this.addSystem("Usage: /team add <member>");
-        return;
-      }
-      try {
-        store.addMember(member);
-        this.addSystem(`Added team member: ${member}`);
-      } catch (err) {
-        this.addError(`Failed to add member: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (sub === "remove" || sub === "rm") {
-      const member = args.slice(1).join(" ").trim();
-      if (!member) {
-        this.addSystem("Usage: /team remove <member>");
-        return;
-      }
-      const removed = store.removeMember(member);
-      this.addSystem(removed ? `Removed team member: ${member}` : `Not a team member: ${member}`);
-      return;
-    }
-
-    this.addSystem(
-      "Usage: /team <info | name <n> | registry <url> | add <member> | remove <member>>"
-    );
-  }
 
   /** /cmd <natural language> — AI command-search: NL → one shell command. */
   private async handleCmdSearch(nl: string): Promise<void> {
@@ -1331,157 +1178,6 @@ export class TUIApp {
     }
   }
 
-  private handleExportCommand(args: string[]): void {
-    // Parse args: format (md|html|markdown) and/or an output path, in any order.
-    let format: "md" | "html" = "md";
-    let outPath: string | undefined;
-    for (const arg of args) {
-      const lower = arg.toLowerCase();
-      if (lower === "md" || lower === "markdown") {
-        format = "md";
-      } else if (lower === "html" || lower === "htm") {
-        format = "html";
-      } else {
-        outPath = arg;
-      }
-    }
-
-    const session = sessionManager.getActiveSession();
-    if (!session) {
-      this.addSystem("No active session to export.");
-      return;
-    }
-
-    const messages = session.contextManager
-      .getMessages()
-      .map((m) => ({ role: m.role, content: m.content }));
-
-    if (messages.length === 0) {
-      this.addSystem("Nothing to export — this session has no messages yet.");
-      return;
-    }
-
-    const title = session.title || "Sentinel Session";
-    const ext = format === "html" ? "html" : "md";
-    const content =
-      format === "html"
-        ? exportSessionHtml({ title, messages })
-        : exportSessionMarkdown({ title, messages });
-
-    const defaultName = `sentinel-export-${session.id.slice(0, 8)}.${ext}`;
-    const target = outPath
-      ? isAbsolute(outPath)
-        ? outPath
-        : resolve(this.projectRoot, outPath)
-      : join(this.projectRoot, defaultName);
-
-    try {
-      writeFileSync(target, content, "utf8");
-      this.addSystem(`Exported ${messages.length} messages to ${target}`);
-    } catch (err) {
-      this.addSystem(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  private handleBranchCommand(): void {
-    const source = sessionManager.getActiveSession();
-    if (!source) {
-      this.addSystem("No active session to branch.");
-      return;
-    }
-
-    // Create a new session/tab, then copy the source's conversation into it so
-    // the branch starts as an independent duplicate of the current context.
-    const branch = sessionManager.createSession({
-      projectRoot: this.projectRoot,
-      title: `${source.title} (branch)`,
-      model: source.model,
-      agent: source.agent,
-    });
-
-    const srcCm = source.contextManager;
-    const dstCm = branch.contextManager;
-    const sysPrompt = srcCm.getSystemPrompt();
-    if (sysPrompt) dstCm.setSystemPrompt(sysPrompt);
-    for (const m of srcCm.getMessages()) {
-      if (m.role === "system") continue; // re-derived from the system prompt
-      dstCm.addMessage(m.role as "user" | "assistant" | "tool", m.content, m.metadata);
-    }
-    sessionManager.markDirty(branch.id);
-
-    // Switch the UI to the new branch tab and replay its transcript.
-    this.tabManager.refresh();
-    this.tabManager.switchTab(branch.id);
-    this.addSystem(`Branched into a new tab: "${branch.title}" (${srcCm.getMessageCount()} messages copied).`);
-  }
-
-  private handleTabsCommand(args: string[]): void {
-    const sub = args[0];
-
-    if (!sub || sub === "list") {
-      const sessions = sessionManager.getAllSessions();
-      const activeId = sessionManager.getActiveSessionId();
-      let msg = "Tabs:\n";
-      for (const s of sessions) {
-        const active = s.id === activeId ? " ←" : "";
-        const pin = s.pinned ? "\u{1F4CC}" : "  ";
-        msg += `  ${pin} ${s.id.slice(0, 8)}… ${s.title}${active}\n`;
-      }
-      this.addSystem(msg.trimEnd());
-      return;
-    }
-
-    if (sub === "new") {
-      this.createNewTab();
-      this.addSystem("New tab created.");
-      return;
-    }
-
-    if (sub === "close") {
-      const id = args[1];
-      if (!id) {
-        const activeId = sessionManager.getActiveSessionId();
-        if (activeId) {
-          this.onTabClose(activeId);
-          this.addSystem("Closed active tab.");
-        }
-      } else {
-        this.onTabClose(id);
-        this.addSystem(`Closed tab ${id}.`);
-      }
-      return;
-    }
-
-    if (sub === "switch") {
-      const id = args[1];
-      if (id) {
-        this.tabManager.switchTab(id);
-        this.addSystem(`Switched to tab.`);
-      }
-      return;
-    }
-
-    if (sub === "rename") {
-      const id = args[1];
-      const name = args.slice(2).join(" ");
-      if (id && name) {
-        sessionManager.renameSession(id, name);
-        this.tabManager.refresh();
-        this.addSystem(`Tab renamed to ${name}.`);
-      } else {
-        this.tabManager.renameCurrentTab();
-      }
-      return;
-    }
-
-    if (sub === "pin") {
-      this.tabManager.togglePinCurrent();
-      this.addSystem("Pin toggled.");
-      return;
-    }
-
-    this.addSystem("Usage: /tabs [list|new|close|switch|rename|pin]");
-  }
 
   private getSystemPrompt(): string {
     const agentName = state.get("currentAgent");
