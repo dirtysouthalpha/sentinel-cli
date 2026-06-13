@@ -36,6 +36,16 @@ describe("AnthropicProvider streaming", () => {
     expect(res.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
   });
 
+  it("handles data: WITHOUT a space (proxy passthrough)", async () => {
+    const lines = [
+      `data:${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "proxied" } })}`,
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse(lines)));
+    const p = new AnthropicProvider({ apiKey: "test" } as never);
+    const res = await p.chatStream([{ role: "user", content: "hi" }], {});
+    expect(res.content).toBe("proxied");
+  });
+
   it("streams text via text_delta", async () => {
     const lines = [
       d({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }),

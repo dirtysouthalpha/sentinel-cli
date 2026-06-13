@@ -203,9 +203,12 @@ export class AnthropicProvider implements AIProvider {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6).trim();
-            if (data === "[DONE]") continue;
+          // The space after "data:" is optional in SSE; Anthropic-compat proxies
+          // may emit "data:{...}". Match both so events aren't silently dropped.
+          const ltrim = line.trimStart();
+          if (ltrim.startsWith("data:")) {
+            const data = ltrim.slice(5).trim();
+            if (!data || data === "[DONE]") continue;
 
             try {
               const event = JSON.parse(data);
