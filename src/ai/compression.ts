@@ -66,6 +66,15 @@ function fallbackCompress(messages: CompressionMessage[]): CompressionMessage[] 
 }
 
 export async function compressToolOutput(output: string, toolName: string): Promise<string> {
+  // File contents must reach the model verbatim — compressing/slicing them
+  // leads to edits against corrupted input. (Read output is already bounded by
+  // the read tool's char cap and the executor's truncateMiddle.)
+  if (toolName === "file") return output;
+  // Only compress genuinely large outputs; small/medium tool results fit in
+  // context fine and must not be lossily altered.
+  const COMPRESS_THRESHOLD = 16000; // chars, ~4.5k tokens
+  if (output.length <= COMPRESS_THRESHOLD) return output;
+
   const cacheEnabled = true;
   const cacheKey = getCacheKey(output);
 
