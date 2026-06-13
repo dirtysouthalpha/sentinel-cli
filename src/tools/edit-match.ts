@@ -8,7 +8,7 @@
  */
 
 export type LineEditResult =
-  | { ok: true; newContent: string; oldText: string; line: number }
+  | { ok: true; newContent: string; oldText: string; line: number; matchType: "exact" | "tolerant" }
   | { ok: false; error: string };
 
 function findBlocks(
@@ -42,19 +42,19 @@ export function replaceLineBlock(
   const fileLines = content.split("\n");
   const searchBlock = oldText.split("\n");
 
-  const splice = (start: number): LineEditResult => {
+  const splice = (start: number, matchType: "exact" | "tolerant"): LineEditResult => {
     const matchedOld = fileLines.slice(start, start + searchBlock.length).join("\n");
     const newContent = [
       ...fileLines.slice(0, start),
       ...replaceText.split("\n"),
       ...fileLines.slice(start + searchBlock.length),
     ].join("\n");
-    return { ok: true, newContent, oldText: matchedOld, line: start + 1 };
+    return { ok: true, newContent, oldText: matchedOld, line: start + 1, matchType };
   };
 
   // 1) Exact line match — require uniqueness, or the wrong copy could be edited.
   const exact = findBlocks(fileLines, searchBlock, (a, b) => a === b);
-  if (exact.length === 1) return splice(exact[0]);
+  if (exact.length === 1) return splice(exact[0], "exact");
   if (exact.length > 1) {
     return {
       ok: false,
@@ -78,5 +78,5 @@ export function replaceLineBlock(
       error: `Ambiguous edit: ${tolerant.length} whitespace-insensitive matches. Include more surrounding lines to disambiguate.`,
     };
   }
-  return splice(tolerant[0]);
+  return splice(tolerant[0], "tolerant");
 }

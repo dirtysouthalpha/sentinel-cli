@@ -57,6 +57,17 @@ describe("file tool — edit robustness", () => {
     });
     expect(res.success).toBe(true);
     expect(readFileSync(join(dir, f), "utf8")).toBe("function f() {\n    return 43;\n}\n");
+    // The model is told it was a fuzzy match so it can double-check.
+    expect(res.output).toMatch(/whitespace-tolerant match/i);
+    expect((res.data as { matchType: string }).matchType).toBe("tolerant");
+  });
+
+  it("labels an exact match as exact", async () => {
+    const f = seed("exact.ts", "const y = 2;\n");
+    const res = await tool.execute({ action: "edit", path: f, searchLines: ["const y = 2;"], replaceText: "const y = 3;" });
+    expect(res.success).toBe(true);
+    expect(res.output).not.toMatch(/whitespace-tolerant/i);
+    expect((res.data as { matchType: string }).matchType).toBe("exact");
   });
 
   it("honors strictWhitespace by refusing a non-exact match", async () => {

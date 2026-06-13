@@ -106,7 +106,7 @@ function computeEdit(
   args: Record<string, unknown>,
   replaceText: string,
   strictWhitespace: boolean
-): { ok: true; newContent: string; oldText: string; line: number } | { ok: false; error: string } {
+): { ok: true; newContent: string; oldText: string; line: number; matchType: "exact" | "tolerant" } | { ok: false; error: string } {
   const resolved = resolveTarget(content, args);
   if (!resolved.ok) return resolved;
   const target = resolved.target;
@@ -119,7 +119,7 @@ function computeEdit(
       ...replaceText.split("\n"),
       ...lines.slice(target.endIdx),
     ].join("\n");
-    return { ok: true, newContent, oldText: target.oldText, line: target.line };
+    return { ok: true, newContent, oldText: target.oldText, line: target.line, matchType: "exact" };
   }
 
   return replaceLineBlock(content, target.oldText, replaceText, strictWhitespace);
@@ -246,13 +246,18 @@ export function createFileTool(projectRoot: string): ToolDef {
             }
 
             writeFileSync(path, result.newContent, encoding);
+            const tolerantNote =
+              result.matchType === "tolerant"
+                ? " (whitespace-tolerant match — verify it landed where you intended)"
+                : "";
             return {
               success: true,
-              output: `Edited ${path} at line ${result.line} (${result.oldText.length} -> ${replaceText.length} bytes)`,
+              output: `Edited ${path} at line ${result.line} (${result.oldText.length} -> ${replaceText.length} bytes)${tolerantNote}`,
               data: {
                 anchorHash: args.anchorHash as string | undefined,
                 editedLines: result.line,
                 bytesChanged: replaceText.length - result.oldText.length,
+                matchType: result.matchType,
               },
             };
           }
