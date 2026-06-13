@@ -24,10 +24,34 @@ export function createBashTool(projectRoot: string): ToolDef {
           { cwd, timeout, maxBuffer: 10 * 1024 * 1024, shell },
           (error, stdout, stderr) => {
             if (error) {
+              const e = error as Error & { killed?: boolean; signal?: string; code?: number | string };
+
+              // Timeout: exec kills the child and surfaces a generic "Command
+              // failed". Say so plainly so the agent can shorten/adjust.
+              if (e.killed && (e.signal === "SIGTERM" || e.signal === "SIGKILL")) {
+                resolve({
+                  success: false,
+                  output: stdout || "",
+                  error: `Command timed out after ${timeout}ms. Partial output (if any) is above; narrow the work or raise the timeout.`,
+                });
+                return;
+              }
+
+              // Output exceeded maxBuffer: return what we captured with a clear note.
+              if (/maxBuffer/i.test(e.message)) {
+                resolve({
+                  success: false,
+                  output: stdout || "",
+                  error: "Output exceeded the 10MB buffer. Narrow the command (filter, head / Select-Object -First, or redirect to a file).",
+                });
+                return;
+              }
+
+              const exit = typeof e.code === "number" ? ` (exit ${e.code})` : "";
               resolve({
                 success: false,
                 output: stdout || "",
-                error: stderr || error.message,
+                error: (stderr || e.message) + exit,
               });
             } else {
               resolve({
