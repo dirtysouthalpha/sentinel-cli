@@ -27,6 +27,12 @@ export interface AgentRunnerDeps {
   toolDefs: ToolDef[];
   executeTool: (tc: ToolCall) => Promise<ChatMessage>;
   extractToolCalls: (content: string) => ToolCall[] | null;
+  /**
+   * Optional verification (typically a type-check/build). When `verifyOnComplete`
+   * is set and the agent made edits, this runs as the agent is about to finish;
+   * `ok:false` feeds `output` back so the agent fixes the problems before stopping.
+   */
+  runVerification?: () => Promise<{ ok: boolean; output: string }>;
 }
 
 export interface AgentRunnerConfig {
@@ -46,6 +52,10 @@ export interface AgentRunnerConfig {
   stuckThreshold?: number;
   budgetUSD?: number;
   getEstimatedCost?: () => number;
+  /** Run verification (e.g. tsc) when the agent finishes after making edits. */
+  verifyOnComplete?: boolean;
+  /** Max verify→fix cycles before giving up and stopping anyway (default 2). */
+  maxVerifyRetries?: number;
 }
 
 export interface AgentRunResult {
@@ -79,6 +89,22 @@ export interface AgentRunnerEvents {
   taskComplete: (reason: string) => void;
   budgetExceeded: (cost: number, budget: number) => void;
   stuckDetected: (toolName: string, count: number) => void;
+  verifyFailed: (output: string) => void;
+  verifyPassed: () => void;
+}
+
+/** Tools that change files on disk — used to decide whether to verify on completion. */
+function isMutatingTool(name: string, argsStr: string): boolean {
+  if (name === "patch") return true;
+  if (name === "file") {
+    try {
+      const action = String((JSON.parse(argsStr) as { action?: unknown }).action ?? "");
+      return action === "write" || action === "edit" || action === "delete" || action === "mkdir";
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 /**
@@ -95,7 +121,10 @@ export class AgentRunner extends EventEmitter {
   private readonly config: AgentRunnerConfig;
   private readonly stuckDetector: StuckDetector;
   private readonly budgetEnforcer: BudgetEnforcer | null;
+  private readonly runVerification?: () => Promise<{ ok: boolean; output: string }>;
   private consecutiveStuckCount = 0;
+  private edited = false;
+  private verifyCount = 0;
 
   constructor(deps: AgentRunnerDeps, config: AgentRunnerConfig) {
     super();
@@ -104,11 +133,48 @@ export class AgentRunner extends EventEmitter {
     this.toolDefs = deps.toolDefs;
     this.executeTool = deps.executeTool;
     this.extract = deps.extractToolCalls;
+    this.runVerification = deps.runVerification;
     this.config = config;
     this.stuckDetector = new StuckDetector(config.stuckThreshold ?? 3);
     this.budgetEnforcer = config.budgetUSD
       ? new BudgetEnforcer(config.budgetUSD, config.getEstimatedCost ?? (() => 0))
       : null;
+  }
+
+  /**
+   * Verify-on-complete gate. Returns true when it injected a fix-it message
+   * (the caller should keep looping); false when the agent may stop. Bounded by
+   * maxVerifyRetries so a stubborn error can't loop forever.
+   */
+  private async verifyGate(): Promise<boolean> {
+    if (!this.runVerification || !this.config.verifyOnComplete) return false;
+    if (!this.edited) return false;
+    if (this.verifyCount >= (this.config.maxVerifyRetries ?? 2)) return false;
+    this.verifyCount++;
+
+    let result: { ok: boolean; output: string };
+    try {
+      result = await this.runVerification();
+    } catch {
+      // If verification itself can't run, don't block the agent from finishing.
+      return false;
+    }
+
+    if (result.ok) {
+      this.emit("verifyPassed");
+      return false;
+    }
+
+    this.emit("verifyFailed", result.output);
+    this.context.addMessage(
+      "user",
+      "Automated verification (type-check/build) found problems after your changes:\n\n" +
+        result.output +
+        "\n\nFix these problems. If a problem is pre-existing and unrelated to your task, " +
+        "say so explicitly and then you may stop."
+    );
+    this.edited = false; // require fresh edits before verifying again
+    return true;
   }
 
   // ---- typed event overloads -------------------------------------------------
@@ -183,6 +249,12 @@ export class AgentRunner extends EventEmitter {
         const willContinue = !!(toolCalls && toolCalls.length && !signal?.aborted);
 
         if (!willContinue) {
+          // Before declaring done: if the agent edited files, verify they
+          // compile and feed any problems back so it self-corrects.
+          if (!signal?.aborted && (await this.verifyGate())) {
+            this.emit("roundEnd", round, true);
+            continue;
+          }
           stopReason = signal?.aborted ? "aborted" : "no_tool_calls";
           this.emit("roundEnd", round, false);
           break;
@@ -230,6 +302,7 @@ export class AgentRunner extends EventEmitter {
               const { name, ok, firstLine, resultText } = r.value;
               this.emit("toolResult", name, ok, firstLine, resultText);
               this.context.addMessage("tool", `[Tool: ${name}]\n${resultText}`, { toolCallId: tc.id, name });
+              if (ok && isMutatingTool(name, tc.arguments)) this.edited = true;
             }
           }
         }

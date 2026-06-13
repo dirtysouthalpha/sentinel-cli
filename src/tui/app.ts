@@ -1284,6 +1284,11 @@ export class TUIApp {
           toolDefs: [...childToolDefs, subagentTool.def, todoTool.def],
           executeTool: topExecute,
           extractToolCalls,
+          runVerification: async () => {
+            const cmd = autoCfg.verificationCommands?.[0];
+            const r = await runDiagnostics(this.projectRoot, cmd ? { command: cmd } : {});
+            return { ok: r.ok, output: formatDiagnostics(r.diagnostics) };
+          },
         },
         {
           model: runnerModel,
@@ -1294,6 +1299,8 @@ export class TUIApp {
           stuckThreshold: autoCfg.stuckThreshold || 3,
           budgetUSD: autoCfg.budgetUSD || 0,
           getEstimatedCost: () => usageTracker.snapshot().estimatedCostUSD,
+          verifyOnComplete: isAutonomous && autoCfg.verifyOnComplete !== false,
+          maxVerifyRetries: autoCfg.maxVerifyRetries,
         }
       );
 
@@ -1329,6 +1336,10 @@ export class TUIApp {
       runner.on("stuckDetected", (name, n) =>
         this.addSystem(`Stuck on ${name} (${n}x) — trying different approach`)
       );
+      runner.on("verifyFailed", () =>
+        this.addSystem("Verification found problems — feeding them back to fix…")
+      );
+      runner.on("verifyPassed", () => this.addSystem("Verification passed ✓"));
 
       // V2: expand @file / @url mentions into the message before the agent runs.
       let outbound = await expandMentions(userMessage, this.projectRoot);

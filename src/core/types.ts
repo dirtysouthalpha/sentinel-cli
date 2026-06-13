@@ -98,6 +98,11 @@ export interface AutonomousConfig {
   stuckDetection: boolean;
   stuckThreshold: number;
   verificationCommands: string[];
+  /** Run verification (type-check/build) when the agent finishes after editing,
+   *  feeding failures back so it self-corrects. Defaults on in autonomous mode. */
+  verifyOnComplete?: boolean;
+  /** Max verify→fix cycles before stopping anyway (default 2). */
+  maxVerifyRetries?: number;
 }
 
 export const DEFAULT_CONFIG: SentinelConfig = {

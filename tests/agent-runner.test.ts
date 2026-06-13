@@ -307,6 +307,77 @@ describe("AgentRunner", () => {
     expect(provider.calls).toBe(8);
   });
 
+  it("(k) verify-on-complete feeds failures back, then stops once it passes", async () => {
+    const edit = toolCall("file", { action: "write", path: "x.ts", content: "boom" });
+    // 1: edit, 2: "done" (triggers verify #1 -> fail), 3: edit (the fix), 4: "done" (verify #2 -> pass)
+    const provider = new FakeProvider([
+      { content: "", model: "m", toolCalls: [edit] },
+      { content: "done", model: "m" },
+      { content: "", model: "m", toolCalls: [edit] },
+      { content: "fixed", model: "m" },
+    ]);
+    const ctx = new FakeContext();
+
+    let verifyCalls = 0;
+    const runVerification = async () => {
+      verifyCalls++;
+      return verifyCalls === 1
+        ? { ok: false, output: "x.ts(1,1): error TS1005: ';' expected." }
+        : { ok: true, output: "" };
+    };
+
+    const runner = new AgentRunner(
+      makeDeps(provider, ctx, { runVerification }),
+      { maxRounds: 10, verifyOnComplete: true }
+    );
+
+    const failures: string[] = [];
+    runner.on("verifyFailed", (o) => failures.push(o));
+
+    const result = await runner.run("go");
+
+    expect(verifyCalls).toBe(2);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatch(/TS1005/);
+    expect(ctx.messages.some((m) => m.role === "user" && /Automated verification/.test(m.content))).toBe(true);
+    expect(result.stopReason).toBe("no_tool_calls");
+  });
+
+  it("(l) verify-on-complete does nothing when no edits were made", async () => {
+    const provider = new FakeProvider([{ content: "just answering", model: "m" }]);
+    const ctx = new FakeContext();
+    let verifyCalls = 0;
+    const runner = new AgentRunner(
+      makeDeps(provider, ctx, { runVerification: async () => { verifyCalls++; return { ok: true, output: "" }; } }),
+      { maxRounds: 5, verifyOnComplete: true }
+    );
+
+    await runner.run("go");
+    expect(verifyCalls).toBe(0);
+  });
+
+  it("(m) verify-on-complete is bounded by maxVerifyRetries", async () => {
+    const edit = toolCall("file", { action: "edit", path: "x.ts" });
+    // Edits then says done, repeatedly — would verify forever without the cap.
+    const provider = new FakeProvider([
+      { content: "", model: "m", toolCalls: [edit] },
+      { content: "done", model: "m" },
+      { content: "", model: "m", toolCalls: [edit] },
+      { content: "done", model: "m" },
+      { content: "", model: "m", toolCalls: [edit] },
+      { content: "done", model: "m" },
+    ]);
+    const ctx = new FakeContext();
+    let verifyCalls = 0;
+    const runner = new AgentRunner(
+      makeDeps(provider, ctx, { runVerification: async () => { verifyCalls++; return { ok: false, output: "still broken" }; } }),
+      { maxRounds: 50, verifyOnComplete: true, maxVerifyRetries: 2 }
+    );
+
+    await runner.run("go");
+    expect(verifyCalls).toBe(2); // capped
+  });
+
   it("stops cleanly with no_tool_calls when model returns plain text", async () => {
     const provider = new FakeProvider([{ content: "all done", model: "m" }]);
     const ctx = new FakeContext();
