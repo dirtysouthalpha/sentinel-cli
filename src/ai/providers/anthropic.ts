@@ -185,8 +185,8 @@ export class AnthropicProvider implements AIProvider {
     try {
     const fullContent: string[] = [];
     let model = "";
-    const toolCallMap = new Map<string, { name: string; args: string }>();
-    let currentToolId = "";
+    // Keyed by the content-block index, which start/delta/stop events all carry.
+    const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
     let usageData: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
 
     if (response.body) {
@@ -216,17 +216,28 @@ export class AnthropicProvider implements AIProvider {
                   status,
                   "anthropic"
                 );
+              } else if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+                const text = event.delta.text || "";
+                if (text) { fullContent.push(text); onChunk?.({ content: text, done: false }); }
               } else if (event.type === "content_block_delta" && event.delta?.text) {
+                // Fallback for any variant that puts text directly on the delta.
                 fullContent.push(event.delta.text);
                 onChunk?.({ content: event.delta.text, done: false });
               } else if (event.type === "message_start") {
                 model = event.message?.model || "";
-              } else if (event.type === "tool_use_start") {
-                currentToolId = event.id || `call_${toolCallMap.size}`;
-                toolCallMap.set(currentToolId, { name: event.name || "", args: "" });
-              } else if (event.type === "input_json_delta" && currentToolId) {
-                const tc = toolCallMap.get(currentToolId);
-                if (tc && event.delta?.partial_json) tc.args += event.delta.partial_json;
+              } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+                // Anthropic announces a tool call here (id + name), then streams
+                // its JSON arguments as input_json_delta events at the same index.
+                const idx = event.index ?? 0;
+                toolCallMap.set(idx, {
+                  id: event.content_block.id || `call_${idx}`,
+                  name: event.content_block.name || "",
+                  args: "",
+                });
+              } else if (event.type === "content_block_delta" && event.delta?.type === "input_json_delta") {
+                const idx = event.index ?? 0;
+                const tc = toolCallMap.get(idx);
+                if (tc && event.delta.partial_json) tc.args += event.delta.partial_json;
               } else if (event.type === "message_delta" && event.usage) {
                 usageData = {
                   promptTokens: event.usage.input_tokens || 0,
@@ -286,7 +297,9 @@ export class AnthropicProvider implements AIProvider {
     onChunk?.({ content: "", done: true });
 
     const toolCalls = toolCallMap.size > 0
-      ? Array.from(toolCallMap.entries()).map(([id, tc]) => ({ id, name: tc.name, arguments: tc.args }))
+      ? Array.from(toolCallMap.values())
+          .filter((tc) => tc.name)
+          .map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.args || "{}" }))
       : undefined;
 
     return {
