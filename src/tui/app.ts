@@ -1289,6 +1289,26 @@ export class TUIApp {
             const r = await runDiagnostics(this.projectRoot, cmd ? { command: cmd } : {});
             return { ok: r.ok, output: formatDiagnostics(r.diagnostics) };
           },
+          compactContext: async () => {
+            // Only when the context is getting full — then summarize the older
+            // turns with the model (preserving decisions/files/open problems)
+            // instead of the lossy char-slice fallback.
+            if (cm.getContextUtilization() < 0.8) return false;
+            await cm.compactWithLLM(async (texts) => {
+              const resp = await provider.chatStream(
+                [{
+                  role: "user",
+                  content:
+                    "Summarize this conversation excerpt concisely. Preserve the task/goal, " +
+                    "decisions made, files changed, and any unresolved problems; omit chit-chat.\n\n" +
+                    texts.join("\n"),
+                }],
+                { model: runnerModel, temperature: 0.3, maxTokens: 400 }
+              );
+              return resp.content || "";
+            });
+            return true;
+          },
         },
         {
           model: runnerModel,
@@ -1340,6 +1360,7 @@ export class TUIApp {
         this.addSystem("Verification found problems — feeding them back to fix…")
       );
       runner.on("verifyPassed", () => this.addSystem("Verification passed ✓"));
+      runner.on("compacted", () => this.addSystem("Context compacted (summarized older turns)."));
       runner.on("retry", (attempt, delayMs, err) =>
         this.addSystem(
           `Transient error (${err instanceof Error ? err.message.slice(0, 80) : String(err)}) — ` +

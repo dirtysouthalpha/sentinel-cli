@@ -33,6 +33,12 @@ export interface AgentRunnerDeps {
    * `ok:false` feeds `output` back so the agent fixes the problems before stopping.
    */
   runVerification?: () => Promise<{ ok: boolean; output: string }>;
+  /**
+   * Optional context compaction, called at the start of each round. The host
+   * decides whether compaction is needed (e.g. utilization > threshold) and
+   * performs it (typically LLM summarization). Returns true if it compacted.
+   */
+  compactContext?: () => Promise<boolean>;
 }
 
 export interface AgentRunnerConfig {
@@ -97,6 +103,7 @@ export interface AgentRunnerEvents {
   verifyFailed: (output: string) => void;
   verifyPassed: () => void;
   retry: (attempt: number, delayMs: number, err: unknown) => void;
+  compacted: () => void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -151,6 +158,7 @@ export class AgentRunner extends EventEmitter {
   private readonly stuckDetector: StuckDetector;
   private readonly budgetEnforcer: BudgetEnforcer | null;
   private readonly runVerification?: () => Promise<{ ok: boolean; output: string }>;
+  private readonly compactContext?: () => Promise<boolean>;
   private consecutiveStuckCount = 0;
   private edited = false;
   private verifyCount = 0;
@@ -163,6 +171,7 @@ export class AgentRunner extends EventEmitter {
     this.executeTool = deps.executeTool;
     this.extract = deps.extractToolCalls;
     this.runVerification = deps.runVerification;
+    this.compactContext = deps.compactContext;
     this.config = config;
     this.stuckDetector = new StuckDetector(config.stuckThreshold ?? 3);
     this.budgetEnforcer = config.budgetUSD
@@ -281,6 +290,17 @@ export class AgentRunner extends EventEmitter {
 
         this.emit("roundStart", round);
         completedRounds = round;
+
+        // Compact the conversation (LLM summarization) before sending, if the
+        // host says it's needed — keeps long runs under the context limit
+        // without the lossy char-slice fallback.
+        if (this.compactContext) {
+          try {
+            if (await this.compactContext()) this.emit("compacted");
+          } catch {
+            // Compaction is best-effort; never block the round on it.
+          }
+        }
 
         const aiMessages = this.context.toAIMessages();
 

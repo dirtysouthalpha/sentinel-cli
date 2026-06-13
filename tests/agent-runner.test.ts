@@ -463,6 +463,34 @@ describe("AgentRunner", () => {
     expect(result.stopReason).toBe("error");
   });
 
+  it("(q) calls compactContext each round and emits compacted when it compacts", async () => {
+    const provider = new FakeProvider([{ content: "hi", model: "m" }]);
+    const ctx = new FakeContext();
+    let compactCalls = 0;
+    const runner = new AgentRunner(
+      makeDeps(provider, ctx, { compactContext: async () => { compactCalls++; return true; } }),
+      { maxRounds: 3 }
+    );
+    let compacted = 0;
+    runner.on("compacted", () => compacted++);
+
+    await runner.run("go");
+
+    expect(compactCalls).toBe(1); // plain text -> one round
+    expect(compacted).toBe(1);
+  });
+
+  it("(r) a throwing compactContext never breaks the round", async () => {
+    const provider = new FakeProvider([{ content: "hi", model: "m" }]);
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(
+      makeDeps(provider, ctx, { compactContext: async () => { throw new Error("boom"); } }),
+      { maxRounds: 3 }
+    );
+    const result = await runner.run("go");
+    expect(result.stopReason).toBe("no_tool_calls");
+  });
+
   it("stops cleanly with no_tool_calls when model returns plain text", async () => {
     const provider = new FakeProvider([{ content: "all done", model: "m" }]);
     const ctx = new FakeContext();
