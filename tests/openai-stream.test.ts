@@ -44,6 +44,20 @@ describe("parseOpenAIStream", () => {
     expect(res.content).toBe("split-content");
   });
 
+  it("processes a final event that lacks a trailing newline", async () => {
+    // No trailing "\n" on the usage event — some proxies omit it.
+    const usage = `data: ${JSON.stringify({ choices: [{ delta: {} }], usage: { prompt_tokens: 9, completion_tokens: 1, total_tokens: 10 } })}`;
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(delta("hi") + usage));
+        c.close();
+      },
+    });
+    const res = await parseOpenAIStream(new Response(stream));
+    expect(res.content).toBe("hi");
+    expect(res.usage).toEqual({ promptTokens: 9, completionTokens: 1, totalTokens: 10 });
+  });
+
   it("captures usage and finish_reason", async () => {
     const line = `data: ${JSON.stringify({ model: "m", choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 } })}\n`;
     const res = await parseOpenAIStream(sse([line, "data: [DONE]\n"]));

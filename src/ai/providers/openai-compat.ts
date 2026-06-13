@@ -119,6 +119,52 @@ export async function parseOpenAIStream(
   let usageData: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
   let finishReason = "";
 
+  // Handle one SSE line. The space after "data:" is optional in SSE; some
+  // OpenAI-compatible endpoints emit "data:{...}". Handle both, or content is
+  // silently lost.
+  const handleLine = (line: string): void => {
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith("data:")) return;
+    const data = trimmed.slice(5).trim();
+    if (!data || data === "[DONE]") return;
+
+    try {
+      const parsed = JSON.parse(data);
+      const delta = parsed.choices?.[0]?.delta;
+      if (delta?.content) {
+        fullContent.push(delta.content);
+        onChunk?.({ content: delta.content, done: false });
+      }
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          if (!toolCallMap.has(idx)) {
+            toolCallMap.set(idx, {
+              id: tc.id || `call_${idx}`,
+              name: tc.function?.name || "",
+              args: "",
+            });
+          }
+          const existing = toolCallMap.get(idx)!;
+          if (tc.id) existing.id = tc.id;
+          if (tc.function?.name) existing.name = tc.function.name;
+          if (tc.function?.arguments) existing.args += tc.function.arguments;
+        }
+      }
+      if (parsed.model) model = parsed.model;
+      if (parsed.choices?.[0]?.finish_reason) finishReason = parsed.choices[0].finish_reason;
+      if (parsed.usage) {
+        usageData = {
+          promptTokens: parsed.usage.prompt_tokens || 0,
+          completionTokens: parsed.usage.completion_tokens || 0,
+          totalTokens: parsed.usage.total_tokens || 0,
+        };
+      }
+    } catch {
+      // skip malformed / partial JSON
+    }
+  };
+
   if (response.body) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -132,52 +178,14 @@ export async function parseOpenAIStream(
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 
-      for (const line of lines) {
-        // The space after "data:" is optional in SSE; some OpenAI-compatible
-        // endpoints emit "data:{...}". Handle both, or content is silently lost.
-        const trimmed = line.trimStart();
-        if (trimmed.startsWith("data:")) {
-          const data = trimmed.slice(5).trim();
-          if (!data || data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(data);
-            const delta = parsed.choices?.[0]?.delta;
-            if (delta?.content) {
-              fullContent.push(delta.content);
-              onChunk?.({ content: delta.content, done: false });
-            }
-            if (delta?.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                const idx = tc.index ?? 0;
-                if (!toolCallMap.has(idx)) {
-                  toolCallMap.set(idx, {
-                    id: tc.id || `call_${idx}`,
-                    name: tc.function?.name || "",
-                    args: "",
-                  });
-                }
-                const existing = toolCallMap.get(idx)!;
-                if (tc.id) existing.id = tc.id;
-                if (tc.function?.name) existing.name = tc.function.name;
-                if (tc.function?.arguments) existing.args += tc.function.arguments;
-              }
-            }
-            if (parsed.model) model = parsed.model;
-            if (parsed.choices?.[0]?.finish_reason) finishReason = parsed.choices[0].finish_reason;
-            if (parsed.usage) {
-              usageData = {
-                promptTokens: parsed.usage.prompt_tokens || 0,
-                completionTokens: parsed.usage.completion_tokens || 0,
-                totalTokens: parsed.usage.total_tokens || 0,
-              };
-            }
-          } catch {
-            // skip
-          }
-        }
-      }
+      for (const line of lines) handleLine(line);
     }
+
+    // Flush the decoder and process any final line that lacked a trailing
+    // newline — otherwise a non-newline-terminated final event (e.g. the usage
+    // record from some proxies) would be dropped.
+    buffer += decoder.decode();
+    if (buffer) handleLine(buffer);
   }
 
   onChunk?.({ content: "", done: true });
