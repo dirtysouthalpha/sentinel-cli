@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { AIProvider, ChatMessage, ToolCall, ToolDef, contentToText } from "../ai/types.js";
+import { AIProvider, ChatMessage, ChatOptions, ChatResponse, ToolCall, ToolDef, contentToText } from "../ai/types.js";
 import { evaluateRound, EvalResult } from "./self-evaluator.js";
 import { StuckDetector } from "./stuck-detector.js";
 import { BudgetEnforcer } from "./budget-enforcer.js";
@@ -56,6 +56,11 @@ export interface AgentRunnerConfig {
   verifyOnComplete?: boolean;
   /** Max verify→fix cycles before giving up and stopping anyway (default 2). */
   maxVerifyRetries?: number;
+  /** Attempts for a model call before failing the run, on transient errors
+   *  (rate limit / 5xx / network). Default 3. Set 1 to disable retries. */
+  maxRetries?: number;
+  /** Base backoff in ms between model-call retries (exponential). Default 500. */
+  retryBaseDelayMs?: number;
 }
 
 export interface AgentRunResult {
@@ -91,6 +96,30 @@ export interface AgentRunnerEvents {
   stuckDetected: (toolName: string, count: number) => void;
   verifyFailed: (output: string) => void;
   verifyPassed: () => void;
+  retry: (attempt: number, delayMs: number, err: unknown) => void;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Whether a model-call error is worth retrying (rate limit / 5xx / network). */
+function isTransientError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    /\b(429|500|502|503|504)\b/.test(msg) ||
+    msg.includes("rate limit") ||
+    msg.includes("overloaded") ||
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    msg.includes("econnrefused") ||
+    msg.includes("enotfound") ||
+    msg.includes("socket hang up") ||
+    msg.includes("fetch failed") ||
+    msg.includes("network error")
+  );
 }
 
 /** Tools that change files on disk — used to decide whether to verify on completion. */
@@ -139,6 +168,43 @@ export class AgentRunner extends EventEmitter {
     this.budgetEnforcer = config.budgetUSD
       ? new BudgetEnforcer(config.budgetUSD, config.getEstimatedCost ?? (() => 0))
       : null;
+  }
+
+  /**
+   * Stream a model response, retrying transient failures (rate limit / 5xx /
+   * network) with exponential backoff. Retries only happen before any token is
+   * streamed, so output is never duplicated.
+   */
+  private async streamWithRetry(
+    messages: ChatMessage[],
+    options: ChatOptions,
+    signal?: AbortSignal
+  ): Promise<ChatResponse> {
+    const maxAttempts = Math.max(1, this.config.maxRetries ?? 3);
+    const baseDelay = this.config.retryBaseDelayMs ?? 500;
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (signal?.aborted) throw new Error("aborted");
+      let streamedAny = false;
+      try {
+        return await this.provider.chatStream(messages, options, (chunk) => {
+          if (chunk.content) {
+            streamedAny = true;
+            this.emit("token", chunk.content);
+          }
+        });
+      } catch (err) {
+        lastErr = err;
+        if (streamedAny || signal?.aborted || attempt === maxAttempts || !isTransientError(err)) {
+          throw err;
+        }
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        this.emit("retry", attempt, delay, err);
+        await sleep(delay);
+      }
+    }
+    throw lastErr;
   }
 
   /**
@@ -218,12 +284,10 @@ export class AgentRunner extends EventEmitter {
 
         const aiMessages = this.context.toAIMessages();
 
-        const response = await this.provider.chatStream(
+        const response = await this.streamWithRetry(
           aiMessages,
           { model, tools: this.toolDefs, temperature, maxTokens },
-          (chunk) => {
-            if (chunk.content) this.emit("token", chunk.content);
-          }
+          signal
         );
 
         this.emit("streamEnd", round);

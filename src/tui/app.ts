@@ -1340,6 +1340,12 @@ export class TUIApp {
         this.addSystem("Verification found problems — feeding them back to fix…")
       );
       runner.on("verifyPassed", () => this.addSystem("Verification passed ✓"));
+      runner.on("retry", (attempt, delayMs, err) =>
+        this.addSystem(
+          `Transient error (${err instanceof Error ? err.message.slice(0, 80) : String(err)}) — ` +
+          `retry ${attempt} in ${Math.round(delayMs)}ms`
+        )
+      );
 
       // V2: expand @file / @url mentions into the message before the agent runs.
       let outbound = await expandMentions(userMessage, this.projectRoot);

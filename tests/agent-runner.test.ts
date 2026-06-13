@@ -78,6 +78,31 @@ class FakeProvider implements AIProvider {
   }
 }
 
+/** Provider whose behavior per call is scripted to a response or a thrown error. */
+class FlakyProvider implements AIProvider {
+  name = "flaky";
+  calls = 0;
+  constructor(private behavior: (call: number) => ChatResponse | Error) {}
+  async chat(): Promise<ChatResponse> {
+    throw new Error("not used");
+  }
+  async chatStream(
+    _messages: ChatMessage[],
+    _options?: ChatOptions,
+    onChunk?: (chunk: StreamChunk) => void
+  ): Promise<ChatResponse> {
+    this.calls += 1;
+    const outcome = this.behavior(this.calls);
+    if (outcome instanceof Error) throw outcome;
+    if (outcome.content && onChunk) onChunk({ content: outcome.content, done: false });
+    if (onChunk) onChunk({ content: "", done: true });
+    return outcome;
+  }
+  isAvailable(): boolean {
+    return true;
+  }
+}
+
 function toolCall(name: string, args: Record<string, unknown>, id = `id_${name}`): ToolCall {
   return { id, name, arguments: JSON.stringify(args) };
 }
@@ -376,6 +401,66 @@ describe("AgentRunner", () => {
 
     await runner.run("go");
     expect(verifyCalls).toBe(2); // capped
+  });
+
+  it("(n) retries a transient model error then succeeds", async () => {
+    const provider = new FlakyProvider((call) =>
+      call === 1
+        ? new Error("429 Too Many Requests: rate limit exceeded")
+        : { content: "done", model: "m" }
+    );
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(makeDeps(provider, ctx), {
+      maxRounds: 5,
+      maxRetries: 3,
+      retryBaseDelayMs: 0,
+    });
+
+    const retries: number[] = [];
+    runner.on("retry", (attempt) => retries.push(attempt));
+
+    const result = await runner.run("go");
+
+    expect(provider.calls).toBe(2);
+    expect(retries).toEqual([1]);
+    expect(result.stopReason).toBe("no_tool_calls");
+    expect(result.finalContent).toBe("done");
+  });
+
+  it("(o) does NOT retry a non-transient model error", async () => {
+    const provider = new FlakyProvider(() => new Error("400 invalid request: bad schema"));
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(makeDeps(provider, ctx), {
+      maxRounds: 5,
+      maxRetries: 3,
+      retryBaseDelayMs: 0,
+    });
+    const errors: unknown[] = [];
+    runner.on("runError", (e) => errors.push(e));
+
+    const result = await runner.run("go");
+
+    expect(provider.calls).toBe(1);
+    expect(result.stopReason).toBe("error");
+    expect(errors).toHaveLength(1);
+  });
+
+  it("(p) gives up after maxRetries on a persistent transient error", async () => {
+    const provider = new FlakyProvider(() => new Error("503 Service Unavailable"));
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(makeDeps(provider, ctx), {
+      maxRounds: 5,
+      maxRetries: 2,
+      retryBaseDelayMs: 0,
+    });
+    const retries: number[] = [];
+    runner.on("retry", (attempt) => retries.push(attempt));
+
+    const result = await runner.run("go");
+
+    expect(provider.calls).toBe(2); // initial + 1 retry, then give up
+    expect(retries).toEqual([1]);
+    expect(result.stopReason).toBe("error");
   });
 
   it("stops cleanly with no_tool_calls when model returns plain text", async () => {
