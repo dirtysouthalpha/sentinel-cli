@@ -1,0 +1,12 @@
+# Normalize all text files to LF in the repo; check out with LF everywhere.
+# Stops the "LF will be replaced by CRLF" churn on this Windows checkout.
+* text=auto eol=lf
+
+# Explicitly binary (never touch line endings).
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.tgz binary
