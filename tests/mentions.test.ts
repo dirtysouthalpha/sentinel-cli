@@ -33,6 +33,21 @@ describe("expandMentions", () => {
     expect(out).toContain("@missing.txt (file): [not found or unreadable]");
   });
 
+  it("@symbol finds a symbol in code (cross-platform, via searchGrep)", async () => {
+    await writeFile(join(dir, "code.ts"), "export function MySymbol() { return 1; }\n", "utf8");
+    const out = await expandMentions("define @symbol:MySymbol", dir);
+    expect(out).toContain("@symbol:MySymbol (symbol):");
+    expect(out).toMatch(/code\.ts.*MySymbol/);
+  });
+
+  it("@symbol treats shell metacharacters as data (no injection)", async () => {
+    const { existsSync } = await import("node:fs");
+    // If this were shell-interpolated, it could create a marker file. It must not.
+    const out = await expandMentions("check @symbol:z;touch+inj.txt", dir);
+    expect(out).toContain("(symbol)"); // resolved, no throw
+    expect(existsSync(join(dir, "inj.txt"))).toBe(false); // nothing executed
+  });
+
   it("expands a URL mention via injected fetchText", async () => {
     const out = await expandMentions("check @https://example.com/doc", dir, {
       fetchText: async (url) => `fetched body for ${url}`,

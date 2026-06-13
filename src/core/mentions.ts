@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { execSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
+import { searchGrep } from "../tools/search.js";
+import { runDiagnostics, formatDiagnostics } from "./diagnostics.js";
 
 /**
  * Options for {@link expandMentions}. `fetchText` is injectable so tests (and
@@ -104,10 +105,9 @@ export async function expandMentions(
         continue;
       }
       try {
-        const result = execSync(
-          `grep -rn "${symbolName}" --include="*.ts" --include="*.js" -m 50 .`,
-          { cwd: projectRoot, encoding: "utf8", timeout: 10_000 }
-        );
+        // Reuse the hardened, cross-platform search (no shell injection, works
+        // on Windows, skips noise dirs) instead of a raw interpolated grep.
+        const result = await searchGrep(projectRoot, symbolName, undefined, 50);
         const lines = result.split("\n").slice(0, 500);
         const body =
           lines.length >= 500
@@ -118,29 +118,13 @@ export async function expandMentions(
         blocks.push(`@${mention} (symbol): [no matches found]`);
       }
     } else if (mention === "problems") {
-      // @problems — run tsc diagnostics
+      // @problems — type-check diagnostics via the shared, cross-platform runner
+      // (handles the shell + --pretty false; no Unix-only `2>&1`).
       try {
-        const raw = execSync("npx tsc --noEmit 2>&1", {
-          cwd: projectRoot,
-          encoding: "utf8",
-          timeout: 30_000,
-        });
-        const lines = raw.split("\n").slice(0, 500);
-        const body =
-          lines.length >= 500
-            ? lines.join("\n") + "\n... (truncated at 500 lines)"
-            : lines.join("\n");
-        blocks.push(`@problems (diagnostics):\n${body}`);
+        const r = await runDiagnostics(projectRoot);
+        blocks.push(`@problems (diagnostics):\n${formatDiagnostics(r.diagnostics)}`);
       } catch (err) {
-        // execSync throws on non-zero exit — stdout is in err.stdout
-        const output =
-          (err as { stdout?: string }).stdout ?? String(err);
-        const lines = output.split("\n").slice(0, 500);
-        const body =
-          lines.length >= 500
-            ? lines.join("\n") + "\n... (truncated at 500 lines)"
-            : lines.join("\n");
-        blocks.push(`@problems (diagnostics):\n${body}`);
+        blocks.push(`@problems (diagnostics): [failed to run: ${String(err)}]`);
       }
     } else {
       const path = isAbsolute(mention) ? mention : resolve(projectRoot, mention);

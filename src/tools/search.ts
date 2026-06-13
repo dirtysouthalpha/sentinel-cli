@@ -46,7 +46,7 @@ function matchGlob(name: string, pattern: string): boolean {
 // Directories that only add noise to code search — skipped on both platforms.
 const NOISE_DIRS = ["node_modules", ".git", "dist", "build", ".next", "coverage", ".turbo", "out"];
 
-async function searchGrep(root: string, pattern: string, include?: string, maxResults: number = 100): Promise<string> {
+export async function searchGrep(root: string, pattern: string, include?: string, maxResults: number = 100): Promise<string> {
   return new Promise<string>((resolve) => {
     const isWindows = process.platform === "win32";
 
