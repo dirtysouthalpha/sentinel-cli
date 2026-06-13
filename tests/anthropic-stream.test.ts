@@ -52,3 +52,37 @@ describe("AnthropicProvider streaming", () => {
     expect(chunks.join("")).toBe("Hello there");
   });
 });
+
+function jsonResponse(obj: object): Response {
+  return new Response(JSON.stringify(obj), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+describe("AnthropicProvider non-streaming chat", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("parses text and tool_use blocks", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      model: "claude-opus-4-8",
+      stop_reason: "tool_use",
+      usage: { input_tokens: 3, output_tokens: 4 },
+      content: [
+        { type: "text", text: "let me check" },
+        { type: "tool_use", id: "toolu_9", name: "search", input: { pattern: "foo" } },
+      ],
+    })));
+    const p = new AnthropicProvider({ apiKey: "test" } as never);
+    const res = await p.chat([{ role: "user", content: "find foo" }]);
+    expect(res.content).toBe("let me check");
+    expect(res.toolCalls).toHaveLength(1);
+    expect(res.toolCalls![0].name).toBe("search");
+    expect(JSON.parse(res.toolCalls![0].arguments)).toEqual({ pattern: "foo" });
+  });
+
+  it("does not crash on a 200 response missing the content array", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ model: "m", usage: { input_tokens: 0, output_tokens: 0 } })));
+    const p = new AnthropicProvider({ apiKey: "test" } as never);
+    const res = await p.chat([{ role: "user", content: "hi" }]);
+    expect(res.content).toBe("");
+    expect(res.toolCalls).toBeUndefined();
+  });
+});
