@@ -66,9 +66,9 @@ interface OpenAIChoice {
   message?: {
     content?: string;
     tool_calls?: Array<{
-      id: string;
-      type: string;
-      function: { name: string; arguments: string };
+      id?: string;
+      type?: string;
+      function?: { name?: string; arguments?: string };
     }>;
   };
   finish_reason?: string;
@@ -84,11 +84,15 @@ export function parseOpenAIResponse(data: OpenAIResponse): ChatResponse {
   const choice = data.choices?.[0];
   const msg = choice?.message;
 
-  const toolCalls: ToolCall[] | undefined = msg?.tool_calls?.map((tc) => ({
-    id: tc.id,
-    name: tc.function.name,
-    arguments: tc.function.arguments,
-  }));
+  // Guard against malformed tool calls (missing function/name) from quirky
+  // providers — a single bad entry must not throw and kill the whole response.
+  const toolCalls: ToolCall[] | undefined = msg?.tool_calls
+    ?.map((tc, i) => ({
+      id: tc.id || `call_${i}`,
+      name: tc.function?.name || "",
+      arguments: tc.function?.arguments ?? "",
+    }))
+    .filter((tc) => tc.name);
 
   return {
     content: msg?.content || "",
