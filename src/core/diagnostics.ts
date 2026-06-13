@@ -89,7 +89,9 @@ export async function runDiagnostics(
   projectRoot: string,
   opts: RunDiagnosticsOptions = {}
 ): Promise<DiagnosticsResult> {
-  const command = opts.command || "npx tsc --noEmit";
+  // --pretty false forces single-line, color-free output that parseTscOutput
+  // can read, even when a project's tsconfig sets pretty:true.
+  const command = opts.command || "npx tsc --noEmit --pretty false";
   const run = opts.run || defaultRun;
   const { stdout, stderr, code } = await run(command, projectRoot);
   const raw = [stdout, stderr].filter(Boolean).join("\n");

@@ -70,7 +70,7 @@ describe("runDiagnostics", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.diagnostics).toEqual([]);
-    expect(calls[0].cmd).toBe("npx tsc --noEmit");
+    expect(calls[0].cmd).toBe("npx tsc --noEmit --pretty false");
     expect(calls[0].cwd).toBe("/proj");
   });
 
