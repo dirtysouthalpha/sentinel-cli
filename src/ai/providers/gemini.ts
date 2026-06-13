@@ -303,8 +303,10 @@ export class GeminiProvider implements AIProvider {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
+          // SSE allows "data:" with or without the space; match both.
+          const ltrim = line.trimStart();
+          if (!ltrim.startsWith("data:")) continue;
+          const data = ltrim.slice(5).trim();
           if (!data || data === "[DONE]") continue;
 
           try {
