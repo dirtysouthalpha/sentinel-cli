@@ -273,6 +273,40 @@ describe("AgentRunner", () => {
     expect(emptyWithCalls!.toolCalls).toHaveLength(1);
   });
 
+  it("(i) gates self-evaluation to every Nth round (default 3)", async () => {
+    // Always returns a tool call -> loop runs to maxRounds; empty content -> eval = "continue".
+    const provider = new FakeProvider([
+      { content: "", model: "m", toolCalls: [toolCall("bash", { command: "x" })] },
+    ]);
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(makeDeps(provider, ctx), {
+      maxRounds: 6,
+      selfEvaluation: true,
+    });
+
+    const result = await runner.run("go");
+
+    expect(result.rounds).toBe(6);
+    // 6 round calls + self-eval at rounds 3 and 6 (default interval 3) = 8.
+    expect(provider.calls).toBe(8);
+  });
+
+  it("(j) selfEvalInterval:1 evaluates every round", async () => {
+    const provider = new FakeProvider([
+      { content: "", model: "m", toolCalls: [toolCall("bash", { command: "x" })] },
+    ]);
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(makeDeps(provider, ctx), {
+      maxRounds: 4,
+      selfEvaluation: true,
+      selfEvalInterval: 1,
+    });
+
+    await runner.run("go");
+    // 4 round calls + 4 self-eval calls = 8.
+    expect(provider.calls).toBe(8);
+  });
+
   it("stops cleanly with no_tool_calls when model returns plain text", async () => {
     const provider = new FakeProvider([{ content: "all done", model: "m" }]);
     const ctx = new FakeContext();

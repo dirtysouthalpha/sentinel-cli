@@ -36,6 +36,11 @@ export interface AgentRunnerConfig {
   maxTokens?: number;
   largeContextWarnAt?: number;
   selfEvaluation?: boolean;
+  /** Run self-evaluation only every N rounds (default 3). Each eval is a full
+   *  extra model call, so evaluating every round triples model spend on long
+   *  tasks for little gain — the loop already exits on no_tool_calls and stuck
+   *  is detected separately. */
+  selfEvalInterval?: number;
   completionDetection?: boolean;
   stuckDetection?: boolean;
   stuckThreshold?: number;
@@ -259,8 +264,10 @@ export class AgentRunner extends EventEmitter {
 
         this.consecutiveStuckCount = 0;
 
-        // Self-evaluation
-        if (this.config.selfEvaluation) {
+        // Self-evaluation — gated to every Nth round to avoid a full extra
+        // model call on every tool-using round (see selfEvalInterval).
+        const evalInterval = Math.max(1, this.config.selfEvalInterval ?? 3);
+        if (this.config.selfEvaluation && round % evalInterval === 0) {
           const evalOutcome = await evaluateRound(
             this.context.toAIMessages(),
             this.provider,
