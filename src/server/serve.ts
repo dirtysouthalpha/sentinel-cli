@@ -377,6 +377,13 @@ class Connection {
         ? createHookAwareExecutor(config.hooks, parentExecute, defaultRunShell)
         : parentExecute;
 
+      const autoCfg: import("../core/types.js").AutonomousConfig = config.autonomous || {
+        enabled: false, maxRounds: 15, budgetUSD: 0, selfEvaluation: true,
+        completionDetection: true, stuckDetection: true, stuckThreshold: 3,
+        verificationCommands: [],
+      };
+      const isAutonomous = autoCfg.enabled && agent === "gsd";
+
       const runner = new AgentRunner(
         {
           provider,
@@ -385,7 +392,16 @@ class Connection {
           executeTool: topExecute,
           extractToolCalls,
         },
-        { model: modelName, maxRounds: agent === "gsd" ? 30 : 15, largeContextWarnAt: 50 }
+        {
+          model: modelName,
+          maxRounds: isAutonomous ? (autoCfg.maxRounds || 50) : agent === "gsd" ? 30 : 15,
+          largeContextWarnAt: 50,
+          selfEvaluation: isAutonomous && autoCfg.selfEvaluation !== false,
+          stuckDetection: isAutonomous && autoCfg.stuckDetection !== false,
+          stuckThreshold: autoCfg.stuckThreshold || 3,
+          budgetUSD: autoCfg.budgetUSD || 0,
+          getEstimatedCost: () => this.cost.estimatedCostUSD,
+        }
       );
 
       this.ac = new AbortController();

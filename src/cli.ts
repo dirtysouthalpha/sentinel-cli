@@ -22,9 +22,11 @@ import { getToolDefinitions, executeToolCall } from "./tools/tool-executor.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import { extractToolCalls } from "./core/tool-call-extractor.js";
 import { buildSystemPrompt } from "./core/system-prompt.js";
+import { usageTracker } from "./core/usage-tracker.js";
 import { expandMentions } from "./core/mentions.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "./core/brain-recall.js";
 import { RoutedProvider } from "./ai/routed-provider.js";
+import { ProviderError } from "./ai/errors.js";
 import { PermissionEngine, PermissionMode, PermissionRequest } from "./core/permissions.js";
 import { CheckpointManager } from "./core/checkpoints.js";
 import { createGuardedExecutor } from "./core/guarded-executor.js";
@@ -40,7 +42,7 @@ import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 function getInstallRoot(): string {
   return resolve(
@@ -159,11 +161,11 @@ program
 
 program
   .command("ask <question>")
-  .description("Ask a question (headless mode)")
+  .description("Ask a question (headless, one-shot; use 'run' for agentic tool execution)")
   .option("--model <model>", "AI model to use")
   .action(async (question, _opts, command) => {
     const config = getConfigManager().load();
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider as any, { sentinelProxy: config.sentinelProxy, headroom: config.headroom });
     // --model is also defined on the root command, so commander binds it to the
     // global opts; merge both so the subcommand override is honored either way.
     const merged = command.optsWithGlobals();
@@ -174,14 +176,27 @@ program
     console.log(`\nAsking ${model}...\n`);
 
     try {
-      const response = await providerManager.chat(
+      let output = "";
+      await providerManager.chatStream(
         providerName,
         [{ role: "user", content: question }],
-        { model: modelName }
+        { model: modelName },
+        (chunk) => {
+          if (chunk.content) {
+            process.stdout.write(chunk.content);
+            output += chunk.content;
+          }
+        }
       );
-      console.log(response.content);
+      if (!output.endsWith("\n")) console.log();
     } catch (err) {
-      console.error(`Error: ${err}`);
+      if (err instanceof ProviderError && err.status === 429) {
+        console.error(`\nRate limited on ${model}.`);
+        const fallback = config.small_model && config.small_model !== model ? config.small_model : undefined;
+        if (fallback) console.error(`  Try: node dist/cli.js ask --model ${fallback} "..."`);
+      } else {
+        console.error(`Error: ${err instanceof Error ? err.message : err}`);
+      }
     }
   });
 
@@ -192,6 +207,7 @@ program
   .option("--agent <agent>", "Agent to use (default: config default_agent)")
   .option("--max-steps <n>", "Maximum tool rounds")
   .option("--json", "Emit newline-delimited JSON events instead of text")
+  .option("--quiet", "Only emit the final result (text or JSON --json)")
   .option("--project <path>", "Project root directory")
   .option("--permission-mode <mode>", "Permission mode: yolo | auto | gated (default: yolo)")
   .option("--yes", "Auto-approve permission prompts (non-interactive)")
@@ -201,14 +217,14 @@ program
     const merged = command.optsWithGlobals();
     const projectRoot = merged.project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider as any, { sentinelProxy: config.sentinelProxy, headroom: config.headroom });
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
 
     const explicitModel = merged.model as string | undefined;
     const agentName = opts.agent || config.default_agent;
     const json = !!opts.json;
-
+    const quiet = !!opts.quiet;
     // Use the router when configured (and no explicit --model override); it
     // resolves a provider/model chain with fallback + retry. Otherwise a single
     // provider, exactly as before.
@@ -279,7 +295,13 @@ program
       ? createHookAwareExecutor(config.hooks, parentExecute, defaultRunShell)
       : parentExecute;
 
-    const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : agentName === "gsd" ? 30 : 15;
+    const autoCfg: import("./core/types.js").AutonomousConfig = config.autonomous || {
+      enabled: false, maxRounds: 15, budgetUSD: 0, selfEvaluation: true,
+      completionDetection: true, stuckDetection: true, stuckThreshold: 3,
+      verificationCommands: [],
+    };
+    const isAutonomous = autoCfg.enabled && agentName === "gsd";
+    const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : isAutonomous ? (autoCfg.maxRounds || 50) : agentName === "gsd" ? 30 : 15;
     const runner = new AgentRunner(
       {
         provider,
@@ -288,36 +310,46 @@ program
         executeTool: topExecute,
         extractToolCalls,
       },
-      { model: modelName, maxRounds }
+      {
+        model: modelName,
+        maxRounds,
+        selfEvaluation: isAutonomous && autoCfg.selfEvaluation !== false,
+        stuckDetection: isAutonomous && autoCfg.stuckDetection !== false,
+        stuckThreshold: autoCfg.stuckThreshold || 3,
+        budgetUSD: autoCfg.budgetUSD || 0,
+        getEstimatedCost: () => usageTracker.snapshot().estimatedCostUSD,
+      }
     );
 
     const emit = (obj: Record<string, unknown>) => {
-      if (json) console.log(JSON.stringify(obj));
+      if (json && !quiet) console.log(JSON.stringify(obj));
     };
 
-    runner.on("roundStart", (round) => emit({ type: "round_start", round }));
-    runner.on("token", (text) => {
-      if (json) emit({ type: "token", text });
-      else process.stdout.write(text);
-    });
-    runner.on("streamEnd", () => {
-      if (!json) process.stdout.write("\n");
-    });
-    runner.on("usage", (u) => emit({ type: "usage", ...u }));
-    runner.on("toolStart", (name, args) => {
-      emit({ type: "tool_start", name, args });
-      if (!json) process.stdout.write(`[tool] ${name} ${args}\n`);
-    });
-    runner.on("toolResult", (name, ok, firstLine, full) => {
-      emit({ type: "tool_result", name, ok, firstLine, full });
-      if (!json) process.stdout.write(`  ${ok ? "ok" : "ERR"} ${firstLine}\n`);
-    });
-    runner.on("roundEnd", (round, willContinue) => emit({ type: "round_end", round, willContinue }));
-    runner.on("runError", (e) => {
-      const message = e instanceof Error ? e.message : String(e);
-      emit({ type: "error", message });
-      if (!json) console.error(`\nError: ${message}`);
-    });
+    if (!quiet) {
+      runner.on("roundStart", (round) => emit({ type: "round_start", round }));
+      runner.on("token", (text) => {
+        if (json) emit({ type: "token", text });
+        else process.stdout.write(text);
+      });
+      runner.on("streamEnd", () => {
+        if (!json) process.stdout.write("\n");
+      });
+      runner.on("usage", (u) => emit({ type: "usage", ...u }));
+      runner.on("toolStart", (name, args) => {
+        emit({ type: "tool_start", name, args });
+        if (!json) process.stdout.write(`[tool] ${name} ${args}\n`);
+      });
+      runner.on("toolResult", (name, ok, firstLine, full) => {
+        emit({ type: "tool_result", name, ok, firstLine, full });
+        if (!json) process.stdout.write(`  ${ok ? "ok" : "ERR"} ${firstLine}\n`);
+      });
+      runner.on("roundEnd", (round, willContinue) => emit({ type: "round_end", round, willContinue }));
+      runner.on("runError", (e) => {
+        const message = e instanceof Error ? e.message : String(e);
+        emit({ type: "error", message });
+        if (!json) console.error(`\nError: ${message}`);
+      });
+    }
 
     const ac = new AbortController();
     process.once("SIGINT", () => ac.abort());
@@ -340,7 +372,14 @@ program
     } finally {
       await mcp.disconnect();
     }
-    emit({ type: "done", stopReason: result.stopReason, rounds: result.rounds, usage: result.usage });
+    // In quiet mode, only emit the final result
+    if (quiet && json) {
+      console.log(JSON.stringify({ type: "done", stopReason: result.stopReason, rounds: result.rounds, usage: result.usage, result: result.finalContent }));
+    } else if (quiet) {
+      console.log(result.finalContent);
+    } else {
+      emit({ type: "done", stopReason: result.stopReason, rounds: result.rounds, usage: result.usage });
+    }
 
     // Set exitCode and let the event loop drain (don't process.exit() — on
     // Windows that can tear down a still-flushing piped stdout and crash libuv).
@@ -432,7 +471,7 @@ program
     setLogLevel("silent");
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider as any, { sentinelProxy: config.sentinelProxy, headroom: config.headroom });
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
     try {
@@ -451,7 +490,7 @@ program
     setLogLevel("warn");
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider as any, { sentinelProxy: config.sentinelProxy, headroom: config.headroom });
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
     await launchGui({ projectRoot, installRoot: getInstallRoot() });
@@ -494,7 +533,7 @@ async function runMain(options: {
     state.set("currentAgent", config.default_agent);
   }
 
-  providerManager.initializeFromConfig(config.provider as any);
+  providerManager.initializeFromConfig(config.provider as any, { sentinelProxy: config.sentinelProxy, headroom: config.headroom });
 
   toolManager.initialize(projectRoot);
 
