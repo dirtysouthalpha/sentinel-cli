@@ -19,8 +19,8 @@ import { renderMarkdown } from "./render-markdown.js";
 import { InputHandler } from "./input-handler.js";
 import { ChatRenderer } from "./chat-renderer.js";
 import { CommandPalette } from "./command-palette.js";
-// Phase 2: LSP integration
-import { lspToolDef, executeLsp } from "../tools/lsp.js";
+// Phase 2: LSP integration — registered centrally in toolManager + TOOL_DEFINITIONS,
+// so it flows through getToolDefinitions()/executeToolCall like every other tool.
 // Phase 3: todo panel
 import { TodoPanel } from "./todo-panel.js";
 import {

@@ -6,6 +6,7 @@ import { createSearchTool } from "./search.js";
 import { createWebTool } from "./web.js";
 import { createPatchTool } from "./patch.js";
 import { createBrowserTool } from "./browser.js";
+import { lspToolDef } from "./lsp.js";
 import { events } from "../core/events.js";
 import { createLogger } from "../utils/logger.js";
 
@@ -33,6 +34,7 @@ class ToolManager {
     this.register(createWebTool());
     this.register(createPatchTool(projectRoot));
     this.register(createBrowserTool());
+    this.register(lspToolDef);
     log.info(`Initialized ${this.tools.size} tools`);
   }
 

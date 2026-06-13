@@ -130,6 +130,25 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
       },
     },
   },
+  lsp: {
+    type: "function",
+    function: {
+      name: "lsp",
+      description: "Code intelligence via Language Server Protocol. Actions: diagnostics, definition, references, hover, symbols, rename, code_actions",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", description: "diagnostics|definition|references|hover|symbols|rename|code_actions", enum: ["diagnostics", "definition", "references", "hover", "symbols", "rename", "code_actions"] },
+          file: { type: "string", description: "File path for the request" },
+          line: { type: "number", description: "Line number (0-based)" },
+          character: { type: "number", description: "Character offset (0-based)" },
+          newName: { type: "string", description: "New name (for rename action)" },
+          query: { type: "string", description: "Query string (for symbols action)" },
+        },
+        required: ["action"],
+      },
+    },
+  },
 };
 
 export function getToolDefinitions(): AIToolDef[] {
