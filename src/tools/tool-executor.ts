@@ -6,6 +6,23 @@ import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "tool-exec" });
 
+/**
+ * Truncate oversized tool output keeping BOTH ends — important because errors,
+ * stack traces, and summaries usually live at the end, which a head-only cut
+ * would discard. Keeps ~70% head / ~30% tail with a marker in between.
+ */
+export function truncateMiddle(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const headLen = Math.floor(max * 0.7);
+  const tailLen = max - headLen;
+  const omitted = text.length - max;
+  return (
+    text.slice(0, headLen) +
+    `\n\n... (${omitted} characters truncated) ...\n\n` +
+    text.slice(text.length - tailLen)
+  );
+}
+
 const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
   file: {
     type: "function",
@@ -198,7 +215,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ChatMessage> 
 
     return {
       role: "tool",
-      content: output.length > 50000 ? output.slice(0, 50000) + "\n... (truncated)" : output,
+      content: truncateMiddle(output, 50000),
       toolCallId: id,
       name,
     };

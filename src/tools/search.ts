@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import { readdirSync, statSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import { ToolDef, ToolResult } from "./types.js";
@@ -48,8 +48,13 @@ async function searchGrep(root: string, pattern: string, include?: string, maxRe
     const isWindows = process.platform === "win32";
 
     if (isWindows) {
-      const includeFilter = include ? `-Include "${include}"` : "";
-      const cmd = `Get-ChildItem -Path "${root}" -Recurse ${includeFilter} -File -ErrorAction SilentlyContinue | Select-String -Pattern "${pattern}" | Select-Object -First ${maxResults} | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line)" }`;
+      // Single-quote every interpolated value. In PowerShell, single-quoted
+      // strings are literal (no $() expansion, no quote break-out); the only
+      // escape needed is doubling an embedded '. This makes the pattern data,
+      // not code — closing the previous "${pattern}" injection hole.
+      const sq = (s: string) => `'${s.replace(/'/g, "''")}'`;
+      const includeFilter = include ? `-Include ${sq(include)}` : "";
+      const cmd = `Get-ChildItem -Path ${sq(root)} -Recurse ${includeFilter} -File -ErrorAction SilentlyContinue | Select-String -Pattern ${sq(pattern)} | Select-Object -First ${maxResults} | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line)" }`;
 
       exec(
         cmd,
@@ -63,15 +68,23 @@ async function searchGrep(root: string, pattern: string, include?: string, maxRe
         }
       );
     } else {
-      const includeArg = include ? ` --include="${include}"` : "";
-      exec(
-        `grep -rn${includeArg} -E "${pattern}" "${root}" 2>/dev/null | head -${maxResults}`,
+      // execFile with an argv array runs grep directly (no shell), so the
+      // pattern and path can't be interpreted as shell syntax. We slice to
+      // maxResults in JS instead of piping to `head`.
+      const argv = ["-rnE"];
+      if (include) argv.push(`--include=${include}`);
+      argv.push(pattern, root);
+      execFile(
+        "grep",
+        argv,
         { cwd: root, timeout: 15000, maxBuffer: 5 * 1024 * 1024 },
         (error, stdout) => {
-          if (error && error.code !== 1) { // grep exits 1 when no matches — not a real error
+          if (error && (error as NodeJS.ErrnoException & { code?: number }).code !== 1) {
+            // grep exits 1 when there are no matches — not a real error.
             resolve(`Search error: ${error.message}`);
           } else {
-            resolve(stdout || "No results found");
+            const lines = (stdout || "").split("\n").filter(Boolean).slice(0, maxResults);
+            resolve(lines.length ? lines.join("\n") : "No results found");
           }
         }
       );
