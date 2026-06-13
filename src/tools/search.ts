@@ -15,7 +15,7 @@ function searchGlob(root: string, pattern: string, maxResults: number = 100): st
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
         if (results.length >= maxResults) return;
-        if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+        if (entry.name.startsWith(".") || NOISE_DIRS.includes(entry.name)) continue;
 
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
@@ -43,6 +43,9 @@ function matchGlob(name: string, pattern: string): boolean {
   return new RegExp(`^${regexStr}$`, "i").test(name);
 }
 
+// Directories that only add noise to code search — skipped on both platforms.
+const NOISE_DIRS = ["node_modules", ".git", "dist", "build", ".next", "coverage", ".turbo", "out"];
+
 async function searchGrep(root: string, pattern: string, include?: string, maxResults: number = 100): Promise<string> {
   return new Promise<string>((resolve) => {
     const isWindows = process.platform === "win32";
@@ -54,7 +57,9 @@ async function searchGrep(root: string, pattern: string, include?: string, maxRe
       // not code — closing the previous "${pattern}" injection hole.
       const sq = (s: string) => `'${s.replace(/'/g, "''")}'`;
       const includeFilter = include ? `-Include ${sq(include)}` : "";
-      const cmd = `Get-ChildItem -Path ${sq(root)} -Recurse ${includeFilter} -File -ErrorAction SilentlyContinue | Select-String -Pattern ${sq(pattern)} | Select-Object -First ${maxResults} | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line)" }`;
+      // Drop matches whose path crosses a noise dir (e.g. \node_modules\).
+      const noiseRe = sq(NOISE_DIRS.map((d) => `[\\\\/]${d}[\\\\/]`).join("|"));
+      const cmd = `Get-ChildItem -Path ${sq(root)} -Recurse ${includeFilter} -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch ${noiseRe} } | Select-String -Pattern ${sq(pattern)} | Select-Object -First ${maxResults} | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line)" }`;
 
       exec(
         cmd,
@@ -72,6 +77,7 @@ async function searchGrep(root: string, pattern: string, include?: string, maxRe
       // pattern and path can't be interpreted as shell syntax. We slice to
       // maxResults in JS instead of piping to `head`.
       const argv = ["-rnE"];
+      for (const d of NOISE_DIRS) argv.push(`--exclude-dir=${d}`);
       if (include) argv.push(`--include=${include}`);
       argv.push(pattern, root);
       execFile(

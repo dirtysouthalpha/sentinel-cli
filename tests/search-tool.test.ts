@@ -38,6 +38,20 @@ describe("search tool", () => {
     expect(res.data).toBeInstanceOf(Array);
     expect((res.data as string[]).length).toBe(2);
   });
+
+  it("excludes noise dirs (node_modules) from glob and grep", async () => {
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(join(dir, "node_modules"), { recursive: true });
+    writeFileSync(join(dir, "node_modules", "dep.txt"), "needle\n", "utf8");
+
+    const glob = await tool.execute({ pattern: "*.txt", type: "glob" });
+    const files = glob.data as string[];
+    expect(files.some((f) => f.includes("node_modules"))).toBe(false);
+    expect(files.length).toBe(2); // a.txt + b.txt, not dep.txt
+
+    const grep = await tool.execute({ pattern: "needle", type: "grep" });
+    expect(grep.output).not.toMatch(/node_modules/);
+  });
 });
 
 describe("truncateMiddle", () => {
