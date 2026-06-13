@@ -5,6 +5,7 @@ import { createLogger } from "../utils/logger.js";
 const log = createLogger({ prefix: "tools:browser" });
 
 let cachedBrowser: Browser | null = null;
+let exitHookInstalled = false;
 
 async function getBrowser(): Promise<Browser> {
   if (!cachedBrowser) {
@@ -12,6 +13,17 @@ async function getBrowser(): Promise<Browser> {
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
     });
+    // Kill the headless Chromium on process exit so it isn't orphaned when the
+    // session ends without an explicit `close` (mirrors the LSP exit hook).
+    if (!exitHookInstalled) {
+      exitHookInstalled = true;
+      const kill = () => {
+        try { cachedBrowser?.process()?.kill(); } catch { /* already gone */ }
+      };
+      process.once("exit", kill);
+      process.once("SIGINT", () => { kill(); process.exit(130); });
+      process.once("SIGTERM", () => { kill(); process.exit(143); });
+    }
   }
   return cachedBrowser;
 }
