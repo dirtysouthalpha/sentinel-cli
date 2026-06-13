@@ -58,6 +58,24 @@ describe("parseOpenAIStream", () => {
     expect(res.usage).toEqual({ promptTokens: 9, completionTokens: 1, totalTokens: 10 });
   });
 
+  it("drops a tool call that never gets a name (parity with non-streaming)", async () => {
+    // Quirky provider emits an indexed tool_call delta but no function.name.
+    // A nameless call can't be dispatched, so it must not reach the loop.
+    const bad = `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "{}" } }] } }] })}\n`;
+    const res = await parseOpenAIStream(sse([bad, "data: [DONE]\n"]));
+    expect(res.toolCalls).toBeUndefined();
+  });
+
+  it("defaults empty tool-call arguments to {} so they parse as JSON", async () => {
+    // Zero-arg tool call: name present, arguments never streamed. Bare "" would
+    // throw in JSON.parse downstream; it must become "{}".
+    const line = `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "list" } }] } }] })}\n`;
+    const res = await parseOpenAIStream(sse([line, "data: [DONE]\n"]));
+    expect(res.toolCalls).toHaveLength(1);
+    expect(res.toolCalls![0].name).toBe("list");
+    expect(JSON.parse(res.toolCalls![0].arguments)).toEqual({});
+  });
+
   it("captures usage and finish_reason", async () => {
     const line = `data: ${JSON.stringify({ model: "m", choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 } })}\n`;
     const res = await parseOpenAIStream(sse([line, "data: [DONE]\n"]));

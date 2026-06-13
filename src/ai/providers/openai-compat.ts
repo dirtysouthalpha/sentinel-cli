@@ -90,7 +90,7 @@ export function parseOpenAIResponse(data: OpenAIResponse): ChatResponse {
     ?.map((tc, i) => ({
       id: tc.id || `call_${i}`,
       name: tc.function?.name || "",
-      arguments: tc.function?.arguments ?? "",
+      arguments: tc.function?.arguments || "{}",
     }))
     .filter((tc) => tc.name);
 
@@ -190,13 +190,13 @@ export async function parseOpenAIStream(
 
   onChunk?.({ content: "", done: true });
 
-  const toolCalls = toolCallMap.size > 0
-    ? Array.from(toolCallMap.values()).map((tc) => ({
-        id: tc.id,
-        name: tc.name,
-        arguments: tc.args,
-      }))
-    : undefined;
+  // Mirror parseOpenAIResponse / the Anthropic stream: drop nameless calls a
+  // quirky provider can emit (undispatchable), and default empty arguments to
+  // "{}" so a zero-arg call survives JSON.parse downstream.
+  const assembled = Array.from(toolCallMap.values())
+    .filter((tc) => tc.name)
+    .map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.args || "{}" }));
+  const toolCalls = assembled.length > 0 ? assembled : undefined;
 
   return {
     content: fullContent.join(""),
