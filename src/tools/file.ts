@@ -53,6 +53,145 @@ function findHashedSection(lines: string[], anchorHash: string): HashedSection |
   return null;
 }
 
+/**
+ * How an edit locates the text to change:
+ *  - `range`  — an explicit line span (from lineStart/lineEnd or an anchorHash).
+ *               We splice exactly those lines; no content search, so identical
+ *               text elsewhere in the file can never be hit by mistake.
+ *  - `search` — find `oldText` by content (from searchLines). Subject to the
+ *               uniqueness guard and whitespace-tolerant fallback below.
+ */
+type EditTarget =
+  | { kind: "range"; startIdx: number; endIdx: number; line: number; oldText: string }
+  | { kind: "search"; oldText: string };
+
+function resolveTarget(
+  content: string,
+  args: Record<string, unknown>
+): { ok: true; target: EditTarget } | { ok: false; error: string } {
+  const searchLines = (args.searchLines as string[]) || [];
+  const anchorHash = args.anchorHash as string | undefined;
+  const lineStart = args.lineStart as number | undefined;
+  const lineEnd = args.lineEnd as number | undefined;
+  const lines = content.split("\n");
+
+  if (lineStart !== undefined && lineEnd !== undefined) {
+    if (lineStart < 1 || lineEnd > lines.length || lineStart > lineEnd) {
+      return { ok: false, error: `Invalid line range ${lineStart}-${lineEnd} for a ${lines.length}-line file` };
+    }
+    const oldText = lines.slice(lineStart - 1, lineEnd).join("\n");
+    return { ok: true, target: { kind: "range", startIdx: lineStart - 1, endIdx: lineEnd, line: lineStart, oldText } };
+  }
+  if (searchLines.length > 0) {
+    return { ok: true, target: { kind: "search", oldText: searchLines.join("\n") } };
+  }
+  if (anchorHash) {
+    const found = findHashedSection(lines, anchorHash);
+    if (!found) return { ok: false, error: `Hash anchor ${anchorHash} not found in file` };
+    return { ok: true, target: { kind: "range", startIdx: found.startLine - 1, endIdx: found.endLine, line: found.startLine, oldText: found.text } };
+  }
+  return { ok: false, error: "Must provide one of: lineStart+lineEnd, searchLines, or anchorHash" };
+}
+
+/**
+ * Resolve a `search` target to concrete new file content, applying the
+ * uniqueness guard and a whitespace-tolerant fallback. Returns the rewritten
+ * content plus the matched old text (for diffs), or a descriptive error the
+ * model can act on.
+ */
+function findBlocks(
+  fileLines: string[],
+  searchBlock: string[],
+  eq: (a: string, b: string) => boolean
+): number[] {
+  const starts: number[] = [];
+  for (let i = 0; i + searchBlock.length <= fileLines.length; i++) {
+    let hit = true;
+    for (let j = 0; j < searchBlock.length; j++) {
+      if (!eq(fileLines[i + j], searchBlock[j])) { hit = false; break; }
+    }
+    if (hit) starts.push(i);
+  }
+  return starts;
+}
+
+function applySearch(
+  content: string,
+  oldText: string,
+  replaceText: string,
+  strictWhitespace: boolean
+): { ok: true; newContent: string; oldText: string; line: number } | { ok: false; error: string } {
+  // Line-aligned block matching (not raw substring) so a search for `foo();`
+  // matches a whole line, never a fragment inside `  foo();` or `if(foo());`.
+  const fileLines = content.split("\n");
+  const searchBlock = oldText.split("\n");
+
+  const splice = (start: number) => {
+    const matchedOld = fileLines.slice(start, start + searchBlock.length).join("\n");
+    const newContent = [
+      ...fileLines.slice(0, start),
+      ...replaceText.split("\n"),
+      ...fileLines.slice(start + searchBlock.length),
+    ].join("\n");
+    return { ok: true as const, newContent, oldText: matchedOld, line: start + 1 };
+  };
+
+  // 1) Exact line match — require uniqueness, or the wrong copy could be edited.
+  const exact = findBlocks(fileLines, searchBlock, (a, b) => a === b);
+  if (exact.length === 1) return splice(exact[0]);
+  if (exact.length > 1) {
+    return {
+      ok: false,
+      error: `Ambiguous edit: the search text appears ${exact.length} times. Include more surrounding lines so it uniquely identifies one location.`,
+    };
+  }
+
+  if (strictWhitespace) {
+    return { ok: false, error: "Exact text not found (strictWhitespace is on). Check the content and whitespace." };
+  }
+
+  // 2) Whitespace-tolerant fallback: compare lines ignoring leading/trailing
+  //    whitespace (handles indentation drift, trailing spaces, CRLF). Still
+  //    requires a unique match before touching the file.
+  const norm = (s: string) => s.replace(/^\s+/, "").replace(/\s+$/, "");
+  const tolerant = findBlocks(fileLines, searchBlock, (a, b) => norm(a) === norm(b));
+  if (tolerant.length === 0) {
+    return { ok: false, error: "Text not found in file. Check the content and surrounding lines." };
+  }
+  if (tolerant.length > 1) {
+    return {
+      ok: false,
+      error: `Ambiguous edit: ${tolerant.length} whitespace-insensitive matches. Include more surrounding lines to disambiguate.`,
+    };
+  }
+  return splice(tolerant[0]);
+}
+
+/** Compute the edited content for any target, or a descriptive error. */
+function computeEdit(
+  content: string,
+  args: Record<string, unknown>,
+  replaceText: string,
+  strictWhitespace: boolean
+): { ok: true; newContent: string; oldText: string; line: number } | { ok: false; error: string } {
+  const resolved = resolveTarget(content, args);
+  if (!resolved.ok) return resolved;
+  const target = resolved.target;
+
+  if (target.kind === "range") {
+    // Splice the exact line span — never a content search.
+    const lines = content.split("\n");
+    const newContent = [
+      ...lines.slice(0, target.startIdx),
+      ...replaceText.split("\n"),
+      ...lines.slice(target.endIdx),
+    ].join("\n");
+    return { ok: true, newContent, oldText: target.oldText, line: target.line };
+  }
+
+  return applySearch(content, target.oldText, replaceText, strictWhitespace);
+}
+
 export function createFileTool(projectRoot: string): ToolDef {
   return {
     name: "file",
@@ -111,118 +250,39 @@ export function createFileTool(projectRoot: string): ToolDef {
           }
           case "edit": {
             const content = readFileSync(path, encoding);
-            const searchLines = (args.searchLines as string[]) || [];
             const replaceText = args.replaceText as string;
-            const anchorHash = args.anchorHash as string | undefined;
-            const lineStart = (args.lineStart as number | undefined);
-            const lineEnd = (args.lineEnd as number | undefined);
+            const strictWhitespace = !!args.strictWhitespace;
 
-            let actualOldText: string;
-            let searchResult: { found: boolean; matchLine?: number; matchStart?: number };
-
-            if (lineStart !== undefined && lineEnd !== undefined) {
-              const lines = content.split("\n");
-              const selectedLines = lines.slice(lineStart - 1, lineEnd);
-              actualOldText = selectedLines.join("\n");
-              searchResult = { found: true, matchLine: lineStart };
-            } else if (searchLines.length > 0) {
-              actualOldText = searchLines.join("\n");
-              searchResult = { found: true };
-            } else if (anchorHash) {
-              const lines = content.split("\n");
-              const found = findHashedSection(lines, anchorHash);
-              if (!found) {
-                return { success: false, output: "", error: `Hash anchor ${anchorHash} not found in file` };
-              }
-              actualOldText = found.text;
-              searchResult = { found: true, matchLine: found.startLine };
-            } else {
-              return { success: false, output: "", error: "Must provide one of: lineStart+lineEnd, searchLines, or anchorHash" };
+            const result = computeEdit(content, args, replaceText, strictWhitespace);
+            if (!result.ok) {
+              return { success: false, output: "", error: result.error };
             }
 
-            if (!content.includes(actualOldText)) {
-              const lines = content.split("\n");
-              const firstLine = actualOldText.split("\n")[0];
-              const trimmedMatch = firstLine?.trim();
-              const candidates: number[] = [];
-
-              for (let i = 0; i < lines.length; i++) {
-                if (lines[i].trim() === trimmedMatch) {
-                  candidates.push(i + 1);
-                }
-              }
-
-              if (candidates.length > 0 && !args.strictWhitespace) {
-                for (const candidate of candidates) {
-                  const candidateText = lines.slice(candidate - 1, candidate - 1 + actualOldText.split("\n").length).join("\n");
-                  if (lines[candidate - 1]?.trim() === trimmedMatch) {
-                    const reconstructed = lines.slice(candidate - 1, candidate - 1 + actualOldText.split("\n").length)
-                      .map((l, idx) => idx === 0 || idx === actualOldText.split("\n").length - 1 ? l : l.trim())
-                      .join("\n");
-                    if (content.includes(reconstructed)) {
-                      return {
-                        success: false,
-                        output: "",
-                        error: `Exact match not found. Line ${candidate} has similar content but whitespace differs.\nUse strictWhitespace: false or provide exact text with proper indentation.`,
-                      };
-                    }
-                  }
-                }
-              }
-
-              return { success: false, output: "", error: `Text not found in file. Check content and whitespace.` };
-            }
-
-            const newContent = content.replace(actualOldText, replaceText);
-            writeFileSync(path, newContent, encoding);
-
+            writeFileSync(path, result.newContent, encoding);
             return {
               success: true,
-              output: `Edited ${path} (${actualOldText.length} -> ${replaceText.length} bytes)`,
+              output: `Edited ${path} at line ${result.line} (${result.oldText.length} -> ${replaceText.length} bytes)`,
               data: {
-                anchorHash,
-                editedLines: searchResult.matchLine,
-                bytesChanged: replaceText.length - actualOldText.length,
+                anchorHash: args.anchorHash as string | undefined,
+                editedLines: result.line,
+                bytesChanged: replaceText.length - result.oldText.length,
               },
             };
           }
           case "preview": {
             const content = readFileSync(path, encoding);
-            const searchLines = (args.searchLines as string[]) || [];
             const replaceText = args.replaceText as string;
-            const anchorHash = args.anchorHash as string | undefined;
-            const lineStart = (args.lineStart as number | undefined);
-            const lineEnd = (args.lineEnd as number | undefined);
+            const strictWhitespace = !!args.strictWhitespace;
 
-            let actualOldText: string;
-
-            if (lineStart !== undefined && lineEnd !== undefined) {
-              const lines = content.split("\n");
-              const selectedLines = lines.slice(lineStart - 1, lineEnd);
-              actualOldText = selectedLines.join("\n");
-            } else if (searchLines.length > 0) {
-              actualOldText = searchLines.join("\n");
-            } else if (anchorHash) {
-              const lines = content.split("\n");
-              const found = findHashedSection(lines, anchorHash);
-              if (!found) {
-                return { success: false, output: "", error: `Hash anchor ${anchorHash} not found in file` };
-              }
-              actualOldText = found.text;
-            } else {
-              return { success: false, output: "", error: "Must provide one of: lineStart+lineEnd, searchLines, or anchorHash" };
+            const result = computeEdit(content, args, replaceText, strictWhitespace);
+            if (!result.ok) {
+              return { success: false, output: "", error: result.error };
             }
 
-            if (!content.includes(actualOldText)) {
-              return { success: false, output: "", error: `Text not found in file. Check content and whitespace.` };
-            }
-
-            const newContent = content.replace(actualOldText, replaceText);
-            const diffOutput = diff(actualOldText, replaceText);
-
+            const diffOutput = diff(result.oldText, replaceText);
             return {
               success: true,
-              output: `Preview of changes to ${path}:\n${diffOutput}`,
+              output: `Preview of changes to ${path} (line ${result.line}):\n${diffOutput}`,
               data: { isPreview: true },
             };
           }
