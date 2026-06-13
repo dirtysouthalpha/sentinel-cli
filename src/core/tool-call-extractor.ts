@@ -15,7 +15,8 @@ export function extractToolCalls(content: string): ToolCall[] | null {
   if (!content) return null;
   const calls: ToolCall[] = [];
   const patterns: [RegExp, "tool" | "bash"][] = [
-    [/```tool\s*\n([\s\S]*?)```/g, "tool"],
+    // Accept ```tool and ```tool_call as aliases for a JSON tool call.
+    [/```tool(?:_call)?\s*\n([\s\S]*?)```/g, "tool"],
     [/```bash\s*\n([\s\S]*?)```/g, "bash"],
   ];
   for (const [re, kind] of patterns) {
@@ -31,13 +32,14 @@ export function extractToolCalls(content: string): ToolCall[] | null {
       } else {
         try {
           const parsed = JSON.parse(body);
+          // Tolerate the common key variants models emit.
+          const name = parsed.name ?? parsed.tool ?? parsed.tool_name;
+          if (!name || typeof name !== "string") continue; // not a usable call
+          const rawArgs = parsed.arguments ?? parsed.args ?? parsed.parameters ?? parsed.input ?? {};
           calls.push({
             id: parsed.id || `call_${calls.length}`,
-            name: parsed.name,
-            arguments:
-              typeof parsed.arguments === "string"
-                ? parsed.arguments
-                : JSON.stringify(parsed.arguments),
+            name,
+            arguments: typeof rawArgs === "string" ? rawArgs : JSON.stringify(rawArgs),
           });
         } catch {
           // skip unparseable

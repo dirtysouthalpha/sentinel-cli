@@ -83,4 +83,24 @@ describe("extractToolCalls", () => {
   it("returns null on empty input", () => {
     expect(extractToolCalls("")).toBeNull();
   });
+
+  it("accepts a ```tool_call fence", () => {
+    const content = ["```tool_call", JSON.stringify({ name: "git", arguments: { action: "status" } }), "```"].join("\n");
+    const calls = extractToolCalls(content);
+    expect(calls).toHaveLength(1);
+    expect(calls![0].name).toBe("git");
+  });
+
+  it("tolerates tool/args key variants", () => {
+    const content = ["```tool", JSON.stringify({ tool: "file", args: { action: "read", path: "x" } }), "```"].join("\n");
+    const calls = extractToolCalls(content);
+    expect(calls).toHaveLength(1);
+    expect(calls![0].name).toBe("file");
+    expect(JSON.parse(calls![0].arguments)).toEqual({ action: "read", path: "x" });
+  });
+
+  it("skips a block with no name instead of emitting a nameless call", () => {
+    const content = ["```tool", JSON.stringify({ arguments: { path: "x" } }), "```"].join("\n");
+    expect(extractToolCalls(content)).toBeNull();
+  });
 });
