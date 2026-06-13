@@ -197,10 +197,12 @@ export function createFileTool(projectRoot: string): ToolDef {
     name: "file",
     description: "Read, write, and manage files",
     parameters: {
-      action: { type: "string", description: "read|write|exists|delete|list|mkdir", required: true },
+      action: { type: "string", description: "read|write|exists|delete|list|mkdir|edit|preview", required: true },
       path: { type: "string", description: "File path relative to project root", required: true },
       content: { type: "string", description: "Content to write (for write action)" },
       encoding: { type: "string", description: "File encoding", default: "utf-8" },
+      offset: { type: "number", description: "read: 1-based start line of the window" },
+      limit: { type: "number", description: "read: max number of lines to return" },
     },
     execute: async (args): Promise<ToolResult> => {
       try {
@@ -213,8 +215,39 @@ export function createFileTool(projectRoot: string): ToolDef {
             if (!existsSync(path)) {
               return { success: false, output: "", error: `File not found: ${path}` };
             }
-            const content = readFileSync(path, encoding);
-            return { success: true, output: content };
+            const raw = readFileSync(path, encoding);
+            const offset = args.offset as number | undefined; // 1-based start line
+            const limit = args.limit as number | undefined;   // max lines to return
+            const lines = raw.split("\n");
+            const total = lines.length;
+            const DEFAULT_MAX_LINES = 2000;
+
+            let start = 0;
+            let end = total;
+            let windowed = false;
+
+            if (offset !== undefined || limit !== undefined) {
+              start = Math.min(Math.max(0, (offset ?? 1) - 1), total);
+              end = Math.min(total, start + (limit ?? DEFAULT_MAX_LINES));
+              windowed = true;
+            } else if (total > DEFAULT_MAX_LINES) {
+              // Guard against context blowout from reading a huge file whole.
+              end = DEFAULT_MAX_LINES;
+              windowed = true;
+            }
+
+            const slice = lines.slice(start, end).join("\n");
+            if (!windowed) {
+              return { success: true, output: slice };
+            }
+            return {
+              success: true,
+              output:
+                slice +
+                `\n\n[showing lines ${start + 1}-${end} of ${total}. ` +
+                `Use action:read with offset/limit to read other parts.]`,
+              data: { totalLines: total, start: start + 1, end },
+            };
           }
           case "write": {
             const content = args.content as string;

@@ -17,6 +17,8 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
         properties: {
           action: { type: "string", description: "read|write|exists|delete|list|mkdir|edit|preview", enum: ["read", "write", "exists", "delete", "list", "mkdir", "edit", "preview"] },
           path: { type: "string", description: "File path relative to project root" },
+          offset: { type: "number", description: "read: 1-based start line of the window (large files are capped; use this to page)" },
+          limit: { type: "number", description: "read: max number of lines to return" },
           content: { type: "string", description: "Content to write (for write action)" },
           encoding: { type: "string", description: "File encoding" },
           replaceText: { type: "string", description: "New text to replace with (for edit/preview actions)" },

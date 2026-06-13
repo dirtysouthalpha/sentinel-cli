@@ -129,4 +129,32 @@ describe("file tool — edit robustness", () => {
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/traversal/i);
   });
+
+  describe("read windowing", () => {
+    it("returns a small file whole, with no truncation note", async () => {
+      const f = seed("small.ts", "a\nb\nc\n");
+      const res = await tool.execute({ action: "read", path: f });
+      expect(res.success).toBe(true);
+      expect(res.output).toBe("a\nb\nc\n");
+      expect(res.output).not.toMatch(/showing lines/);
+    });
+
+    it("windows by offset/limit", async () => {
+      const f = seed("win.ts", Array.from({ length: 100 }, (_, i) => `line${i + 1}`).join("\n"));
+      const res = await tool.execute({ action: "read", path: f, offset: 10, limit: 3 });
+      expect(res.success).toBe(true);
+      expect(res.output).toContain("line10\nline11\nline12");
+      expect(res.output).toMatch(/showing lines 10-12 of 100/);
+    });
+
+    it("caps an oversized file read and says so", async () => {
+      const big = Array.from({ length: 2500 }, (_, i) => `L${i + 1}`).join("\n");
+      const f = seed("big.ts", big);
+      const res = await tool.execute({ action: "read", path: f });
+      expect(res.success).toBe(true);
+      expect(res.output).toMatch(/showing lines 1-2000 of 2500/);
+      expect(res.output).not.toContain("L2001");
+      expect((res.data as { totalLines: number }).totalLines).toBe(2500);
+    });
+  });
 });
