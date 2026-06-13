@@ -138,7 +138,7 @@ export class AnthropicProvider implements AIProvider {
     const { system, messages: chatMsgs } = this.toAnthropicMessages(messages);
 
     const body: Record<string, unknown> = {
-      model: options?.model || "claude-sonnet-4-20250514",
+      model: options?.model || "claude-sonnet-4-6",
       max_tokens: options?.maxTokens || 8192,
       temperature: options?.temperature ?? 0.7,
       messages: chatMsgs,
@@ -157,6 +157,11 @@ export class AnthropicProvider implements AIProvider {
       }));
     }
 
+    // 2 retries with 5s / 10s backoff for transient 429s (Claude Max quota windows)
+    const RETRY_DELAYS = [5000, 10000];
+    const MAX_RETRIES = RETRY_DELAYS.length;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const response = await fetch(`${this.baseURL}/v1/messages`, {
       method: "POST",
       headers: {
@@ -169,9 +174,15 @@ export class AnthropicProvider implements AIProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new ProviderError(`Anthropic API error: ${response.status} - ${error}`, response.status, "anthropic");
+      const err = new ProviderError(`Anthropic API error: ${response.status} - ${error}`, response.status, "anthropic");
+      if (response.status === 429 && attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw err;
     }
 
+    try {
     const fullContent: string[] = [];
     let model = "";
     const toolCallMap = new Map<string, { name: string; args: string }>();
@@ -198,7 +209,14 @@ export class AnthropicProvider implements AIProvider {
 
             try {
               const event = JSON.parse(data);
-              if (event.type === "content_block_delta" && event.delta?.text) {
+              if (event.type === "error") {
+                const status = event.error?.type === "rate_limit_error" ? 429 : 500;
+                throw new ProviderError(
+                  `Anthropic error: ${event.error?.type} - ${event.error?.message}`,
+                  status,
+                  "anthropic"
+                );
+              } else if (event.type === "content_block_delta" && event.delta?.text) {
                 fullContent.push(event.delta.text);
                 onChunk?.({ content: event.delta.text, done: false });
               } else if (event.type === "message_start") {
@@ -216,8 +234,49 @@ export class AnthropicProvider implements AIProvider {
                   totalTokens: (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0),
                 };
               }
-            } catch {
-              // skip
+            } catch (e) {
+              if (e instanceof ProviderError) throw e;
+              // skip malformed SSE events
+            }
+          } else {
+            // Raw JSON error line terminated by a newline (proxy passthrough)
+            const trimmed = line.trim();
+            if (trimmed.startsWith("{")) {
+              try {
+                const errObj = JSON.parse(trimmed);
+                if (errObj.type === "error") {
+                  const status = errObj.error?.type === "rate_limit_error" ? 429 : 500;
+                  throw new ProviderError(
+                    `Anthropic error: ${errObj.error?.type} - ${errObj.error?.message}`,
+                    status,
+                    "anthropic"
+                  );
+                }
+              } catch (e) {
+                if (e instanceof ProviderError) throw e;
+              }
+            }
+          }
+        }
+
+        // buffer.pop() keeps content without a trailing newline — check it for a bare
+        // JSON error object (proxy sends the error body without a trailing \n, so it
+        // never appears as a complete "line" above and would block the next read forever)
+        const bufTrimmed = buffer.trim();
+        if (bufTrimmed.startsWith("{") && bufTrimmed.endsWith("}")) {
+          let parsed: unknown;
+          try { parsed = JSON.parse(bufTrimmed); } catch { /* not complete JSON yet */ }
+          if (parsed && typeof parsed === "object") {
+            const errObj = parsed as Record<string, unknown>;
+            if (errObj.type === "error") {
+              void reader.cancel(); // close the connection before throwing
+              const err = errObj.error as Record<string, unknown> | undefined;
+              const status = err?.type === "rate_limit_error" ? 429 : 500;
+              throw new ProviderError(
+                `Anthropic error: ${err?.type} - ${err?.message}`,
+                status,
+                "anthropic"
+              );
             }
           }
         }
@@ -236,6 +295,16 @@ export class AnthropicProvider implements AIProvider {
       toolCalls,
       usage: usageData,
     };
+    } catch (e) {
+      // Retry on 429 (Claude Max quota windows); propagate everything else
+      if (e instanceof ProviderError && e.status === 429 && attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw e;
+    }
+    } // end retry loop
+    throw new ProviderError("Rate limit exceeded after retries", 429, "anthropic");
   }
 
   isAvailable(): boolean {

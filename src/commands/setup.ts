@@ -79,8 +79,10 @@ export async function runSetup(): Promise<void> {
     (config.provider as Record<string, unknown>).anthropic = {
       options: { apiKey: anthropicKey },
       models: {
-        "claude-sonnet": { name: "Claude Sonnet" },
-        "claude-haiku": { name: "Claude Haiku" },
+        "claude-fable-5": { name: "Claude Fable 5 (Most Capable)" },
+        "claude-opus-4-8": { name: "Claude Opus 4.8" },
+        "claude-sonnet-4-6": { name: "Claude Sonnet 4.6 (Recommended)" },
+        "claude-haiku-4-5-20251001": { name: "Claude Haiku 4.5 (Fast)" },
       },
     };
     console.log("  OK Anthropic configured");
@@ -163,8 +165,10 @@ export async function runSetup(): Promise<void> {
   console.log("    zai/glm-4.6              - Best value (recommended)");
   console.log("    zai/glm-5.1              - Most capable");
   console.log("    zai/glm-4.5-air          - Fast & cheap");
-  console.log("    anthropic/claude-sonnet   - Best coding (paid)");
-  console.log("    anthropic/claude-haiku    - Fast & cheap (paid)");
+  console.log("    anthropic/claude-fable-5           - Most capable");
+  console.log("    anthropic/claude-opus-4-8          - High capability");
+  console.log("    anthropic/claude-sonnet-4-6        - Best coding (recommended)");
+  console.log("    anthropic/claude-haiku-4-5-20251001 - Fast & cheap (fallback)");
   console.log("    openai/gpt-4o            - GPT-4o (paid)");
   console.log("    ollama/llama3            - Local, free");
   console.log("");
@@ -183,6 +187,57 @@ export async function runSetup(): Promise<void> {
   console.log("");
   const theme = await question("  Theme (default: cyberpunk): ");
   if (theme) config.theme = theme;
+
+  console.log("");
+
+  console.log("  ── Sentinel Proxy OAuth ────────────────────────────");
+  console.log("");
+  console.log("  Routes API calls through sentinel-proxy-oauth for OAuth-");
+  console.log("  based access (Claude Max subscription, no API key needed).");
+  console.log("  Default: http://localhost:8080");
+  console.log("  See: C:\\Users\\Administrator\\Downloads\\sentinel-proxy-oauth");
+  console.log("");
+  const useProxy = await question("  Enable Sentinel Proxy? (y/n): ");
+  if (useProxy.toLowerCase() === "y") {
+    const proxyUrl = await question("  Proxy base URL (default: http://localhost:8080): ");
+    const proxyKey = await question("  API key (default: sk-proxy-anthropic): ");
+    const autoStart = await question("  Auto-start proxy on launch? (y/n): ");
+    config.sentinelProxy = {
+      enabled: true,
+      url: proxyUrl || "http://localhost:8080",
+      apiKey: proxyKey || "sk-proxy-anthropic",
+      autoStart: autoStart.toLowerCase() === "y",
+    };
+    // Auto-set model to use anthropic via proxy
+    if (!config.model || config.model === "zai/glm-4.6") {
+      config.model = "anthropic/claude-sonnet-4-6";
+    }
+    console.log("  OK Sentinel Proxy configured");
+  }
+
+  console.log("");
+
+  console.log("  ── Headroom Token Compression ──────────────────────");
+  console.log("");
+  console.log("  Transparent proxy that compresses tokens before sending");
+  console.log("  to the AI provider — reduces cost and extends context.");
+  console.log("  Start with: headroom proxy --port 8787 --backend anthropic");
+  console.log("  Default proxy URL: http://localhost:8787");
+  console.log("");
+  const useHeadroom = await question("  Enable Headroom compression? (y/n): ");
+  if (useHeadroom.toLowerCase() === "y") {
+    const headroomUrl = await question("  Headroom proxy URL (default: http://localhost:8787): ");
+    const mode = await question("  Compression mode — aggressive/balanced/conservative (default: balanced): ");
+    config.headroom = {
+      enabled: true,
+      proxyUrl: headroomUrl || "http://localhost:8787",
+      compressionMode: (["aggressive", "balanced", "conservative"].includes(mode) ? mode : "balanced") as "aggressive" | "balanced" | "conservative",
+      compressToolOutput: true,
+      compressHistory: true,
+      cacheEnabled: true,
+    };
+    console.log("  OK Headroom configured");
+  }
 
   console.log("");
 

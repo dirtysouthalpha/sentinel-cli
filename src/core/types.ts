@@ -18,8 +18,10 @@ export interface SentinelConfig {
   snapshot: boolean;
   sessions?: SessionsConfig;
   headroom?: HeadroomConfig;
+  sentinelProxy?: SentinelProxyConfig;
   ui?: UIConfig;
   hooks?: HooksConfig;
+  autonomous?: AutonomousConfig;
 }
 
 export interface ProviderConfig {
@@ -66,10 +68,18 @@ export interface SessionsConfig {
 
 export interface HeadroomConfig {
   enabled: boolean;
+  proxyUrl: string;
   compressionMode: "aggressive" | "balanced" | "conservative";
   compressToolOutput: boolean;
   compressHistory: boolean;
   cacheEnabled: boolean;
+}
+
+export interface SentinelProxyConfig {
+  enabled: boolean;
+  url: string;
+  apiKey: string;
+  autoStart: boolean;
 }
 
 export interface UIConfig {
@@ -77,6 +87,17 @@ export interface UIConfig {
   showBreadcrumbs: boolean;
   showCompressionStats: boolean;
   tabBarPosition: "top" | "bottom";
+}
+
+export interface AutonomousConfig {
+  enabled: boolean;
+  maxRounds: number;
+  budgetUSD: number;
+  selfEvaluation: boolean;
+  completionDetection: boolean;
+  stuckDetection: boolean;
+  stuckThreshold: number;
+  verificationCommands: string[];
 }
 
 export const DEFAULT_CONFIG: SentinelConfig = {
@@ -101,4 +122,14 @@ export const DEFAULT_CONFIG: SentinelConfig = {
   share: "manual",
   autoupdate: "notify",
   snapshot: true,
+  autonomous: {
+    enabled: false,
+    maxRounds: 15,
+    budgetUSD: 0,
+    selfEvaluation: true,
+    completionDetection: true,
+    stuckDetection: true,
+    stuckThreshold: 3,
+    verificationCommands: [],
+  },
 };

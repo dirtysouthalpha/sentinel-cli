@@ -5,6 +5,12 @@ import { CustomProvider } from "./providers/custom.js";
 import { ZAIProvider } from "./providers/zai.js";
 import { GeminiProvider } from "./providers/gemini.js";
 import { createLogger } from "../utils/logger.js";
+import type { HeadroomConfig, SentinelProxyConfig } from "../core/types.js";
+
+export interface ProxyOverrides {
+  sentinelProxy?: SentinelProxyConfig;
+  headroom?: HeadroomConfig;
+}
 
 const log = createLogger({ prefix: "provider" });
 
@@ -48,31 +54,62 @@ class ProviderManager {
     return Array.from(this.providers.keys());
   }
 
-  initializeFromConfig(providers: Record<string, ProviderConfig>): void {
-    for (const [name, config] of Object.entries(providers)) {
+  // Config stored in JSON uses nested { options: { apiKey, baseURL } } but
+  // provider constructors expect a flat ProviderConfig. Normalize either shape.
+  private normalizeConfig(raw: unknown): ProviderConfig {
+    if (raw && typeof raw === "object") {
+      const r = raw as Record<string, unknown>;
+      if (r.options && typeof r.options === "object") {
+        const opts = r.options as Record<string, unknown>;
+        return {
+          apiKey: opts.apiKey as string | undefined,
+          baseURL: opts.baseURL as string | undefined,
+          ...(opts as Omit<typeof opts, "apiKey" | "baseURL">),
+        } as ProviderConfig;
+      }
+      return r as ProviderConfig;
+    }
+    return {} as ProviderConfig;
+  }
+
+  private applyProxy(cfg: ProviderConfig, providerName: string, proxy: ProxyOverrides): ProviderConfig {
+    // Headroom wraps everything — takes precedence over sentinel proxy
+    if (proxy.headroom?.enabled && proxy.headroom.proxyUrl) {
+      return { ...cfg, baseURL: proxy.headroom.proxyUrl, apiKey: proxy.sentinelProxy?.apiKey || cfg.apiKey };
+    }
+    if (proxy.sentinelProxy?.enabled && providerName === "anthropic") {
+      return { ...cfg, baseURL: proxy.sentinelProxy.url, apiKey: proxy.sentinelProxy.apiKey || cfg.apiKey };
+    }
+    return cfg;
+  }
+
+  initializeFromConfig(providers: Record<string, unknown>, proxy: ProxyOverrides = {}): void {
+    for (const [name, raw] of Object.entries(providers)) {
+      const cfg = this.applyProxy(this.normalizeConfig(raw), name, proxy);
       switch (name) {
         case "anthropic":
-          this.registerProvider(new AnthropicProvider(config));
+          this.registerProvider(new AnthropicProvider(cfg));
           break;
         case "openai":
-          this.registerProvider(new OpenAIProvider(config));
+          this.registerProvider(new OpenAIProvider(cfg));
           break;
         case "zai":
         case "zhipu":
-          this.registerProvider(new ZAIProvider(config));
+          this.registerProvider(new ZAIProvider(cfg));
           break;
         case "gemini":
         case "google":
-          this.registerProvider(new GeminiProvider(config));
+          this.registerProvider(new GeminiProvider(cfg));
           break;
         default:
-          this.registerProvider(new CustomProvider(name, config));
+          this.registerProvider(new CustomProvider(name, cfg));
           break;
       }
     }
 
     if (!this.providers.has("anthropic")) {
-      this.registerProvider(new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY }));
+      const fallback: ProviderConfig = { apiKey: process.env.ANTHROPIC_API_KEY };
+      this.registerProvider(new AnthropicProvider(this.applyProxy(fallback, "anthropic", proxy)));
     }
     if (!this.providers.has("openai")) {
       this.registerProvider(new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY }));
