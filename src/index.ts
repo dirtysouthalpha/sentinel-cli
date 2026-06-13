@@ -26,6 +26,18 @@ export { MCPManager } from "./mcp/manager.js";
 export { createMcpAwareExecutor } from "./mcp/mcp-executor.js";
 export { createHookAwareExecutor, defaultRunShell } from "./core/hooks.js";
 export { runMcpServer } from "./mcp/server.js";
+// Phase 1: extracted TUI modules
+export { InputHandler } from "./tui/input-handler.js";
+export { ChatRenderer } from "./tui/chat-renderer.js";
+export { CommandPalette } from "./tui/command-palette.js";
+// Phase 2: LSP
+export { lspToolDef, executeLsp } from "./tools/lsp.js";
+export { LspManager } from "./core/lsp-manager.js";
+// Phase 3: plan mode + todo panel
+export { PlanMode } from "./core/plan-mode.js";
+export { TodoPanel } from "./tui/todo-panel.js";
+// Phase 5: context intelligence
+export { detectProjectContext, formatProjectContext, loadProjectContext } from "./core/project-context.js";
 export { DEFAULT_CONFIG } from "./core/types.js";
 export type { SentinelConfig, SessionsConfig, HeadroomConfig, UIConfig } from "./core/types.js";
 export type { HooksConfig, HookRule } from "./core/hooks.js";
