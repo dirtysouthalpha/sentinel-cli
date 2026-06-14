@@ -410,6 +410,8 @@ export class TUIApp {
       getPermissionMode: () => this.permissionMode,
       setPermissionMode: (m) => {
         this.permissionMode = m;
+        state.set("permissionMode", m);
+        this.refreshStatus();
       },
       getRepoIndex: () => this.repoIndex,
       setRepoIndex: (i) => {

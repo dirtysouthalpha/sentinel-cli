@@ -18,6 +18,7 @@ vi.mock("../src/core/state.js", () => ({
       const map: Record<string, unknown> = {
         currentAgent: "sentinel", currentModel: "test/model",
         isProcessing: false, compressionStats: { savingsPercent: 0 },
+        permissionMode: "plan",
       };
       return map[key];
     },
@@ -102,6 +103,17 @@ describe("ChatRenderer", () => {
     expect(chat.setContent).toHaveBeenCalled();
     r.endAssistant();
     expect(r.getTranscript()).toContain("hello world");
+  });
+
+  it("refreshStatus surfaces the permission mode", () => {
+    const status = mockElement();
+    const screen = { render: vi.fn(), append: vi.fn() };
+    const chat2 = mockElement();
+    const r2 = new ChatRenderer();
+    r2.init(chat2 as never, status as never, screen as never);
+    r2.refreshStatus();
+    const content = (status.setContent as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string;
+    expect(content).toContain("plan");
   });
 
   it("setTranscript replaces transcript; clearStream resets stream state", () => {

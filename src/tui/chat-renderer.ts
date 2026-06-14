@@ -156,11 +156,16 @@ export class ChatRenderer {
     const processing = state.get("isProcessing") as boolean;
     const compressionStats = state.get("compressionStats") as { savingsPercent: number };
     const tabs     = sessionManager.getSessionCount();
+    const mode     = state.get("permissionMode");
 
     // status dot
     const dot = processing
       ? `{${c.amber}-fg}⠶ working{/}`
       : `{${c.lime}-fg}● ready{/}`;
+
+    // permission mode — amber when guardrails are off (yolo) or edits are blocked (plan)
+    const modeColor = mode === "yolo" || mode === "plan" ? c.amber : c.lime;
+    const modeStr = `{${modeColor}-fg}⛉ ${mode}{/}`;
 
     // cost / token display
     const costStr = this.cost.requests > 0
@@ -178,11 +183,12 @@ export class ChatRenderer {
 
     this.status.setContent(
       ` ${dot}` +
+      `${sep}${modeStr}` +
       `${sep}{${c.accent || c.cyan}-fg}${agent}{/}` +
       `${sep}{${c.textSecondary}-fg}${model}{/}` +
       (costStr ? `${sep}{${c.textTertiary}-fg}${compression}${costStr}{/}` : ``) +
       tabStr +
-      `  {${c.textTertiary}-fg}Ctrl+P menu  Ctrl+S sidebar  Ctrl+Q quit{/} `
+      `  {${c.textTertiary}-fg}Ctrl+P palette  Ctrl+S sidebar  Ctrl+Q quit{/} `
     );
     this.screen.render();
   }

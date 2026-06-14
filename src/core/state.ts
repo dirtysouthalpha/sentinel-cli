@@ -24,6 +24,7 @@ export interface AppState {
   activePanel: "chat" | "files" | "agents" | "settings";
   statusText: string;
   isProcessing: boolean;
+  permissionMode: "yolo" | "auto" | "gated" | "plan";
   messages: ChatMessage[];
   sessions: Session[];
   currentWorkingDir: string;
@@ -59,6 +60,7 @@ const initialState: AppState = {
   activePanel: "chat",
   statusText: "Ready",
   isProcessing: false,
+  permissionMode: "yolo",
   messages: [],
   sessions: [],
   currentWorkingDir: process.cwd(),
