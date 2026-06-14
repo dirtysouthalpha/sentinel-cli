@@ -1,8 +1,8 @@
 /**
- * Command palette — Ctrl+K overlay (Phase 1, Task 1.4).
+ * Command palette — Ctrl+P overlay (Phase 1, Task 1.4).
  *
  * Fuzzy-searchable overlay that indexes slash commands, themes, agents,
- * and model names. Triggered by Ctrl+K, dismissed by Escape.
+ * and model names. Triggered by Ctrl+P, dismissed by Escape.
  */
 
 import blessed from "blessed";

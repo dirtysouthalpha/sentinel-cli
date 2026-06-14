@@ -2,7 +2,7 @@ import blessed from "blessed";
 import { themeEngine } from "./themes/engine.js";
 import { state } from "../core/state.js";
 import { events } from "../core/events.js";
-import { providerManager } from "../ai/provider.js";
+import { providerManager, providerEnvVar } from "../ai/provider.js";
 import { ProviderError } from "../ai/errors.js";
 import { ContextManager } from "../ai/context.js";
 import { commandRegistry } from "../commands/registry.js";
@@ -62,6 +62,12 @@ import { createSidebar } from "./sidebar.js";
 import { VERSION } from "../core/version.js";
 
 const log = createLogger({ prefix: "tui" });
+
+/** Actionable "no API key" message that names the exact env var when known. */
+function noKeyMessage(providerName: string): string {
+  const env = providerEnvVar(providerName);
+  return `No API key for "${providerName}". ${env ? `Set ${env} or ` : ""}run /connect`;
+}
 
 export interface TUIAppOptions {
   projectRoot: string;
@@ -367,7 +373,7 @@ export class TUIApp {
       }
     }
 
-    s += `\n{${c.textTertiary}-fg}Tip: /help <command> for details · Ctrl+K for the palette{/}\n`;
+    s += `\n{${c.textTertiary}-fg}Tip: /help <command> for details · Ctrl+P for the palette{/}\n`;
     this.push(s);
   }
 
@@ -506,7 +512,7 @@ export class TUIApp {
       } else {
         const single = providerManager.getProvider(providerName);
         if (!single) throw new Error(`No provider "${providerName}". Try /providers`);
-        if (!single.isAvailable()) throw new Error(`No API key for "${providerName}". Type /connect`);
+        if (!single.isAvailable()) throw new Error(noKeyMessage(providerName));
         provider = single;
       }
 
@@ -723,7 +729,7 @@ export class TUIApp {
       } else {
         const single = providerManager.getProvider(providerName);
         if (!single) throw new Error(`No provider "${providerName}". Try /providers`);
-        if (!single.isAvailable()) throw new Error(`No API key for "${providerName}". Type /connect`);
+        if (!single.isAvailable()) throw new Error(noKeyMessage(providerName));
         provider = single;
       }
 
@@ -821,7 +827,7 @@ export class TUIApp {
       } else {
         const single = providerManager.getProvider(providerName);
         if (!single) throw new Error(`No provider "${providerName}". Try /providers`);
-        if (!single.isAvailable()) throw new Error(`No API key for "${providerName}". Type /connect`);
+        if (!single.isAvailable()) throw new Error(noKeyMessage(providerName));
         provider = single;
       }
 
@@ -1008,13 +1014,9 @@ export class TUIApp {
       this.tabManager.renameCurrentTab();
     });
 
-    // Ctrl+P — command palette (VS Code-style)
+    // Ctrl+P — command palette (VS Code-style). Note: Ctrl+K is intentionally
+    // NOT bound here — it's kill-to-end-of-line in the input handler (readline).
     this.screen.key(["C-p"], () => {
-      if (this.palette.isOpen()) this.palette.close();
-      else this.palette.open();
-    });
-    // Ctrl+K — also opens palette (legacy binding)
-    this.screen.key(["C-k"], () => {
       if (this.palette.isOpen()) this.palette.close();
       else this.palette.open();
     });

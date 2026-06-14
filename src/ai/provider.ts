@@ -14,6 +14,24 @@ export interface ProxyOverrides {
 
 const log = createLogger({ prefix: "provider" });
 
+/** The primary environment variable that supplies a provider's API key, if any. */
+export function providerEnvVar(name: string): string | undefined {
+  switch (name) {
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "zai":
+    case "zhipu":
+      return "ZAI_API_KEY";
+    case "gemini":
+    case "google":
+      return "GEMINI_API_KEY";
+    default:
+      return undefined;
+  }
+}
+
 class ProviderManager {
   private providers: Map<string, AIProvider> = new Map();
   private static instance: ProviderManager;
