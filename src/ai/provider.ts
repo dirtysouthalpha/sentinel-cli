@@ -91,12 +91,19 @@ class ProviderManager {
   }
 
   private applyProxy(cfg: ProviderConfig, providerName: string, proxy: ProxyOverrides): ProviderConfig {
+    // The Sentinel proxy authenticates clients via the x-proxy-key header
+    // (matched against its proxy_auth_key), not x-api-key. Send it whenever we
+    // route through the gateway, or every request is rejected with E005.
+    const proxyKey = proxy.sentinelProxy?.apiKey;
+    const withProxyHeader = (c: ProviderConfig): ProviderConfig =>
+      proxyKey ? { ...c, headers: { ...(c.headers || {}), "x-proxy-key": proxyKey } } : c;
+
     // Headroom wraps everything — takes precedence over sentinel proxy
     if (proxy.headroom?.enabled && proxy.headroom.proxyUrl) {
-      return { ...cfg, baseURL: proxy.headroom.proxyUrl, apiKey: proxy.sentinelProxy?.apiKey || cfg.apiKey };
+      return withProxyHeader({ ...cfg, baseURL: proxy.headroom.proxyUrl, apiKey: proxyKey || cfg.apiKey });
     }
     if (proxy.sentinelProxy?.enabled && providerName === "anthropic") {
-      return { ...cfg, baseURL: proxy.sentinelProxy.url, apiKey: proxy.sentinelProxy.apiKey || cfg.apiKey };
+      return withProxyHeader({ ...cfg, baseURL: proxy.sentinelProxy.url, apiKey: proxyKey || cfg.apiKey });
     }
     return cfg;
   }

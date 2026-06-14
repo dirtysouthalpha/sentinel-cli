@@ -101,6 +101,8 @@ export interface ProviderConfig {
   models?: Record<string, ModelConfig>;
   codingPlan?: boolean;
   defaultModel?: string;
+  /** Extra HTTP headers sent on every request (e.g. x-proxy-key for the gateway). */
+  headers?: Record<string, string>;
   [key: string]: unknown;
 }
 

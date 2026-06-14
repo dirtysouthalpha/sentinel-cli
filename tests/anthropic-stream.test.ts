@@ -36,6 +36,24 @@ describe("AnthropicProvider streaming", () => {
     expect(res.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
   });
 
+  it("sends configured extra headers (x-proxy-key) through the gateway", async () => {
+    const lines = [
+      d({ type: "message_start", message: { model: "m" } }),
+      d({ type: "message_delta", usage: { input_tokens: 1, output_tokens: 1 } }),
+    ];
+    const fetchMock = vi.fn(async () => sseResponse(lines));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = new AnthropicProvider({ apiKey: "test", headers: { "x-proxy-key": "sk-sentinel-xyz" } } as never);
+    await p.chatStream([{ role: "user", content: "hi" }], { model: "m" });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.headers).toMatchObject({
+      "x-api-key": "test",
+      "x-proxy-key": "sk-sentinel-xyz",
+    });
+  });
+
   it("handles data: WITHOUT a space (proxy passthrough)", async () => {
     const lines = [
       `data:${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "proxied" } })}`,

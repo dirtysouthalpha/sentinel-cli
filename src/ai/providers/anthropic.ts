@@ -17,10 +17,13 @@ export class AnthropicProvider implements AIProvider {
   name = "anthropic";
   private apiKey: string;
   private baseURL: string;
+  /** Extra headers (e.g. x-proxy-key when routed through the Sentinel gateway). */
+  private extraHeaders: Record<string, string>;
 
   constructor(config: ProviderConfig) {
     this.apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || "";
     this.baseURL = config.baseURL || "https://api.anthropic.com";
+    this.extraHeaders = config.headers || {};
   }
 
   private toAnthropicMessages(messages: ChatMessage[]): {
@@ -85,6 +88,7 @@ export class AnthropicProvider implements AIProvider {
         "Content-Type": "application/json",
         "x-api-key": this.apiKey,
         "anthropic-version": "2023-06-01",
+        ...this.extraHeaders,
       },
       body: JSON.stringify(body),
     });
@@ -168,6 +172,7 @@ export class AnthropicProvider implements AIProvider {
         "Content-Type": "application/json",
         "x-api-key": this.apiKey,
         "anthropic-version": "2023-06-01",
+        ...this.extraHeaders,
       },
       body: JSON.stringify(body),
     });
