@@ -39,9 +39,28 @@ from the `R1…` baseline (provider core, permissions, MCP), **not** from the
 - Stuck detection now also catches A/B/A/B oscillation.
 - Parity: self-correction + compaction wired across TUI, server, and headless CLI.
 
+## Ergonomics & ease of use
+
+- **One source of truth for commands.** Command names + descriptions had drifted
+  across four places (the registry, a hardcoded help list, the palette catalog,
+  and the inline `/`-autocomplete) — the palette and tab-completion were missing
+  ~10 real commands. All now derive from the command registry, so they can't
+  drift. `/help <command>` shows usage + aliases; unknown commands suggest the
+  closest match ("Did you mean /model?").
+- **Command layer refactor.** The 615-line, 38-branch `handleCommand` god-method
+  became a thin dispatcher over a tested registry (`src/tui/commands/`); `app.ts`
+  dropped from 1818 → ~1100 lines, with first-ever command-dispatch tests.
+- **Friendlier failures.** Auth (401/403) names the exact env var to set; 404
+  flags a bad model id; 5xx and network errors get plain-language guidance (incl.
+  an "is Ollama running?" hint); user-cancellation no longer double-reports.
+- **At-a-glance safety.** The status bar now shows the permission mode (amber for
+  `yolo`/`plan`). Keybinding hints corrected (Ctrl+K is kill-line, Ctrl+P is the
+  palette) and made consistent everywhere.
+- **Search** on Windows spawns PowerShell with `-NoProfile` (faster, deterministic).
+
 ## Quality
 
-- Tests: **469 passing across 71 files** (from 367/52). Includes a full-stack
+- Tests: **492 passing across 74 files** (from 367/52). Includes a full-stack
   integration test (real SSE parse → agent loop → real file tool → disk).
 - `docs/agentic-coding.md` documents the capabilities and config knobs.
 
