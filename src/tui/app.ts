@@ -4,6 +4,7 @@ import { state } from "../core/state.js";
 import { events } from "../core/events.js";
 import { providerManager, providerEnvVar } from "../ai/provider.js";
 import { ProviderError } from "../ai/errors.js";
+import { formatChatError, isAbortError } from "../ai/error-format.js";
 import { ContextManager } from "../ai/context.js";
 import { commandRegistry } from "../commands/registry.js";
 import { parseCommand, resolveTemplate } from "../commands/loader.js";
@@ -671,8 +672,11 @@ export class TUIApp {
       if (activeId) sessionManager.markDirty(activeId);
     } catch (err) {
       this.endAssistant();
-      // Auto-switch to small_model on persistent rate limits so the next message works
-      if (err instanceof ProviderError && err.status === 429) {
+      // User cancelled — onCancel already announced "Cancelled."; don't double-report.
+      if (isAbortError(err)) {
+        // no-op
+      } else if (err instanceof ProviderError && err.status === 429) {
+        // Auto-switch to small_model on persistent rate limits so the next message works
         const cfg = getConfigManager().getAll();
         const fallback = cfg.small_model as string | undefined;
         const current = state.get("currentModel");
@@ -683,7 +687,7 @@ export class TUIApp {
           this.addError(`Rate limited on ${current}. Try again in a few minutes or switch models with /model.`);
         }
       } else {
-        this.addError(err instanceof Error ? err.message : String(err));
+        this.addError(formatChatError(err, state.get("currentModel")));
       }
     } finally {
       this.ac = undefined;
@@ -783,7 +787,7 @@ export class TUIApp {
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);
     } catch (err) {
-      this.addError(err instanceof Error ? err.message : String(err));
+      this.addError(formatChatError(err, state.get("currentModel")));
     } finally {
       this.isProcessing = false;
       state.set("isProcessing", false);
@@ -886,7 +890,7 @@ export class TUIApp {
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);
     } catch (err) {
-      this.addError(err instanceof Error ? err.message : String(err));
+      this.addError(formatChatError(err, state.get("currentModel")));
     } finally {
       this.isProcessing = false;
       state.set("isProcessing", false);
