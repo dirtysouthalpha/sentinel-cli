@@ -7,13 +7,13 @@ import { ProviderError } from "../ai/errors.js";
 import { ContextManager } from "../ai/context.js";
 import { commandRegistry } from "../commands/registry.js";
 import { parseCommand, resolveTemplate } from "../commands/loader.js";
+import { dispatchCommand } from "./commands/registry.js";
+import type { CommandContext } from "./commands/context.js";
 import { getToolDefinitions, executeToolCall } from "../tools/tool-executor.js";
 import { ToolCall } from "../ai/types.js";
 import { AgentRunner } from "../core/agent-runner.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
-import { suggestCommand } from "../core/command-search.js";
-import { searchCatalog, COMMAND_CATALOG } from "../core/command-catalog.js";
 import { renderMarkdown } from "./render-markdown.js";
 // Phase 1: extracted TUI modules
 import { InputHandler } from "./input-handler.js";
@@ -23,26 +23,11 @@ import { CommandPalette } from "./command-palette.js";
 // so it flows through getToolDefinitions()/executeToolCall like every other tool.
 // Phase 3: todo panel
 import { TodoPanel } from "./todo-panel.js";
-import {
-  saveWorkflow,
-  listWorkflows,
-  getWorkflow,
-  deleteWorkflow,
-  renderSteps,
-} from "../core/workflows-store.js";
-import {
-  buildBundle,
-  writeBundle,
-  readBundle,
-  applyBundle,
-} from "../core/sync.js";
 import { expandMentions } from "../core/mentions.js";
-import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
+import { runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
-import { buildIndex, search as searchRepoIndex, RepoIndex } from "../core/repo-index.js";
+import { RepoIndex } from "../core/repo-index.js";
 import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
-import { loadAttachment } from "../core/attachments.js";
-import { buildVisionMessage } from "../core/vision.js";
 import { createHeaderBar } from "./header-bar.js";
 import { TabManager } from "./tab-manager.js";
 import {
@@ -70,24 +55,12 @@ import { exec } from "child_process";
 import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
-import { fetchRegistry, searchRegistry, installEntry } from "../core/marketplace.js";
-import { buildAbout } from "../core/about.js";
-import { checkForUpdate } from "../core/update-check.js";
 import { createLogger } from "../utils/logger.js";
-import { readFileSync } from "node:fs";
-import { join, isAbsolute, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createSidebar } from "./sidebar.js";
+import { VERSION } from "../core/version.js";
 
 const log = createLogger({ prefix: "tui" });
-
-const VERSION = "0.4.0";
-
-/**
- * Default marketplace registry source for `/marketplace` (V15). A project-local
- * JSON file by default; overridable per-invocation with an explicit path/URL, or
- * by committing a registry document at this path. Can also be a remote URL.
- */
-const DEFAULT_MARKETPLACE_SOURCE = ".sentinel/registry.json";
 
 export interface TUIAppOptions {
   projectRoot: string;
@@ -422,605 +395,56 @@ export class TUIApp {
     this.push(s);
   }
 
+  private buildCommandContext(args: string[], commandName: string): CommandContext {
+    return {
+      projectRoot: this.projectRoot,
+      args,
+      commandName,
+      addSystem: (t) => this.addSystem(t),
+      addError: (t) => this.addError(t),
+      push: (s) => this.push(s),
+      chatWithAI: (m) => this.chatWithAI(m),
+      getContextManager: () => this.getContextManager(),
+      getCost: () => this.renderer.getCost(),
+      getPermissionMode: () => this.permissionMode,
+      setPermissionMode: (m) => {
+        this.permissionMode = m;
+      },
+      getRepoIndex: () => this.repoIndex,
+      setRepoIndex: (i) => {
+        this.repoIndex = i;
+      },
+      isMcpConnected: () => this.mcpConnected,
+      mcp: this.mcp,
+      background: this.background,
+      wireBackground: () => this.wireBackground(),
+      runShell: (c, s) => this.runShell(c, s),
+      runPipeline: (pl) => this.runPipelineDelegated(pl),
+      runGsd: (task) => this.runGsdDelegated(task),
+      slashCtx: () => this.slashCtx(),
+      showSlashMenu: () => this.showSlashMenu(),
+      clearScreen: () => {
+        this.renderer.setTranscript("");
+        this.renderer.clearStream();
+        this.printWelcome();
+      },
+      quit: () => {
+        this.screen.destroy();
+        process.exit(0);
+      },
+    };
+  }
+
   private async handleCommand(input: string): Promise<void> {
     const parsed = parseCommand(input);
 
-    if (parsed.name === "help" || parsed.name === "?") {
-      this.showSlashMenu();
+    // Built-in slash commands live in src/tui/commands/; dispatchCommand resolves
+    // the name (and aliases) and runs the handler against a CommandContext.
+    if (await dispatchCommand(parsed.name, this.buildCommandContext(parsed.args, parsed.name))) {
       return;
     }
 
-    if (parsed.name === "quit" || parsed.name === "exit" || parsed.name === "q") {
-      this.screen.destroy();
-      process.exit(0);
-      return;
-    }
-
-    if (parsed.name === "clear") {
-      this.renderer.setTranscript("");
-      this.renderer.clearStream();
-      this.printWelcome();
-      this.addSystem("Cleared.");
-      return;
-    }
-
-    if (parsed.name === "compact") {
-      const cm = this.getContextManager();
-      const before = cm.getMessageCount();
-      cm.compact();
-      const after = cm.getMessageCount();
-      this.addSystem(`Compacted: ${before} → ${after} messages.`);
-      const activeId = sessionManager.getActiveSessionId();
-      if (activeId) sessionManager.markDirty(activeId);
-      return;
-    }
-
-    if (parsed.name === "export") {
-      handleExportCommand(this.slashCtx(), parsed.args);
-      return;
-    }
-
-    if (parsed.name === "branch") {
-      handleBranchCommand(this.slashCtx());
-      return;
-    }
-
-    if (parsed.name === "cost") {
-      const cost = this.renderer.getCost();
-      this.addSystem(
-        [
-          "Session cost:",
-          `  Prompt:     ${cost.promptTokens.toLocaleString()} tokens`,
-          `  Completion: ${cost.completionTokens.toLocaleString()} tokens`,
-          `  Total:      ${cost.totalTokens.toLocaleString()} tokens`,
-          `  Requests:   ${cost.requests}`,
-          `  Est. cost:  $${cost.estimatedCostUSD.toFixed(4)}`,
-        ].join("\n")
-      );
-      return;
-    }
-
-    if (parsed.name === "usage") {
-      this.addSystem(usageTracker.render());
-      return;
-    }
-
-    if (parsed.name === "about") {
-      this.addSystem(buildAbout(VERSION));
-      return;
-    }
-
-    if (parsed.name === "update") {
-      this.addSystem("Checking for updates …");
-      const r = await checkForUpdate(VERSION);
-      if (r.latest === null) {
-        this.addSystem("Could not check for updates (offline?).");
-      } else if (r.updateAvailable) {
-        this.addSystem(
-          `v${r.latest} available (you have v${r.current}). Update: npm i -g sentinel-cli`
-        );
-      } else {
-        this.addSystem(`Sentinel is up to date (v${r.current}).`);
-      }
-      return;
-    }
-
-    // /diagnostics (alias /diag): run the project's typecheck/build and surface
-    // structured errors. Optional args override the command (e.g. /diag npm run build).
-    if (parsed.name === "diagnostics" || parsed.name === "diag") {
-      const command = parsed.args.join(" ").trim() || undefined;
-      this.addSystem(`Running diagnostics: ${command || "npx tsc --noEmit"} …`);
-      try {
-        const { ok, diagnostics } = await runDiagnostics(this.projectRoot, { command });
-        if (ok && diagnostics.length === 0) {
-          this.addSystem("No problems found.");
-        } else {
-          this.addSystem(formatDiagnostics(diagnostics));
-        }
-      } catch (err) {
-        this.addError(`Diagnostics failed: ${(err as Error).message}`);
-      }
-      return;
-    }
-
-    if (parsed.name === "context") {
-      const cm = this.getContextManager();
-      const msgs = cm.getMessages();
-      const totalChars = msgs.reduce((sum, m) => sum + m.content.length, 0);
-      this.addSystem(
-        [
-          "Context:",
-          `  Messages: ${msgs.length}`,
-          `  Size: ~${Math.ceil(totalChars / 4)} tokens`,
-          "  Auto-compacts as it fills.",
-        ].join("\n")
-      );
-      return;
-    }
-
-    if (parsed.name === "connect" || parsed.name === "setup") {
-      this.addSystem(
-        [
-          "Connect an AI provider:",
-          "  Wizard:  run  node dist/cli.js setup  in a terminal",
-          "  Env var: set ZAI_API_KEY=your-key  (or ANTHROPIC_API_KEY / OPENAI_API_KEY)",
-          "  Config:  add a provider block to sentinel.json",
-          "  Then switch with:  /model zai/glm-4.6",
-        ].join("\n")
-      );
-      return;
-    }
-
-    if (parsed.name === "theme") {
-      const name = parsed.args[0];
-      if (!name) {
-        let list = "Themes:\n";
-        for (const t of themeEngine.getAllThemes()) {
-          const cur = t.name === themeEngine.getTheme().name ? "  ←" : "";
-          list += `  ${t.name.padEnd(12)} ${t.display}${cur}\n`;
-        }
-        this.addSystem(list.trimEnd());
-        return;
-      }
-      if (themeEngine.setTheme(name)) {
-        state.set("currentTheme", name);
-        this.addSystem(`Theme → ${themeEngine.getTheme().display}`);
-      } else {
-        this.addError(`Unknown theme: ${name}`);
-      }
-      return;
-    }
-
-    if (parsed.name === "permissions" || parsed.name === "perms") {
-      const mode = parsed.args[0];
-      if (!mode) {
-        this.addSystem(`Permission mode: ${this.permissionMode}  (yolo | auto | gated | plan)`);
-        return;
-      }
-      if (mode === "yolo" || mode === "auto" || mode === "gated" || mode === "plan") {
-        this.permissionMode = mode;
-        this.addSystem(`Permission mode → ${mode}`);
-      } else {
-        this.addError(`Unknown mode: ${mode}. Use yolo | auto | gated | plan.`);
-      }
-      return;
-    }
-
-    // /plan toggles read-only research mode; /plan off restores yolo.
-    if (parsed.name === "plan") {
-      if (parsed.args[0] === "off") {
-        this.permissionMode = "yolo";
-        this.addSystem("Plan mode off → yolo. Edits/commands re-enabled.");
-      } else {
-        this.permissionMode = "plan";
-        this.addSystem("Plan mode on (read-only). I'll research and propose a plan; edits/commands are blocked until you `/plan off`.");
-      }
-      return;
-    }
-
-    // /bg <cmd> runs a shell command in the background; /bg cancel <id> stops it.
-    if (parsed.name === "bg") {
-      if (parsed.args[0] === "cancel") {
-        const id = parsed.args[1];
-        if (!id) return void this.addError("Usage: /bg cancel <id>");
-        this.addSystem(this.background.cancel(id) ? `bg #${id} cancelled.` : `No running bg task #${id}.`);
-        return;
-      }
-      const command = parsed.args.join(" ").trim();
-      if (!command) return void this.addSystem("Usage: /bg <shell command>   ·   /bg cancel <id>   ·   /tasks");
-      this.wireBackground();
-      const task = this.background.start(command, (signal) => this.runShell(command, signal));
-      this.addSystem(`▶ bg #${task.id} started: ${command}`);
-      return;
-    }
-
-    // /tasks lists background tasks and their status.
-    if (parsed.name === "tasks") {
-      const tasks = this.background.list();
-      if (tasks.length === 0) return void this.addSystem("No background tasks. Start one with /bg <command>.");
-      const mark: Record<string, string> = { running: "▶", done: "✓", error: "✗", cancelled: "∅" };
-      this.addSystem(
-        "Background tasks:\n" +
-          tasks.map((t) => `${mark[t.status] || "?"} #${t.id} [${t.status}] ${t.label}`).join("\n")
-      );
-      return;
-    }
-
-    if (parsed.name === "mcp") {
-      if (!this.mcpConnected) {
-        this.addSystem("MCP connects on your first message. Send one, then run /mcp.");
-        return;
-      }
-      const tools = this.mcp.list();
-      if (tools.length === 0) {
-        this.addSystem("No MCP tools (no servers configured or none discovered).");
-        return;
-      }
-      let msg = `MCP tools (${tools.length}):\n`;
-      for (const t of tools) msg += `  mcp__${t.server}__${t.tool}\n`;
-      this.addSystem(msg.trimEnd());
-      return;
-    }
-
-    if (parsed.name === "marketplace" || parsed.name === "market") {
-      await this.handleMarketplace(parsed.args);
-      return;
-    }
-
-    if (parsed.name === "checkpoints") {
-      const cps = new CheckpointManager(this.projectRoot).list();
-      if (cps.length === 0) {
-        this.addSystem("No checkpoints yet. They're created when the agent edits files.");
-        return;
-      }
-      let msg = `Checkpoints (${cps.length}, newest last):\n`;
-      for (const c of cps) {
-        msg += `  ${c.id}  ${c.tool.padEnd(6)} ${c.existed ? "edit  " : "create"}  ${c.path}\n`;
-      }
-      this.addSystem(msg.trimEnd());
-      return;
-    }
-
-    if (parsed.name === "undo") {
-      const cp = new CheckpointManager(this.projectRoot).undoLast();
-      if (!cp) {
-        this.addSystem("Nothing to undo.");
-        return;
-      }
-      this.addSystem(`Undid ${cp.tool} ${cp.existed ? "edit" : "create"} of ${cp.path}`);
-      return;
-    }
-
-    if (parsed.name === "agent") {
-      const name = parsed.args[0];
-      if (!name) {
-        this.addSystem(`Agent: ${state.get("currentAgent")}`);
-        return;
-      }
-      state.set("currentAgent", name);
-      events.emit("agent:switched", name);
-      const activeId = sessionManager.getActiveSessionId();
-      if (activeId) sessionManager.updateSessionAgent(activeId, name);
-      this.addSystem(`Agent → ${name}`);
-      return;
-    }
-
-    if (parsed.name === "model") {
-      const name = parsed.args[0];
-      if (!name) {
-        this.addSystem(`Model: ${state.get("currentModel")}`);
-        return;
-      }
-      state.set("currentModel", name);
-      events.emit("model:changed", name);
-      const activeId = sessionManager.getActiveSessionId();
-      if (activeId) sessionManager.updateSessionModel(activeId, name);
-      this.addSystem(`Model → ${name}`);
-      return;
-    }
-
-    if (parsed.name === "providers") {
-      const available = providerManager.getAvailableProviderNames();
-      let msg = "Providers:\n";
-      for (const name of providerManager.getAllProviderNames()) {
-        msg += `  ${name.padEnd(12)} ${available.includes(name) ? "ok" : "no key"}\n`;
-      }
-      this.addSystem(msg.trimEnd());
-      return;
-    }
-
-    if (parsed.name === "tabs") {
-      handleTabsCommand(this.slashCtx(), parsed.args);
-      return;
-    }
-
-    if (parsed.name === "cmd") {
-      await this.handleCmdSearch(parsed.args.join(" "));
-      return;
-    }
-
-    // /palette [query] (alias /p) — searchable text command palette (V13).
-    if (parsed.name === "palette" || parsed.name === "p") {
-      const query = parsed.args.join(" ").trim();
-      const matches = searchCatalog(query);
-      if (matches.length === 0) {
-        this.addSystem(`No commands match: ${query}`);
-        return;
-      }
-      const width = Math.max(...matches.map((m) => m.command.length));
-      const header = query ? `Palette — ${matches.length} match(es) for "${query}":` : "Palette:";
-      const lines = matches.map((m) => `  ${m.command.padEnd(width)} — ${m.description}`);
-      this.addSystem([header, ...lines].join("\n"));
-      return;
-    }
-
-    // /index — build the lite TF-IDF repo index (V11).
-    if (parsed.name === "index") {
-      this.repoIndex = buildIndex(this.projectRoot);
-      const note = this.repoIndex.truncated ? " (truncated — file cap hit)" : "";
-      this.addSystem(`Indexed ${this.repoIndex.fileCount} file(s)${note}.`);
-      return;
-    }
-
-    // /search <query> — semantic search over the repo index (builds it first if needed).
-    if (parsed.name === "search") {
-      const query = parsed.args.join(" ").trim();
-      if (!query) {
-        this.addSystem("Usage: /search <query>");
-        return;
-      }
-      if (!this.repoIndex) {
-        this.repoIndex = buildIndex(this.projectRoot);
-        this.addSystem(`Built index of ${this.repoIndex.fileCount} file(s).`);
-      }
-      const results = searchRepoIndex(this.repoIndex, query, 8);
-      if (results.length === 0) {
-        this.addSystem(`No matches for: ${query}`);
-        return;
-      }
-      let msg = `Top ${results.length} result(s) for "${query}":\n`;
-      for (const r of results) {
-        msg += `  ${r.path}  (${r.score.toFixed(3)})\n`;
-        if (r.snippet) msg += `      ${r.snippet}\n`;
-      }
-      this.addSystem(msg.trimEnd());
-      return;
-    }
-
-    // /workflow — saved, parameterized workflows (Warp Drive, V5).
-    if (parsed.name === "workflow") {
-      const sub = (parsed.args[0] || "").toLowerCase();
-
-      if (!sub || sub === "list") {
-        const wfs = listWorkflows(this.projectRoot);
-        if (wfs.length === 0) {
-          this.addSystem(
-            "No workflows yet. Save one with:\n  /workflow save <name> <step1> ; <step2> ..."
-          );
-          return;
-        }
-        let msg = `Workflows (${wfs.length}):\n`;
-        for (const wf of wfs) {
-          const desc = wf.description ? ` — ${wf.description}` : "";
-          msg += `  ${wf.name.padEnd(16)} ${wf.steps.length} step(s)${desc}\n`;
-        }
-        this.addSystem(msg.trimEnd());
-        return;
-      }
-
-      if (sub === "save") {
-        const name = parsed.args[1];
-        if (!name) {
-          this.addSystem("Usage: /workflow save <name> <step1> ; <step2> ...");
-          return;
-        }
-        const rest = parsed.args.slice(2).join(" ").trim();
-        const steps = rest
-          .split(" ; ")
-          .map((s) => s.trim())
-          .filter(Boolean);
-        if (steps.length === 0) {
-          this.addSystem("Usage: /workflow save <name> <step1> ; <step2> ...");
-          return;
-        }
-        try {
-          saveWorkflow(this.projectRoot, { name, steps });
-          this.addSystem(`Saved workflow "${name}" (${steps.length} step(s)).`);
-        } catch (err) {
-          this.addError(
-            `Failed to save workflow: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-        return;
-      }
-
-      if (sub === "delete") {
-        const name = parsed.args[1];
-        if (!name) {
-          this.addSystem("Usage: /workflow delete <name>");
-          return;
-        }
-        this.addSystem(
-          deleteWorkflow(this.projectRoot, name)
-            ? `Deleted workflow "${name}".`
-            : `No workflow named "${name}".`
-        );
-        return;
-      }
-
-      if (sub === "run") {
-        const name = parsed.args[1];
-        if (!name) {
-          this.addSystem("Usage: /workflow run <name> [args...]");
-          return;
-        }
-        const wf = getWorkflow(this.projectRoot, name);
-        if (!wf) {
-          this.addError(`No workflow named "${name}". Try /workflow list`);
-          return;
-        }
-        const rendered = renderSteps(wf, parsed.args.slice(2));
-        const composed =
-          "Execute this workflow:\n" +
-          rendered.map((step, i) => `${i + 1}. ${step}`).join("\n");
-        this.addSystem(`▶ Running workflow "${name}" (${rendered.length} step(s))...`);
-        await this.chatWithAI(composed);
-        return;
-      }
-
-      this.addSystem(
-        "Usage: /workflow list  ·  /workflow save <name> <step1> ; <step2> ...  ·  /workflow run <name> [args...]  ·  /workflow delete <name>"
-      );
-      return;
-    }
-
-    // /sync — V19 portable settings bundle. `export [path]` writes the (redacted)
-    // global config + project skills/workflows to a JSON file; `import <path>`
-    // restores skills + workflows from one. Secrets are stripped on export and the
-    // global config is never overwritten on import.
-    if (parsed.name === "sync") {
-      const sub = (parsed.args[0] || "").toLowerCase();
-
-      if (!sub || sub === "export") {
-        const rawPath = parsed.args.slice(1).join(" ").trim() || "sentinel-sync.json";
-        const outPath = isAbsolute(rawPath) ? rawPath : resolve(this.projectRoot, rawPath);
-        try {
-          const bundle = buildBundle(this.projectRoot);
-          writeBundle(outPath, bundle);
-          const parts: string[] = [];
-          parts.push(bundle.config ? "config (secrets redacted)" : "no config");
-          parts.push(`${Object.keys(bundle.skills ?? {}).length} skill(s)`);
-          parts.push(`${Object.keys(bundle.workflows ?? {}).length} workflow(s)`);
-          this.addSystem(`Exported sync bundle → ${outPath}\n  ${parts.join("  ·  ")}`);
-        } catch (err) {
-          this.addError(
-            `Sync export failed: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-        return;
-      }
-
-      if (sub === "import") {
-        const rawPath = parsed.args.slice(1).join(" ").trim();
-        if (!rawPath) {
-          this.addSystem("Usage: /sync import <path>");
-          return;
-        }
-        const inPath = isAbsolute(rawPath) ? rawPath : resolve(this.projectRoot, rawPath);
-        try {
-          const bundle = readBundle(inPath);
-          const applied = applyBundle(this.projectRoot, bundle);
-          const summary =
-            applied.length > 0
-              ? `Applied ${applied.length} item(s):\n  ${applied.join("\n  ")}`
-              : "Nothing to apply (bundle had no skills or workflows).";
-          const note = bundle.config
-            ? "\nNote: the bundle's global config was NOT applied (review it manually)."
-            : "";
-          this.addSystem(`Imported sync bundle ← ${inPath}\n${summary}${note}`);
-        } catch (err) {
-          this.addError(
-            `Sync import failed: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-        return;
-      }
-
-      this.addSystem("Usage: /sync export [path]  ·  /sync import <path>");
-      return;
-    }
-
-    // /pipeline — V9 deterministic pipeline engine. Steps defined in a JSON file
-    // run in order; consecutive `parallel:true` steps run concurrently. Each step
-    // is delegated to an isolated subagent and may reference prior step results.
-    if (parsed.name === "pipeline") {
-      const sub = (parsed.args[0] || "").toLowerCase();
-      const rawPath = parsed.args.slice(1).join(" ").trim();
-      if (sub !== "run" || !rawPath) {
-        this.addSystem("Usage: /pipeline run <path.json>");
-        return;
-      }
-      const filePath = isAbsolute(rawPath) ? rawPath : resolve(this.projectRoot, rawPath);
-      let pipeline: Pipeline;
-      try {
-        pipeline = parsePipeline(readFileSync(filePath, "utf8"));
-      } catch (err) {
-        this.addError(
-          `Pipeline load failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-        return;
-      }
-      await this.runPipelineDelegated(pipeline);
-      return;
-    }
-
-    // /ship — V8 autonomous GSD pipeline: plan → implement → test → review → fix.
-    // Each phase is delegated to an isolated subagent that sees the task + all prior
-    // phase outputs; fix runs only when the review signals a problem.
-    if (parsed.name === "ship") {
-      const task = parsed.args.join(" ").trim();
-      if (!task) {
-        this.addSystem("Usage: /ship <task>  — autonomously plan, implement, test, review, and fix");
-        return;
-      }
-      await this.runGsdDelegated(task);
-      return;
-    }
-
-    if (parsed.name === "ask-prime") {
-      const question = parsed.args.join(" ").trim();
-      if (!question) {
-        this.addSystem("Usage: /ask-prime <question>");
-        return;
-      }
-      const prime = providerManager.getProvider("sentinel-prime");
-      if (!prime || !prime.isAvailable()) {
-        this.addError(
-          "Sentinel Prime not configured — add a `sentinel-prime` provider in config."
-        );
-        return;
-      }
-      try {
-        const res = await prime.chat([{ role: "user", content: question }], {
-          model: "hermes-agent",
-        });
-        this.addSystem(res.content || "(no answer)");
-      } catch (err) {
-        this.addError(`Sentinel Prime error: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (parsed.name === "describe") {
-      const imagePath = parsed.args[0];
-      if (!imagePath) {
-        this.addSystem('Usage: /describe <imagePath> [prompt]');
-        return;
-      }
-      const prompt = parsed.args.slice(1).join(" ").trim() || "Describe this image in detail.";
-
-      let att;
-      try {
-        att = loadAttachment(resolve(this.projectRoot, imagePath));
-      } catch (err) {
-        this.addError(err instanceof Error ? err.message : String(err));
-        return;
-      }
-
-      const [providerName, ...modelParts] = state.get("currentModel").split("/");
-      const modelName = modelParts.join("/") || undefined;
-      const provider = providerManager.getProvider(providerName);
-      if (!provider) {
-        this.addError(`No provider "${providerName}". Try /providers`);
-        return;
-      }
-      if (!provider.isAvailable()) {
-        this.addError(`No API key for "${providerName}". Type /connect`);
-        return;
-      }
-
-      this.addSystem(`Describing ${att.name} with ${state.get("currentModel")}...`);
-      try {
-        const res = await provider.chat([buildVisionMessage(prompt, [att])], {
-          model: modelName,
-        });
-        this.addSystem(res.content || "(no description)");
-      } catch (err) {
-        this.addError(`Vision error: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (parsed.name === "workspace" || parsed.name === "ws") {
-      handleWorkspaceCommand(this.slashCtx(), parsed.args);
-      return;
-    }
-
-    if (parsed.name === "team") {
-      handleTeamCommand(this.slashCtx(), parsed.args);
-      return;
-    }
-
+    // Fall back to markdown template commands, then an unknown-command note.
     const cmd = commandRegistry.get(parsed.name);
     if (cmd) {
       await this.chatWithAI(resolveTemplate(cmd.template, parsed.args));
@@ -1028,155 +452,6 @@ export class TUIApp {
     }
 
     this.addError(`Unknown command: /${parsed.name}. Type / to see commands.`);
-  }
-
-  /**
-   * /marketplace (alias /market) — V15 extension registry client.
-   *   list [source]            — show every entry in a registry
-   *   search <query> [source]  — filter entries by id/name/description
-   *   install <id> [source]    — install a skill (.md) or MCP server config
-   * `source` defaults to DEFAULT_MARKETPLACE_SOURCE; may be a local path or URL.
-   */
-  private async handleMarketplace(args: string[]): Promise<void> {
-    const sub = (args[0] || "").toLowerCase();
-    const usage =
-      "Usage: /marketplace list [source]  ·  /marketplace search <query> [source]  ·  /marketplace install <id> [source]";
-
-    if (!sub) {
-      this.addSystem(usage);
-      return;
-    }
-
-    // Resolve a source token against the project root when it's a relative path;
-    // URLs and absolute paths pass through.
-    const resolveSource = (token?: string): string => {
-      const src = token || DEFAULT_MARKETPLACE_SOURCE;
-      if (/^https?:\/\//i.test(src) || isAbsolute(src)) return src;
-      return resolve(this.projectRoot, src);
-    };
-
-    const loadRegistry = async (source: string) => fetchRegistry(source);
-
-    if (sub === "list") {
-      const source = resolveSource(args[1]);
-      try {
-        const reg = await loadRegistry(source);
-        if (reg.entries.length === 0) {
-          this.addSystem("Marketplace registry is empty.");
-          return;
-        }
-        let msg = `Marketplace (${reg.entries.length} entr${reg.entries.length === 1 ? "y" : "ies"}):\n`;
-        for (const e of reg.entries) {
-          msg += `  ${e.id.padEnd(20)} [${e.type}] ${e.name}${e.description ? ` — ${e.description}` : ""}\n`;
-        }
-        this.addSystem(msg.trimEnd());
-      } catch (err) {
-        this.addError(`Marketplace list failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (sub === "search") {
-      const query = (args[1] || "").trim();
-      if (!query) {
-        this.addSystem("Usage: /marketplace search <query> [source]");
-        return;
-      }
-      const source = resolveSource(args[2]);
-      try {
-        const reg = await loadRegistry(source);
-        const hits = searchRegistry(reg, query);
-        if (hits.length === 0) {
-          this.addSystem(`No marketplace entries match "${query}".`);
-          return;
-        }
-        let msg = `${hits.length} match${hits.length === 1 ? "" : "es"} for "${query}":\n`;
-        for (const e of hits) {
-          msg += `  ${e.id.padEnd(20)} [${e.type}] ${e.name}${e.description ? ` — ${e.description}` : ""}\n`;
-        }
-        this.addSystem(msg.trimEnd());
-      } catch (err) {
-        this.addError(`Marketplace search failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (sub === "install") {
-      const id = (args[1] || "").trim();
-      if (!id) {
-        this.addSystem("Usage: /marketplace install <id> [source]");
-        return;
-      }
-      const source = resolveSource(args[2]);
-      try {
-        const reg = await loadRegistry(source);
-        const entry = reg.entries.find((e) => e.id === id);
-        if (!entry) {
-          this.addError(`No marketplace entry with id "${id}". Try /marketplace list`);
-          return;
-        }
-        // installEntry never throws on network failure — it returns a status string.
-        const summary = await installEntry(this.projectRoot, entry);
-        this.addSystem(summary);
-        if (entry.type === "mcp") {
-          this.addSystem(
-            "MCP server recorded in .sentinel/mcp.install.json. Merge it into your config.mcp and restart to connect."
-          );
-        } else {
-          this.addSystem("Skill installed. It loads on next start (or restart the session).");
-        }
-      } catch (err) {
-        this.addError(`Marketplace install failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    this.addSystem(usage);
-  }
-
-
-  /** /cmd <natural language> — AI command-search: NL → one shell command. */
-  private async handleCmdSearch(nl: string): Promise<void> {
-    const query = nl.trim();
-    if (!query) {
-      this.addSystem("Usage: /cmd <natural language>  e.g. /cmd list the 5 largest files");
-      return;
-    }
-
-    const [providerName, ...modelParts] = state.get("currentModel").split("/");
-    const modelName = modelParts.join("/") || undefined;
-    const provider = providerManager.getProvider(providerName);
-    if (!provider) {
-      this.addError(`No provider "${providerName}". Try /providers`);
-      return;
-    }
-    if (!provider.isAvailable()) {
-      this.addError(`No API key for "${providerName}". Type /connect`);
-      return;
-    }
-
-    this.addSystem(`Searching for a command for: ${query}`);
-    try {
-      const { command, explanation } = await suggestCommand(provider, query, {
-        model: modelName,
-      });
-      if (!command) {
-        this.addSystem(
-          explanation
-            ? `No command produced. ${explanation}`
-            : "No command produced."
-        );
-        return;
-      }
-      let msg = `Suggested command:\n  ${command}`;
-      if (explanation) msg += `\n\n${explanation}`;
-      msg += `\n\nRun it with /bg ${command}  — or copy/paste it into your shell.`;
-      this.addSystem(msg);
-    } catch (err) {
-      this.addError(
-        `Command search failed: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
   }
 
 
