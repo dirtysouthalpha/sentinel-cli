@@ -36,6 +36,33 @@ describe("AnthropicProvider streaming", () => {
     expect(res.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
   });
 
+  it("drops temperature and retries when the model rejects it", async () => {
+    const ok = sseResponse([
+      d({ type: "message_start", message: { model: "claude-opus-4-8" } }),
+      d({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } }),
+      d({ type: "message_delta", usage: { input_tokens: 1, output_tokens: 1 } }),
+    ]);
+    const bad = new Response(
+      '{"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."}}',
+      { status: 400 }
+    );
+    const fetchMock = vi.fn().mockResolvedValueOnce(bad).mockResolvedValueOnce(ok);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = new AnthropicProvider({ apiKey: "test" } as never);
+    const res = await p.chatStream([{ role: "user", content: "hi" }], {
+      model: "claude-opus-4-8",
+      temperature: 0.7,
+    });
+
+    expect(res.content).toBe("hi");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const body1 = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    const body2 = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string);
+    expect(body1.temperature).toBe(0.7); // first attempt included it
+    expect(body2.temperature).toBeUndefined(); // retry dropped it
+  });
+
   it("sends configured extra headers (x-proxy-key) through the gateway", async () => {
     const lines = [
       d({ type: "message_start", message: { model: "m" } }),

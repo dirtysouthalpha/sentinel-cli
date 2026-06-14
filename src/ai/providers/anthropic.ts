@@ -13,6 +13,11 @@ import { createLogger } from "../../utils/logger.js";
 
 const log = createLogger({ prefix: "anthropic" });
 
+/** A 400 whose body says `temperature` is deprecated/unsupported for this model. */
+function rejectsTemperature(status: number, errorText: string): boolean {
+  return status === 400 && /temperature/i.test(errorText) && /(deprecat|unsupported|not supported)/i.test(errorText);
+}
+
 export class AnthropicProvider implements AIProvider {
   name = "anthropic";
   private apiKey: string;
@@ -82,17 +87,29 @@ export class AnthropicProvider implements AIProvider {
       }));
     }
 
-    const response = await fetch(`${this.baseURL}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-        ...this.extraHeaders,
-      },
-      body: JSON.stringify(body),
-    });
+    const send = () =>
+      fetch(`${this.baseURL}/v1/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01",
+          ...this.extraHeaders,
+        },
+        body: JSON.stringify(body),
+      });
 
+    let response = await send();
+    if (!response.ok) {
+      const error = await response.text();
+      // Newer models (e.g. Opus 4.8) reject `temperature` outright — drop it and retry once.
+      if (rejectsTemperature(response.status, error) && "temperature" in body) {
+        delete body.temperature;
+        response = await send();
+      } else {
+        throw new ProviderError(`Anthropic API error: ${response.status} - ${error}`, response.status, "anthropic");
+      }
+    }
     if (!response.ok) {
       const error = await response.text();
       throw new ProviderError(`Anthropic API error: ${response.status} - ${error}`, response.status, "anthropic");
@@ -179,6 +196,11 @@ export class AnthropicProvider implements AIProvider {
 
     if (!response.ok) {
       const error = await response.text();
+      // Newer models (e.g. Opus 4.8) reject `temperature` outright — drop it and retry.
+      if (rejectsTemperature(response.status, error) && "temperature" in body) {
+        delete body.temperature;
+        continue;
+      }
       const err = new ProviderError(`Anthropic API error: ${response.status} - ${error}`, response.status, "anthropic");
       if (response.status === 429 && attempt < MAX_RETRIES) {
         await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
