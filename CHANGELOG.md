@@ -64,10 +64,23 @@ from the `R1…` baseline (provider core, permissions, MCP), **not** from the
   integration test (real SSE parse → agent loop → real file tool → disk).
 - `docs/agentic-coding.md` documents the capabilities and config knobs.
 
-## Known gaps (not yet verified)
+## Verified live
 
-- **No live model run completed**: the local proxy at `:8080` rejects the
-  configured key (`E005 Invalid proxy key`) — a config/auth issue, not code. The
-  full pipeline is verified up to the auth boundary.
-- **TUI rendering/input** is unverified (no TTY in the build environment). Start a
-  trial headless (`run` / `ask`), then graduate to the TUI.
+- **End-to-end model run confirmed** on `zai/glm-4.6`: `ask` returns a correct
+  response, and `run` drives the full agentic loop — real `file` tool call →
+  result fed back → correct multi-step answer. This exercises the hardened
+  streaming tool-call assembly against a live provider.
+- Headless boot (`--no-tui`) loads cleanly: providers, themes, 8 tools, skills,
+  commands, agents — no import-cycle or load-time errors from the command refactor.
+
+## Known gaps
+
+- **anthropic-via-proxy** still returns `E005 Invalid proxy key`: the local proxy
+  at `:8080` rejects the configured `sentinelProxy.apiKey`. The app sends the
+  right key — this is proxy-side auth (likely an expired/rotated OAuth key), not
+  app code. Use `zai` until the proxy key is refreshed. (In the TUI this 403 now
+  renders as the friendly "Authentication failed… check ANTHROPIC_API_KEY or run
+  /connect" message from the error-format work.)
+- **TUI rendering/input** is unverified here (no TTY in this environment). The
+  underlying logic is unit-tested and boots clean; it needs a real terminal to
+  watch it paint.
