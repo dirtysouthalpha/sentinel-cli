@@ -66,20 +66,37 @@ export interface CommandContext {
   slashCtx(): SlashHandlerContext;
   /** Render the built-in command menu (used by /help). */
   showSlashMenu(): void;
+  /** Render usage + description for a single command (used by /help <command>). */
+  showCommandHelp(name: string): void;
   /** Clear the transcript and reprint the welcome banner (used by /clear). */
   clearScreen(): void;
   /** Tear down the screen and exit the process (used by /quit). */
   quit(): void;
 }
 
-/** A single slash command: its canonical name, optional aliases, and handler. */
+/** Display grouping for the help menu, in render order. */
+export type CommandGroup =
+  | "core"
+  | "session"
+  | "agentic"
+  | "repo"
+  | "extensions";
+
+/** A single slash command: its canonical name, aliases, metadata, and handler. */
 export interface CommandSpec {
   /** Canonical command name without the leading slash (e.g. "model"). */
   name: string;
   /** Alternate names that resolve to this handler (e.g. ["perms"]). */
   aliases?: string[];
-  /** One-line description (reserved for future menu generation). */
-  description?: string;
+  /** One-line description — the single source of truth for help and the palette. */
+  description: string;
+  /**
+   * Argument hint appended after the name in help/usage, e.g. "<name>",
+   * "[off]", or "run <f.json>". Omit for commands that take no arguments.
+   */
+  usage?: string;
+  /** Which help section this command renders under. Defaults to "core". */
+  group?: CommandGroup;
   /** Execute the command against the given context. */
   run(ctx: CommandContext): void | Promise<void>;
 }

@@ -6,6 +6,8 @@ export const repoCommands: CommandSpec[] = [
   // /index — build the lite TF-IDF repo index (V11).
   {
     name: "index",
+    description: "Build a semantic index of the repo (TF-IDF, local)",
+    group: "repo",
     async run(ctx) {
       const index = buildIndex(ctx.projectRoot);
       ctx.setRepoIndex(index);
@@ -18,6 +20,9 @@ export const repoCommands: CommandSpec[] = [
   // /search <query> — semantic search over the repo index (builds it first if needed).
   {
     name: "search",
+    description: "Semantic search the repo index for relevant files",
+    usage: "<query>",
+    group: "repo",
     async run(ctx) {
       const query = ctx.args.join(" ").trim();
       if (!query) {
@@ -47,6 +52,8 @@ export const repoCommands: CommandSpec[] = [
 
   {
     name: "checkpoints",
+    description: "List file checkpoints",
+    group: "repo",
     async run(ctx) {
       const cps = new CheckpointManager(ctx.projectRoot).list();
       if (cps.length === 0) {
@@ -64,6 +71,8 @@ export const repoCommands: CommandSpec[] = [
 
   {
     name: "undo",
+    description: "Undo the last agent file change",
+    group: "repo",
     async run(ctx) {
       const cp = new CheckpointManager(ctx.projectRoot).undoLast();
       if (!cp) {

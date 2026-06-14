@@ -7,14 +7,24 @@ export const metaCommands: CommandSpec[] = [
   {
     name: "help",
     aliases: ["?"],
+    description: "Show commands, or details for one",
+    usage: "[command]",
+    group: "session",
     async run(ctx) {
-      ctx.showSlashMenu();
+      const name = ctx.args[0]?.replace(/^\//, "");
+      if (name) {
+        ctx.showCommandHelp(name);
+      } else {
+        ctx.showSlashMenu();
+      }
       return;
     },
   },
   {
     name: "quit",
     aliases: ["exit", "q"],
+    description: "Exit Sentinel",
+    group: "session",
     async run(ctx) {
       ctx.quit();
       return;
@@ -22,6 +32,8 @@ export const metaCommands: CommandSpec[] = [
   },
   {
     name: "clear",
+    description: "Clear chat history",
+    group: "session",
     async run(ctx) {
       ctx.clearScreen();
       ctx.addSystem("Cleared.");
@@ -30,6 +42,8 @@ export const metaCommands: CommandSpec[] = [
   },
   {
     name: "about",
+    description: "Version, runtime, and feature summary",
+    group: "session",
     async run(ctx) {
       ctx.addSystem(buildAbout(VERSION));
       return;
@@ -37,6 +51,8 @@ export const metaCommands: CommandSpec[] = [
   },
   {
     name: "update",
+    description: "Check npm for a newer Sentinel release",
+    group: "session",
     async run(ctx) {
       ctx.addSystem("Checking for updates …");
       const r = await checkForUpdate(VERSION);
@@ -55,6 +71,8 @@ export const metaCommands: CommandSpec[] = [
   {
     name: "connect",
     aliases: ["setup"],
+    description: "Set up an AI provider",
+    group: "core",
     async run(ctx) {
       ctx.addSystem(
         [

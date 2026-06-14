@@ -3,6 +3,8 @@ import {
   resolveCommand,
   dispatchCommand,
   BUILTIN_COMMANDS,
+  getPaletteCommands,
+  getHelpGroups,
 } from "../src/tui/commands/registry.js";
 import type { CommandContext } from "../src/tui/commands/context.js";
 
@@ -111,10 +113,26 @@ describe("command registry", () => {
     expect(collisions).toEqual([]);
   });
 
-  it("every spec has a non-empty name and a callable handler", () => {
+  it("every spec has a non-empty name, description, and callable handler", () => {
     for (const spec of BUILTIN_COMMANDS) {
-      expect(spec.name).toBeTruthy();
+      expect(spec.name, `name for ${spec.name}`).toBeTruthy();
+      expect(spec.description, `description for /${spec.name}`).toBeTruthy();
       expect(typeof spec.run).toBe("function");
     }
+  });
+
+  it("getPaletteCommands covers every command and is well-formed", () => {
+    const palette = getPaletteCommands();
+    expect(palette.length).toBe(BUILTIN_COMMANDS.length);
+    for (const entry of palette) {
+      expect(entry.command.startsWith("/")).toBe(true);
+      expect(entry.command.length).toBeGreaterThan(1);
+      expect(entry.description.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("getHelpGroups partitions every command exactly once", () => {
+    const grouped = getHelpGroups().flatMap((g) => g.commands.map((c) => c.name));
+    expect(grouped.slice().sort()).toEqual(BUILTIN_COMMANDS.map((c) => c.name).sort());
   });
 });

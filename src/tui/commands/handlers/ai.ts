@@ -10,6 +10,9 @@ import { buildVisionMessage } from "../../../core/vision.js";
 export const aiCommands: CommandSpec[] = [
   {
     name: "pipeline",
+    description: "Run a deterministic JSON pipeline of agent steps",
+    usage: "run <f.json>",
+    group: "agentic",
     async run(ctx) {
       const sub = (ctx.args[0] || "").toLowerCase();
       const rawPath = ctx.args.slice(1).join(" ").trim();
@@ -33,6 +36,9 @@ export const aiCommands: CommandSpec[] = [
   },
   {
     name: "ship",
+    description: "Autonomous GSD: plan → implement → test → review → fix",
+    usage: "<task>",
+    group: "agentic",
     async run(ctx) {
       const task = ctx.args.join(" ").trim();
       if (!task) {
@@ -45,6 +51,9 @@ export const aiCommands: CommandSpec[] = [
   },
   {
     name: "ask-prime",
+    description: "Ask Sentinel Prime (Hermes agent)",
+    usage: "<q>",
+    group: "agentic",
     async run(ctx) {
       const question = ctx.args.join(" ").trim();
       if (!question) {
@@ -71,6 +80,9 @@ export const aiCommands: CommandSpec[] = [
   },
   {
     name: "describe",
+    description: "Vision: describe a local image (one-shot)",
+    usage: "<img> [q]",
+    group: "agentic",
     async run(ctx) {
       const imagePath = ctx.args[0];
       if (!imagePath) {

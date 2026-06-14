@@ -1,4 +1,5 @@
-import type { CommandContext, CommandSpec } from "./context.js";
+import type { CommandContext, CommandSpec, CommandGroup } from "./context.js";
+import type { PaletteCommand } from "../../core/command-catalog.js";
 import { metaCommands } from "./handlers/meta.js";
 import { sessionCommands } from "./handlers/session.js";
 import { configCommands } from "./handlers/config.js";
@@ -37,6 +38,36 @@ const COMMAND_INDEX = buildIndex(BUILTIN_COMMANDS);
 /** Resolve a command name (or alias) to its spec, or undefined if unknown. */
 export function resolveCommand(name: string): CommandSpec | undefined {
   return COMMAND_INDEX.get(name);
+}
+
+/** Help-menu sections, in render order, with human labels. */
+const GROUP_ORDER: { group: CommandGroup; label: string }[] = [
+  { group: "core", label: "Setup & Models" },
+  { group: "session", label: "Session" },
+  { group: "agentic", label: "Agentic" },
+  { group: "repo", label: "Code & Repo" },
+  { group: "extensions", label: "Extensions" },
+];
+
+/** Built-in commands grouped and sorted for the /help menu. */
+export function getHelpGroups(): { label: string; commands: CommandSpec[] }[] {
+  return GROUP_ORDER.map(({ group, label }) => ({
+    label,
+    commands: BUILTIN_COMMANDS.filter((c) => (c.group ?? "core") === group).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    ),
+  })).filter((g) => g.commands.length > 0);
+}
+
+/**
+ * The slash commands as palette entries — the single source for the Ctrl+K
+ * palette and /palette, derived from the registry so it can never drift.
+ */
+export function getPaletteCommands(): PaletteCommand[] {
+  return BUILTIN_COMMANDS.map((c) => ({
+    command: `/${c.name}`,
+    description: c.description,
+  }));
 }
 
 /**

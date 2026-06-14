@@ -7,8 +7,9 @@ import { ProviderError } from "../ai/errors.js";
 import { ContextManager } from "../ai/context.js";
 import { commandRegistry } from "../commands/registry.js";
 import { parseCommand, resolveTemplate } from "../commands/loader.js";
-import { dispatchCommand } from "./commands/registry.js";
+import { dispatchCommand, resolveCommand, getHelpGroups, BUILTIN_COMMANDS } from "./commands/registry.js";
 import type { CommandContext } from "./commands/context.js";
+import { fuzzyFilter } from "../core/fuzzy.js";
 import { getToolDefinitions, executeToolCall } from "../tools/tool-executor.js";
 import { ToolCall } from "../ai/types.js";
 import { AgentRunner } from "../core/agent-runner.js";
@@ -339,60 +340,53 @@ export class TUIApp {
     await this.chatWithAI(input);
   }
 
+  /** Display form of a command: "/name <usage>" (usage omitted when absent). */
+  private commandDisplay(name: string, usage?: string): string {
+    return usage ? `/${name} ${usage}` : `/${name}`;
+  }
+
   private showSlashMenu(): void {
     const c = themeEngine.getBlessedColors();
-    const cmds = commandRegistry.getAll();
 
-    const core: [string, string][] = [
-      ["/connect", "Set up AI provider"],
-      ["/model <name>", "Switch model"],
-      ["/agent <name>", "Switch agent (gsd, code, debug, plan, ask)"],
-      ["/theme <name>", "Switch theme"],
-      ["/providers", "Check API status"],
-      ["/permissions <mode>", "Guardrails: yolo | auto | gated | plan"],
-      ["/plan [off]", "Read-only research mode: propose a plan, no edits"],
-      ["/bg <command>", "Run a shell command in the background"],
-      ["/tasks", "List background tasks (and their status)"],
-      ["/mcp", "List connected MCP tools"],
-      ["/marketplace ...", "Extension registry: list | search <q> | install <id> [source]"],
-      ["/cmd <text>", "AI command-search: natural language → shell command"],
-      ["/palette [query]", "Search the command palette (alias /p)"],
-      ["/index", "Build a semantic index of the repo (TF-IDF, local)"],
-      ["/search <query>", "Semantic search the repo index for relevant files"],
-      ["/workflow ...", "Saved workflows: list | save | run | delete"],
-      ["/sync ...", "Portable settings bundle: export [path] | import <path>"],
-      ["/pipeline run <f.json>", "Run a deterministic JSON pipeline of agent steps"],
-      ["/ship <task>", "Autonomous GSD: plan → implement → test → review → fix"],
-      ["/ask-prime <q>", "Ask Sentinel Prime (Hermes agent)"],
-      ["/describe <img> [q]", "Vision: describe a local image (one-shot)"],
-      ["/checkpoints", "List file checkpoints"],
-      ["/undo", "Undo the last agent file change"],
-      ["/cost", "Session cost breakdown"],
-      ["/usage", "Usage metrics: tokens, cost, per-tool table"],
-      ["/diagnostics", "Run typecheck/build, report errors (alias /diag)"],
-      ["/export [md|html] [path]", "Export this session's transcript to a file"],
-      ["/branch", "Duplicate this session into a new tab"],
-      ["/workspace ...", "Multi-repo roots: list | add | remove | use (alias /ws)"],
-      ["/team ...", "Shared team: info | name <n> | registry <url> | add | remove"],
-      ["/compact", "Compress context (save tokens)"],
-      ["/about", "Version, runtime, and feature summary"],
-      ["/update", "Check npm for a newer Sentinel release"],
-      ["/clear", "Clear chat history"],
-      ["/help", "Full help"],
-      ["/quit", "Exit Sentinel"],
-    ];
-
-    let s = `\n{${c.cyan}-fg}{bold}Commands{/}\n`;
-    for (const [name, desc] of core) {
-      s += `  {${c.accent}-fg}${name.padEnd(18)}{/} {${c.textTertiary}-fg}${desc}{/}\n`;
+    // Rendered from the live registry (single source of truth) — grouped.
+    let s = "";
+    for (const { label, commands } of getHelpGroups()) {
+      s += `\n{${c.cyan}-fg}{bold}${label}{/}\n`;
+      for (const cmd of commands) {
+        const display = this.commandDisplay(cmd.name, cmd.usage);
+        s += `  {${c.accent}-fg}${display.padEnd(22)}{/} {${c.textTertiary}-fg}${cmd.description}{/}\n`;
+      }
     }
+
+    // Markdown template commands (skills) live in a separate registry.
+    const cmds = commandRegistry.getAll();
     if (cmds.length > 0) {
       s += `\n{${c.cyan}-fg}{bold}Super Tools{/}\n`;
       for (const cmd of cmds) {
-        s += `  {${c.accent}-fg}${`/${cmd.name}`.padEnd(18)}{/} {${c.textTertiary}-fg}${cmd.description}{/}\n`;
+        s += `  {${c.accent}-fg}${`/${cmd.name}`.padEnd(22)}{/} {${c.textTertiary}-fg}${cmd.description}{/}\n`;
       }
     }
+
+    s += `\n{${c.textTertiary}-fg}Tip: /help <command> for details · Ctrl+K for the palette{/}\n`;
     this.push(s);
+  }
+
+  /** /help <command> — usage + description for one command, with alias info. */
+  private showCommandHelp(name: string): void {
+    const c = themeEngine.getBlessedColors();
+    const spec = resolveCommand(name);
+    if (!spec) {
+      this.addError(`Unknown command: /${name}. Type /help to see all commands.`);
+      return;
+    }
+    const lines = [
+      `{${c.accent}-fg}{bold}${this.commandDisplay(spec.name, spec.usage)}{/}`,
+      `  ${spec.description}`,
+    ];
+    if (spec.aliases && spec.aliases.length > 0) {
+      lines.push(`  {${c.textTertiary}-fg}Aliases: ${spec.aliases.map((a) => `/${a}`).join(", ")}{/}`);
+    }
+    this.push("\n" + lines.join("\n") + "\n");
   }
 
   private buildCommandContext(args: string[], commandName: string): CommandContext {
@@ -423,6 +417,7 @@ export class TUIApp {
       runGsd: (task) => this.runGsdDelegated(task),
       slashCtx: () => this.slashCtx(),
       showSlashMenu: () => this.showSlashMenu(),
+      showCommandHelp: (name) => this.showCommandHelp(name),
       clearScreen: () => {
         this.renderer.setTranscript("");
         this.renderer.clearStream();
@@ -451,7 +446,14 @@ export class TUIApp {
       return;
     }
 
-    this.addError(`Unknown command: /${parsed.name}. Type / to see commands.`);
+    // Unknown — offer the closest matches so a typo is one keystroke from fixed.
+    const suggestions = fuzzyFilter(parsed.name, BUILTIN_COMMANDS, (s) => s.name)
+      .slice(0, 3)
+      .map((r) => `/${r.item.name}`);
+    const hint = suggestions.length
+      ? ` Did you mean ${suggestions.join(", ")}?`
+      : " Type / to see commands.";
+    this.addError(`Unknown command: /${parsed.name}.${hint}`);
   }
 
 

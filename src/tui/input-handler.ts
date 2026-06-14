@@ -12,7 +12,8 @@
 
 import blessed from "blessed";
 import { themeEngine } from "./themes/engine.js";
-import { searchCatalog, COMMAND_CATALOG } from "../core/command-catalog.js";
+import { searchCatalog } from "../core/command-catalog.js";
+import { getPaletteCommands } from "./commands/registry.js";
 
 export interface InputHandlerCallbacks {
   onSubmit: (msg: string) => void;
@@ -266,7 +267,7 @@ export class InputHandler {
     const buf = this.buffer;
     if (!buf.startsWith("/") || buf.includes(" ")) return;
     const partial = buf.slice(1).toLowerCase();
-    const names = COMMAND_CATALOG.map((c) => c.command.replace(/^\//, ""));
+    const names = getPaletteCommands().map((c) => c.command.replace(/^\//, ""));
     const matches = names.filter((n) => n.toLowerCase().startsWith(partial));
     if (matches.length === 0) return;
     if (matches.length === 1) {
@@ -291,7 +292,7 @@ export class InputHandler {
 
   private updateSlash(): void {
     const c = themeEngine.getBlessedColors();
-    this.slashItems = searchCatalog(this.buffer.slice(1)).slice(0, 12);
+    this.slashItems = searchCatalog(this.buffer.slice(1), getPaletteCommands()).slice(0, 12);
     if (this.slashItems.length === 0) { this.hideSlash(); return; }
     this.slashIndex = this.slashActive ? Math.min(this.slashIndex, this.slashItems.length - 1) : 0;
     const lines = this.slashItems.map((it, i) => {

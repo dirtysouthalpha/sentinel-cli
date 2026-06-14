@@ -52,6 +52,9 @@ export const taskCommands: CommandSpec[] = [
   // /bg <cmd> runs a shell command in the background; /bg cancel <id> stops it.
   {
     name: "bg",
+    description: "Run a shell command in the background",
+    usage: "<command>",
+    group: "repo",
     async run(ctx) {
       if (ctx.args[0] === "cancel") {
         const id = ctx.args[1];
@@ -71,6 +74,8 @@ export const taskCommands: CommandSpec[] = [
   // /tasks lists background tasks and their status.
   {
     name: "tasks",
+    description: "List background tasks (and their status)",
+    group: "repo",
     async run(ctx) {
       const tasks = ctx.background.list();
       if (tasks.length === 0) return void ctx.addSystem("No background tasks. Start one with /bg <command>.");
@@ -88,6 +93,9 @@ export const taskCommands: CommandSpec[] = [
   {
     name: "diagnostics",
     aliases: ["diag"],
+    description: "Run typecheck/build, report errors",
+    usage: "[command]",
+    group: "repo",
     async run(ctx) {
       const command = ctx.args.join(" ").trim() || undefined;
       ctx.addSystem(`Running diagnostics: ${command || "npx tsc --noEmit"} …`);
@@ -107,6 +115,9 @@ export const taskCommands: CommandSpec[] = [
 
   {
     name: "cmd",
+    description: "AI command-search: natural language → shell command",
+    usage: "<text>",
+    group: "agentic",
     async run(ctx) {
       await cmdSearch(ctx, ctx.args.join(" "));
     },

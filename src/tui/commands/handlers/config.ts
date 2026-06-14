@@ -8,6 +8,9 @@ import { providerManager } from "../../../ai/provider.js";
 export const configCommands: CommandSpec[] = [
   {
     name: "theme",
+    description: "Switch theme",
+    usage: "<name>",
+    group: "core",
     async run(ctx) {
       const name = ctx.args[0];
       if (!name) {
@@ -31,6 +34,9 @@ export const configCommands: CommandSpec[] = [
   {
     name: "permissions",
     aliases: ["perms"],
+    description: "Guardrails: yolo | auto | gated | plan",
+    usage: "<mode>",
+    group: "core",
     async run(ctx) {
       const mode = ctx.args[0];
       if (!mode) {
@@ -48,6 +54,9 @@ export const configCommands: CommandSpec[] = [
   },
   {
     name: "plan",
+    description: "Read-only research mode: propose a plan, no edits",
+    usage: "[off]",
+    group: "core",
     async run(ctx) {
       if (ctx.args[0] === "off") {
         ctx.setPermissionMode("yolo");
@@ -61,6 +70,9 @@ export const configCommands: CommandSpec[] = [
   },
   {
     name: "agent",
+    description: "Switch agent (gsd, code, debug, plan, ask)",
+    usage: "<name>",
+    group: "core",
     async run(ctx) {
       const name = ctx.args[0];
       if (!name) {
@@ -77,6 +89,9 @@ export const configCommands: CommandSpec[] = [
   },
   {
     name: "model",
+    description: "Switch model",
+    usage: "<name>",
+    group: "core",
     async run(ctx) {
       const name = ctx.args[0];
       if (!name) {
@@ -93,6 +108,8 @@ export const configCommands: CommandSpec[] = [
   },
   {
     name: "providers",
+    description: "Check API status",
+    group: "core",
     async run(ctx) {
       const available = providerManager.getAvailableProviderNames();
       let msg = "Providers:\n";

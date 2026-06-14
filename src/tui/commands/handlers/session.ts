@@ -12,6 +12,8 @@ import {
 export const sessionCommands: CommandSpec[] = [
   {
     name: "compact",
+    description: "Compress context (save tokens)",
+    group: "session",
     async run(ctx) {
       const cm = ctx.getContextManager();
       const before = cm.getMessageCount();
@@ -25,6 +27,8 @@ export const sessionCommands: CommandSpec[] = [
   },
   {
     name: "context",
+    description: "Show conversation size (messages + token estimate)",
+    group: "session",
     async run(ctx) {
       const cm = ctx.getContextManager();
       const msgs = cm.getMessages();
@@ -42,6 +46,8 @@ export const sessionCommands: CommandSpec[] = [
   },
   {
     name: "cost",
+    description: "Session cost breakdown",
+    group: "session",
     async run(ctx) {
       const cost = ctx.getCost();
       ctx.addSystem(
@@ -59,6 +65,8 @@ export const sessionCommands: CommandSpec[] = [
   },
   {
     name: "usage",
+    description: "Usage metrics: tokens, cost, per-tool table",
+    group: "session",
     async run(ctx) {
       ctx.addSystem(usageTracker.render());
       return;
@@ -66,6 +74,9 @@ export const sessionCommands: CommandSpec[] = [
   },
   {
     name: "export",
+    description: "Export this session's transcript to a file",
+    usage: "[md|html] [path]",
+    group: "session",
     async run(ctx) {
       handleExportCommand(ctx.slashCtx(), ctx.args);
       return;
@@ -73,6 +84,8 @@ export const sessionCommands: CommandSpec[] = [
   },
   {
     name: "branch",
+    description: "Duplicate this session into a new tab",
+    group: "session",
     async run(ctx) {
       handleBranchCommand(ctx.slashCtx());
       return;
@@ -80,6 +93,9 @@ export const sessionCommands: CommandSpec[] = [
   },
   {
     name: "tabs",
+    description: "List and switch session tabs",
+    usage: "...",
+    group: "session",
     async run(ctx) {
       handleTabsCommand(ctx.slashCtx(), ctx.args);
       return;
@@ -88,6 +104,9 @@ export const sessionCommands: CommandSpec[] = [
   {
     name: "workspace",
     aliases: ["ws"],
+    description: "Multi-repo roots: list | add | remove | use",
+    usage: "...",
+    group: "extensions",
     async run(ctx) {
       handleWorkspaceCommand(ctx.slashCtx(), ctx.args);
       return;
@@ -95,6 +114,9 @@ export const sessionCommands: CommandSpec[] = [
   },
   {
     name: "team",
+    description: "Shared team: info | name <n> | registry <url> | add | remove",
+    usage: "...",
+    group: "extensions",
     async run(ctx) {
       handleTeamCommand(ctx.slashCtx(), ctx.args);
       return;

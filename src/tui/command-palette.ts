@@ -10,6 +10,7 @@ import { themeEngine } from "./themes/engine.js";
 import { state } from "../core/state.js";
 import { fuzzyMatch } from "../core/fuzzy.js";
 import { searchCatalog } from "../core/command-catalog.js";
+import { getPaletteCommands } from "./commands/registry.js";
 import { getConfigManager } from "../core/config.js";
 
 interface PaletteEntry {
@@ -133,8 +134,8 @@ export class CommandPalette {
   private buildIndex(): void {
     this.entries = [];
 
-    // Commands — from the live catalog with descriptions
-    for (const c of searchCatalog("")) {
+    // Commands — from the live registry (single source of truth)
+    for (const c of searchCatalog("", getPaletteCommands())) {
       this.entries.push({
         label: c.command,
         description: c.description,

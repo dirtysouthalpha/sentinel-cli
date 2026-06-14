@@ -14,6 +14,7 @@ import {
   applyBundle,
 } from "../../../core/sync.js";
 import { searchCatalog } from "../../../core/command-catalog.js";
+import { getPaletteCommands } from "../registry.js";
 import { isAbsolute, resolve } from "node:path";
 
 /**
@@ -123,6 +124,8 @@ async function marketplace(ctx: CommandContext, args: string[]): Promise<void> {
 export const extensionCommands: CommandSpec[] = [
   {
     name: "mcp",
+    description: "List connected MCP tools",
+    group: "extensions",
     async run(ctx) {
       if (!ctx.isMcpConnected()) {
         ctx.addSystem("MCP connects on your first message. Send one, then run /mcp.");
@@ -142,6 +145,9 @@ export const extensionCommands: CommandSpec[] = [
   {
     name: "marketplace",
     aliases: ["market"],
+    description: "Extension registry: list | search <q> | install <id> [source]",
+    usage: "...",
+    group: "extensions",
     async run(ctx) {
       await marketplace(ctx, ctx.args);
     },
@@ -149,9 +155,12 @@ export const extensionCommands: CommandSpec[] = [
   {
     name: "palette",
     aliases: ["p"],
+    description: "Search the command palette",
+    usage: "[query]",
+    group: "extensions",
     async run(ctx) {
       const query = ctx.args.join(" ").trim();
-      const matches = searchCatalog(query);
+      const matches = searchCatalog(query, getPaletteCommands());
       if (matches.length === 0) {
         ctx.addSystem(`No commands match: ${query}`);
         return;
@@ -165,6 +174,9 @@ export const extensionCommands: CommandSpec[] = [
   },
   {
     name: "workflow",
+    description: "Saved workflows: list | save | run | delete",
+    usage: "...",
+    group: "agentic",
     async run(ctx) {
       const sub = (ctx.args[0] || "").toLowerCase();
 
@@ -253,6 +265,9 @@ export const extensionCommands: CommandSpec[] = [
   },
   {
     name: "sync",
+    description: "Portable settings bundle: export [path] | import <path>",
+    usage: "...",
+    group: "extensions",
     async run(ctx) {
       const sub = (ctx.args[0] || "").toLowerCase();
 
