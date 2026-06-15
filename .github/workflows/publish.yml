@@ -1,0 +1,39 @@
+name: Publish to npm
+
+# Publishes @dirtysouthalpha/sentinel-cli to npm when a vX.Y.Z tag is pushed.
+# Requires a repo secret NPM_TOKEN — an npm "Automation" token (bypasses 2FA).
+# Add it at: GitHub repo → Settings → Secrets and variables → Actions → New secret.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # enables npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # prepublishOnly runs the build; --access public is required for a scoped
+      # package; --provenance attaches a signed build attestation.
+      - name: Publish
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
