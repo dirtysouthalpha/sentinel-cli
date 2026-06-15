@@ -18,7 +18,9 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      # npm install (not ci) so a lockfile authored on another platform still
+      # resolves — npm reconciles optional/transitive deps per-OS.
+      - run: npm install --no-audit --no-fund
 
       - name: Type-check
         run: npm run lint
