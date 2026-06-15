@@ -11,6 +11,11 @@ import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { searchCatalog, COMMAND_CATALOG } from "../core/command-catalog.js";
 import { renderMarkdown } from "./render-markdown.js";
+import { capTranscript } from "./transcript.js";
+import { renderCard } from "./cards.js";
+import { resolveSelection, mergeModels } from "./switcher.js";
+import { skillRegistry } from "../skills/registry.js";
+import { agentRegistry } from "../agents/registry.js";
 import { expandMentions } from "../core/mentions.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
@@ -26,8 +31,6 @@ import {
   deleteForward,
   moveLeft,
   moveRight,
-  moveHome,
-  moveEnd,
   parseCsi,
   completeCommand,
   stepHistory,
@@ -58,12 +61,31 @@ import { buildAbout } from "../core/about.js";
 import { checkForUpdate } from "../core/update-check.js";
 import { createLogger } from "../utils/logger.js";
 import { exec } from "child_process";
-import { writeFileSync, readFileSync } from "node:fs";
-import { join, isAbsolute, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 
 const log = createLogger({ prefix: "tui" });
 
-const VERSION = "0.3.0";
+const VERSION = "1.1.0";
+
+// Braille spinner frames for the animated "working…" indicator.
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// Hard cap on transcript length. Past this the oldest lines are trimmed so a
+// long session never pays an unbounded per-paint cost (see capTranscript).
+const MAX_TRANSCRIPT_LINES = 2000;
+// Curated, switchable models offered by /model and the Ctrl+O cycler. Merged
+// with config-declared models and filtered by available providers at runtime.
+const CURATED_MODELS = [
+  "zai/glm-4.6",
+  "zai/glm-4.5-air",
+  "anthropic/claude-sonnet",
+  "anthropic/claude-haiku",
+  "openai/gpt-4o",
+  "openai/gpt-4o-mini",
+  "ollama/llama3",
+];
+// Built-in agent modes (fallback when the registry is empty).
+const BUILTIN_AGENTS = ["gsd", "code", "ask", "plan", "debug"];
 
 export interface TUIAppOptions {
   projectRoot: string;
@@ -122,9 +144,24 @@ export class TUIApp {
   private slashIndex = 0;
 
   private transcript = "";
-  private stream = "";
-  private streamRaw = ""; // un-escaped assistant text, re-rendered as markdown at end
-  private streamHeaderShown = false;
+  private stream = ""; // legacy live-tail slot; assistant tail now rendered in flushRender
+  private streamRaw = ""; // un-escaped assistant text, re-rendered as a card at each paint
+  private streaming = false; // an assistant message is currently streaming
+
+  // Render coalescing: every mutation marks state dirty and schedules a single
+  // paint per tick instead of repainting synchronously (per-token renders are
+  // the main source of flicker/lag). `chatDirty` gates the expensive chat
+  // setContent so a keystroke-only paint doesn't re-parse the whole transcript.
+  private renderScheduled = false;
+  private chatDirty = false;
+  // Auto-follow the bottom only while the user is already there, so scrolling up
+  // during a run isn't yanked back down.
+  private stickToBottom = true;
+  private destroyed = false;
+  // Animated working indicator.
+  private spinnerInterval?: ReturnType<typeof setInterval>;
+  private spinnerFrame = 0;
+  private workStartedAt = 0;
 
   private cost: CostTracker = {
     promptTokens: 0,
@@ -180,9 +217,8 @@ export class TUIApp {
       bottom: 4,
       scrollable: true,
       alwaysScroll: true,
-      mouse: true,
-      keys: true,
-      vi: true,
+      mouse: true, // wheel scroll only; keys/vi removed so the box never steals
+      // focus-based keys from the raw-stdin line editor.
       tags: true,
       wrap: true,
       padding: { left: 2, right: 2, top: 0, bottom: 0 },
@@ -243,9 +279,21 @@ export class TUIApp {
 
     state.subscribe("currentAgent", () => this.refreshStatus());
     state.subscribe("currentModel", () => this.refreshStatus());
-    state.subscribe("isProcessing", () => this.refreshStatus());
+    state.subscribe("isProcessing", () => this.onProcessingChange());
     state.subscribe("compressionStats", () => this.refreshStatus());
     events.on("theme:changed", () => this.applyTheme());
+
+    // Track whether the user has scrolled up. Our own auto-scroll lands at 100%,
+    // which keeps stickToBottom true; a wheel/keys scroll away from the bottom
+    // clears it so new output no longer yanks the view down.
+    this.chat.on("scroll", () => {
+      this.stickToBottom = this.chat.getScrollPerc() >= 99;
+      this.refreshStatus();
+    });
+
+    // Restore the terminal (bracketed paste, raw mode, alt screen) even on an
+    // unexpected exit — destroy() is idempotent via the `destroyed` guard.
+    process.on("exit", () => this.destroy());
 
     this.screen.render();
     log.info("TUI started");
@@ -256,21 +304,90 @@ export class TUIApp {
     return s.replace(/[{}]/g, (ch) => (ch === "{" ? "{open}" : "{close}"));
   }
 
+  /** Mark the chat body dirty and schedule a coalesced paint. */
   private render(): void {
-    this.chat.setContent(this.transcript + this.stream);
-    this.chat.setScrollPerc(100);
-    this.screen.render();
+    this.chatDirty = true;
+    this.scheduleRender();
+  }
+
+  /** Coalesce all paints within a tick into one screen.render(). */
+  private scheduleRender(): void {
+    if (this.renderScheduled || this.destroyed) return;
+    this.renderScheduled = true;
+    setImmediate(() => this.flushRender());
+  }
+
+  /**
+   * The single paint. Re-lays the chat body only when it changed (so a
+   * keystroke-only repaint doesn't re-parse the whole transcript), follows the
+   * bottom only while sticky, and never lets a render error crash the process.
+   */
+  private flushRender(): void {
+    this.renderScheduled = false;
+    if (this.destroyed) return;
+    try {
+      if (this.chatDirty) {
+        // The in-progress assistant message is rendered fresh each paint (from
+        // streamRaw) so its card grows/wraps correctly; it's baked into the
+        // transcript by endAssistant. This is one message, not the whole history.
+        const tail = this.streaming ? "\n" + this.assistantCard(this.streamRaw) + "\n" : "";
+        this.chat.setContent(this.transcript + tail);
+        this.chatDirty = false;
+        if (this.stickToBottom) this.chat.setScrollPerc(100);
+      }
+      this.screen.render();
+      // Blessed positions/shows the hardware cursor during render; re-hide it so
+      // the blinking caret never appears mid-screen (we draw our own in the input).
+      if (process.stdin.isTTY) process.stdout.write("\x1b[?25l");
+    } catch (err) {
+      log.error(`render failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** Jump the chat scrollback to the top or bottom (Home/End). */
+  private scrollChat(toTop: boolean): void {
+    this.stickToBottom = !toTop; // landing at the bottom re-engages auto-follow
+    try {
+      this.chat.setScrollPerc(toTop ? 0 : 100);
+    } catch {
+      // setScrollPerc can throw before the box has laid out — ignore.
+    }
+    this.refreshStatus();
+    this.scheduleRender();
+  }
+
+  /** Start/stop the working-indicator spinner as the run state flips. */
+  private onProcessingChange(): void {
+    const proc = state.get("isProcessing");
+    if (proc && !this.spinnerInterval) {
+      this.workStartedAt = Date.now();
+      this.spinnerFrame = 0;
+      this.spinnerInterval = setInterval(() => {
+        this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER.length;
+        this.renderInput();
+      }, 120);
+    } else if (!proc && this.spinnerInterval) {
+      clearInterval(this.spinnerInterval);
+      this.spinnerInterval = undefined;
+    }
+    this.refreshStatus();
+    this.renderInput();
   }
 
   private push(block: string): void {
     this.transcript += block;
+    this.transcript = capTranscript(this.transcript, MAX_TRANSCRIPT_LINES);
     this.render();
   }
 
   private renderInput(): void {
     const c = themeEngine.getBlessedColors();
     if (this.isProcessing) {
-      this.input.setContent(`{${c.textTertiary}-fg}  working… press Ctrl+C to cancel{/}`);
+      const frame = SPINNER[this.spinnerFrame];
+      const secs = this.workStartedAt ? Math.floor((Date.now() - this.workStartedAt) / 1000) : 0;
+      this.input.setContent(
+        `{${c.cyan}-fg}${frame}{/} {${c.textTertiary}-fg}working ${secs}s · press Ctrl+C to cancel{/}`
+      );
     } else if (this.inputBuffer.length === 0) {
       this.input.setContent(
         `{${c.cyan}-fg}❯{/} {${c.textTertiary}-fg}Message Sentinel, or / for commands{/}`
@@ -283,43 +400,95 @@ export class TUIApp {
       const after = cur < this.inputBuffer.length ? this.esc(this.inputBuffer.slice(cur + 1)) : "";
       this.input.setContent(`{${c.cyan}-fg}❯{/} ${before}{inverse}${atChar}{/inverse}${after}`);
     }
-    this.screen.render();
+    this.scheduleRender();
+  }
+
+  /** Outer width of a message card, derived from the current terminal width. */
+  private cardWidth(): number {
+    const cols = (this.screen?.width as number) || 80;
+    // Leave room for the chat box padding (2+2) and the card's 2-space indent;
+    // cap so long-line prose stays readable.
+    return Math.max(24, Math.min(cols - 6, 100));
+  }
+
+  /** Render a role message as a bordered, per-role-colored card. */
+  private card(label: string, body: string, colorKey: string): string {
+    const c = themeEngine.getBlessedColors() as unknown as Record<string, string>;
+    const color = c[colorKey] || c.textPrimary;
+    return renderCard({
+      label,
+      body,
+      width: this.cardWidth(),
+      labelColor: color,
+      borderColor: color,
+    });
+  }
+
+  /** The assistant card, body markdown-rendered (code/diff/inline-code styled). */
+  private assistantCard(raw: string): string {
+    const body = renderMarkdown(raw, themeEngine.getBlessedColors() as unknown as Record<string, string>);
+    return this.card("sentinel", body, "lime");
+  }
+
+  /** Selectable agent modes (registry, falling back to the built-ins). */
+  private listAgents(): string[] {
+    const names = agentRegistry.getNames();
+    return names.length ? names : BUILTIN_AGENTS;
+  }
+
+  /** Selectable models: current + config-declared + curated (available providers). */
+  private listModels(): string[] {
+    const providers = (getConfigManager().getAll().provider || {}) as Record<
+      string,
+      { models?: Record<string, unknown> }
+    >;
+    const configModels: string[] = [];
+    for (const [name, p] of Object.entries(providers)) {
+      for (const m of Object.keys(p?.models || {})) configModels.push(`${name}/${m}`);
+    }
+    return mergeModels(
+      CURATED_MODELS,
+      configModels,
+      providerManager.getAvailableProviderNames(),
+      state.get("currentModel") || ""
+    );
+  }
+
+  /** Render a numbered pick list with the current item marked. */
+  private numberedList(title: string, items: string[], current: string, usage: string): string {
+    const lines = items.map((it, i) => {
+      const mark = it === current ? " ←" : "";
+      return `  ${String(i + 1).padStart(2)}. ${it}${mark}`;
+    });
+    return [`${title} — switch with ${usage}:`, ...lines].join("\n");
   }
 
   private addUser(text: string): void {
-    const c = themeEngine.getBlessedColors();
-    const body = this.esc(text)
-      .split("\n")
-      .map((l) => `{${c.textPrimary}-fg}${l}{/}`)
-      .join("\n");
-    this.push(`\n{${c.cyan}-fg}you{/}\n${body}\n`);
+    // User input is shown verbatim (escaped); no markdown so pasted code stays literal.
+    this.push("\n" + this.card("you", this.esc(text), "cyan") + "\n");
   }
 
   private startAssistant(): void {
     this.stream = "";
     this.streamRaw = "";
-    this.streamHeaderShown = false;
+    this.streaming = false;
   }
 
   private streamAssistant(token: string): void {
-    const c = themeEngine.getBlessedColors();
-    if (!this.streamHeaderShown) {
-      this.transcript += `\n{${c.lime}-fg}● sentinel{/}\n`;
-      this.streamHeaderShown = true;
-    }
-    this.stream += this.esc(token); // live (plain) display while streaming
-    this.streamRaw += token; // raw text for end-of-message markdown render
+    this.streaming = true;
+    this.streamRaw += token; // accumulate; the live card is rendered in flushRender
     this.render();
   }
 
   private endAssistant(): void {
-    if (this.streamHeaderShown) {
-      // Re-render the completed message with code-block / diff / inline-code formatting.
-      this.transcript += renderMarkdown(this.streamRaw, themeEngine.getBlessedColors() as unknown as Record<string, string>) + "\n";
+    if (this.streaming) {
+      // Bake the completed assistant card into the transcript at the current width.
+      this.transcript += "\n" + this.assistantCard(this.streamRaw) + "\n";
+      this.transcript = capTranscript(this.transcript, MAX_TRANSCRIPT_LINES);
     }
     this.stream = "";
     this.streamRaw = "";
-    this.streamHeaderShown = false;
+    this.streaming = false;
     this.render();
   }
 
@@ -461,10 +630,13 @@ export class TUIApp {
     const n = sessionManager.getSessionCount();
     const tabs = `{${c.textTertiary}-fg}${n} tab${n === 1 ? "" : "s"}{/}`;
 
+    // When the user has scrolled up, flag that live output is still arriving below.
+    const scrollHint = this.stickToBottom ? "" : `{${c.amber}-fg}↓ more below{/}`;
+
     const sep = `  {${c.textSecondary}-fg}│{/}  `;
-    const segs = [stateSeg, mode, ctx, cost, tabs].filter(Boolean);
+    const segs = [stateSeg, mode, ctx, cost, tabs, scrollHint].filter(Boolean);
     this.status.setContent(" " + segs.join(sep) + " ");
-    this.screen.render();
+    this.scheduleRender();
   }
 
   private applyTheme(): void {
@@ -507,8 +679,28 @@ export class TUIApp {
     // Enable bracketed paste: the terminal wraps pasted text in ESC[200~…ESC[201~
     // so we can insert it whole instead of treating each embedded newline as Enter.
     process.stdout.write("\x1b[?2004h");
+    // Hide the real hardware cursor — we draw our own inverse-cell caret in the
+    // input box, so the blinking terminal cursor would otherwise sit wherever
+    // Blessed last parked it (mid-screen). flushRender re-asserts this after every
+    // paint since Blessed re-shows the cursor on render.
+    try {
+      (this.screen.program as { hideCursor?: () => void }).hideCursor?.();
+    } catch {
+      /* ignore — falls back to the per-paint escape in flushRender */
+    }
+    process.stdout.write("\x1b[?25l");
 
-    process.stdin.on("data", (chunk: string) => this.onInputChunk(chunk));
+    // Guard the stdin handler: a throw here would otherwise propagate out of the
+    // listener and could detach it, freezing all input. Reset transient paste
+    // state so a mid-paste error can't leave us swallowing every keystroke.
+    process.stdin.on("data", (chunk: string) => {
+      try {
+        this.onInputChunk(chunk);
+      } catch (err) {
+        this.pasting = false;
+        log.error(`input failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   }
 
   /** Insert a pasted span at the caret, keeping newlines so multi-line snippets
@@ -669,13 +861,11 @@ export class TUIApp {
           this.renderInput();
         }
         break;
-      case "home":
-        this.applyLine(moveHome(this.line()));
-        this.renderInput();
+      case "home": // jump the scrollback to the top (line-start is Ctrl+A)
+        this.scrollChat(true);
         break;
-      case "end":
-        this.applyLine(moveEnd(this.line()));
-        this.renderInput();
+      case "end": // jump the scrollback to the bottom (line-end is Ctrl+E)
+        this.scrollChat(false);
         break;
       case "delete":
         if (this.inputCursor < this.inputBuffer.length) {
@@ -727,14 +917,14 @@ export class TUIApp {
     this.slashBox.show();
     this.slashBox.setFront();
     this.slashActive = true;
-    this.screen.render();
+    this.scheduleRender();
   }
 
   private hideSlash(): void {
     if (!this.slashActive) return;
     this.slashActive = false;
     this.slashBox.hide();
-    this.screen.render();
+    this.scheduleRender();
   }
 
   private moveSlash(dir: number): void {
@@ -789,6 +979,7 @@ export class TUIApp {
 
   private submit(): void {
     if (this.isProcessing) return;
+    this.stickToBottom = true; // sending a message returns you to the live view
     const msg = this.inputBuffer.trim();
     this.setInputLine("", 0);
     this.historyIndex = -1;
@@ -818,9 +1009,10 @@ export class TUIApp {
 
     const core: [string, string][] = [
       ["/connect", "Set up AI provider"],
-      ["/model <name>", "Switch model"],
-      ["/agent <name>", "Switch agent (gsd, code, debug, plan, ask)"],
-      ["/theme <name>", "Switch theme"],
+      ["/model [name|#]", "List or switch model (no arg = pick list)"],
+      ["/agent [name|#]", "List or switch agent (gsd, code, debug, plan, ask)"],
+      ["/skill [name|#]", "List or run a skill: /skill <name> [args]"],
+      ["/theme [name]", "List or switch theme"],
       ["/providers", "Check API status"],
       ["/permissions <mode>", "Guardrails: yolo | auto | gated | plan"],
       ["/plan [off]", "Read-only research mode: propose a plan, no edits"],
@@ -986,7 +1178,9 @@ export class TUIApp {
       return;
     }
 
-    if (parsed.name === "connect" || parsed.name === "setup") {
+    // /setup shows provider-connection help. /connect (below) handles the
+    // keyless Claude OAuth router and the generic help for a bare /connect.
+    if (parsed.name === "setup") {
       this.addSystem(
         [
           "Connect an AI provider:",
@@ -1119,31 +1313,77 @@ export class TUIApp {
       return;
     }
 
-    if (parsed.name === "agent") {
-      const name = parsed.args[0];
-      if (!name) {
-        this.addSystem(`Agent: ${state.get("currentAgent")}`);
+    if (parsed.name === "agent" || parsed.name === "agents") {
+      const agents = this.listAgents();
+      const cur = state.get("currentAgent");
+      const arg = parsed.args.join(" ").trim();
+      if (!arg) {
+        this.addSystem(this.numberedList("Agents", agents, cur, "/agent <name|number>"));
         return;
       }
-      state.set("currentAgent", name);
-      events.emit("agent:switched", name);
+      const picked = resolveSelection(agents, arg) ?? (agentRegistry.has(arg) ? arg : null);
+      if (!picked) {
+        this.addError(`Unknown agent: ${arg}. Run /agent to list them.`);
+        return;
+      }
+      state.set("currentAgent", picked);
+      events.emit("agent:switched", picked);
       const activeId = sessionManager.getActiveSessionId();
-      if (activeId) sessionManager.updateSessionAgent(activeId, name);
-      this.addSystem(`Agent → ${name}`);
+      if (activeId) sessionManager.updateSessionAgent(activeId, picked);
+      this.addSystem(`Agent → ${picked}`);
       return;
     }
 
-    if (parsed.name === "model") {
-      const name = parsed.args[0];
-      if (!name) {
-        this.addSystem(`Model: ${state.get("currentModel")}`);
+    if (parsed.name === "model" || parsed.name === "models") {
+      const models = this.listModels();
+      const cur = state.get("currentModel");
+      const arg = parsed.args.join(" ").trim();
+      if (!arg) {
+        this.addSystem(
+          this.numberedList("Models", models, cur, "/model <name|number>") +
+            "\n  (or pass any provider/model id directly)"
+        );
         return;
       }
-      state.set("currentModel", name);
-      events.emit("model:changed", name);
+      // Resolve a number / known id / unique short name; otherwise accept a
+      // literal provider/model id so custom models still work.
+      const picked = resolveSelection(models, arg) ?? (arg.includes("/") ? arg : null);
+      if (!picked) {
+        this.addError(`Unknown model: ${arg}. Run /model to list them, or pass a provider/model id.`);
+        return;
+      }
+      state.set("currentModel", picked);
+      events.emit("model:changed", picked);
       const activeId = sessionManager.getActiveSessionId();
-      if (activeId) sessionManager.updateSessionModel(activeId, name);
-      this.addSystem(`Model → ${name}`);
+      if (activeId) sessionManager.updateSessionModel(activeId, picked);
+      this.addSystem(`Model → ${picked}`);
+      return;
+    }
+
+    if (parsed.name === "skill" || parsed.name === "skills") {
+      const skills = skillRegistry.getAll();
+      const names = skills.map((s) => s.name);
+      const arg = parsed.args[0];
+      if (!arg) {
+        if (skills.length === 0) {
+          this.addSystem("No skills loaded.");
+          return;
+        }
+        const lines = skills.map((s, i) => `  ${String(i + 1).padStart(2)}. ${s.name.padEnd(22)} ${s.description}`);
+        this.addSystem(["Skills — run with /skill <name|number> [args]:", ...lines].join("\n"));
+        return;
+      }
+      const pickedName = resolveSelection(names, arg);
+      const skill = pickedName ? skillRegistry.get(pickedName) : undefined;
+      if (!skill) {
+        this.addError(`Unknown skill: ${arg}. Run /skill to list them.`);
+        return;
+      }
+      const rest = parsed.args.slice(1);
+      this.addSystem(`▶ Running skill "${skill.name}"…`);
+      // Skills are prompt templates (like commands): substitute $ARGUMENTS/$1…
+      // then run the body through the agent.
+      await this.chatWithAI(resolveTemplate(skill.content, rest));
       return;
     }
 
@@ -1282,7 +1522,20 @@ export class TUIApp {
     // /connect claude — point the anthropic provider at your OAuth router
     // (keyless) so you can use a Claude subscription. Takes effect immediately.
     if (parsed.name === "connect") {
-      const target = (parsed.args[0] || "claude").toLowerCase();
+      const target = (parsed.args[0] || "").toLowerCase();
+      if (!target) {
+        // Bare /connect → generic provider-connection help.
+        this.addSystem(
+          [
+            "Connect an AI provider:",
+            "  Claude (keyless): /connect claude [router-url]  — use your OAuth router",
+            "  Env var:          set ZAI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY",
+            "  Wizard:           run  node dist/cli.js setup  in a terminal",
+            "  Then switch with: /model   (lists models)",
+          ].join("\n")
+        );
+        return;
+      }
       if (target !== "claude") {
         this.addSystem("Usage: /connect claude [router-url]  — use Claude via your OAuth router (keyless)");
         return;
@@ -1796,15 +2049,6 @@ export class TUIApp {
     }
   }
 
-  private truncateArgs(argsStr: string): string {
-    try {
-      const preview = JSON.stringify(JSON.parse(argsStr));
-      return preview.length > 80 ? preview.slice(0, 80) + "…" : preview;
-    } catch {
-      return argsStr.length > 80 ? argsStr.slice(0, 80) + "…" : argsStr;
-    }
-  }
-
   private createNewTab(): void {
     const session = sessionManager.createSession({
       projectRoot: this.projectRoot,
@@ -1824,14 +2068,16 @@ export class TUIApp {
     for (const msg of msgs) {
       const c = themeEngine.getBlessedColors();
       if (msg.role === "user") {
-        this.transcript += `\n{${c.cyan}-fg}{bold}You{/}\n${this.esc(msg.content)}\n`;
+        this.transcript += "\n" + this.card("you", this.esc(msg.content), "cyan") + "\n";
       } else if (msg.role === "assistant") {
-        this.transcript += `\n{${c.lime}-fg}{bold}Sentinel{/}\n${this.esc(msg.content)}\n`;
+        this.transcript += "\n" + this.assistantCard(msg.content) + "\n";
       } else if (msg.role === "tool") {
         const firstLine = msg.content.split("\n")[0].slice(0, 200);
         this.transcript += `{${c.textTertiary}-fg}${this.esc(firstLine)}{/}\n`;
       }
     }
+    this.transcript = capTranscript(this.transcript, MAX_TRANSCRIPT_LINES);
+    this.stickToBottom = true; // land at the live view when switching tabs
 
     this.cost = {
       promptTokens: 0,
@@ -1895,27 +2141,23 @@ export class TUIApp {
     });
 
     this.screen.key(["S-tab"], () => { // Shift+Tab; Ctrl+A is reserved for line-start in the raw-stdin editor
-      const agents = ["gsd", "code", "ask", "plan", "debug"];
+      const agents = this.listAgents();
       const cur = state.get("currentAgent");
-      const next = agents[(agents.indexOf(cur) + 1) % agents.length];
+      const next = agents[(agents.indexOf(cur) + 1) % agents.length] || agents[0];
       state.set("currentAgent", next);
       events.emit("agent:switched", next);
       this.addSystem(`Agent → ${next}`);
     });
 
     this.screen.key(["C-o"], () => { // Ctrl+O; Ctrl+M IS the Enter key, do not bind it
-      const models = [
-        "zai/glm-4.6",
-        "zai/glm-5.1",
-        "anthropic/claude-sonnet",
-        "anthropic/claude-haiku",
-        "openai/gpt-4o",
-        "ollama/llama3",
-      ];
+      const models = this.listModels();
+      if (models.length === 0) return;
       const cur = state.get("currentModel");
-      const next = models[(models.indexOf(cur) + 1) % models.length];
+      const next = models[(models.indexOf(cur) + 1) % models.length] || models[0];
       state.set("currentModel", next);
       events.emit("model:changed", next);
+      const activeId = sessionManager.getActiveSessionId();
+      if (activeId) sessionManager.updateSessionModel(activeId, next);
       this.addSystem(`Model → ${next}`);
     });
 
@@ -1933,9 +2175,18 @@ export class TUIApp {
   }
 
   destroy(): void {
+    if (this.destroyed) return; // idempotent: called on /quit, Ctrl+Q, and process exit
+    this.destroyed = true;
+    if (this.spinnerInterval) {
+      clearInterval(this.spinnerInterval);
+      this.spinnerInterval = undefined;
+    }
     sessionManager.shutdown();
     void this.mcp.disconnect();
-    if (process.stdin.isTTY) process.stdout.write("\x1b[?2004l"); // disable bracketed paste
+    if (process.stdin.isTTY) {
+      process.stdout.write("\x1b[?2004l"); // disable bracketed paste
+      process.stdout.write("\x1b[?25h"); // restore the hardware cursor
+    }
     if (this.screen) this.screen.destroy();
   }
 }
