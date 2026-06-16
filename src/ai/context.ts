@@ -136,11 +136,10 @@ export class ContextManager {
     };
 
     this.messages = [summaryMessage, ...recent];
-    log.info(`Context compacted: ${older.length + recent.length} -> ${this.messages.length} messages`);
+    // Silent compaction - no user-facing messages
   }
 
   private autoCompact(): void {
-    log.info(`Auto-compacting context (tokens: ${this.getTotalTokens()})`);
     this.compact();
   }
 

@@ -214,14 +214,14 @@ export class TUIApp {
       top: 2,
       left: 0,
       width: "100%",
-      bottom: 4,
+      bottom: 3,
       scrollable: true,
       alwaysScroll: true,
       mouse: true, // wheel scroll only; keys/vi removed so the box never steals
       // focus-based keys from the raw-stdin line editor.
       tags: true,
       wrap: true,
-      padding: { left: 2, right: 2, top: 0, bottom: 0 },
+      padding: { left: 1, right: 1, top: 0, bottom: 0 },
       scrollbar: {
         ch: " ",
         style: { bg: c.border },
@@ -236,11 +236,12 @@ export class TUIApp {
       bottom: 1,
       height: 3,
       tags: true,
-      border: { type: "line" },
+      wrap: true,
+      scrollable: true,
+      alwaysScroll: true,
       style: {
-        bg: c.bgPrimary,
+        bg: c.bgSecondary,
         fg: c.textPrimary,
-        border: { fg: c.border },
       },
     });
 
@@ -385,20 +386,47 @@ export class TUIApp {
     if (this.isProcessing) {
       const frame = SPINNER[this.spinnerFrame];
       const secs = this.workStartedAt ? Math.floor((Date.now() - this.workStartedAt) / 1000) : 0;
-      this.input.setContent(
-        `{${c.cyan}-fg}${frame}{/} {${c.textTertiary}-fg}working ${secs}s · press Ctrl+C to cancel{/}`
-      );
+      this.input.setContent(`{${c.cyan}-fg}${frame}{/} {${c.textTertiary}-fg}working ${secs}s · Ctrl+C cancel{/}`);
     } else if (this.inputBuffer.length === 0) {
-      this.input.setContent(
-        `{${c.cyan}-fg}❯{/} {${c.textTertiary}-fg}Message Sentinel, or / for commands{/}`
-      );
+      this.input.setContent(`{${c.cyan}-fg}❯{/} {${c.textTertiary}-fg}Message Sentinel, or / for commands{/}`);
     } else {
-      // Render the caret as an inverse cell at its real position within the line.
+      // Render with a scrolling window - show text around the cursor
+      const cols = (this.screen?.width as number) || 80;
       const cur = Math.max(0, Math.min(this.inputCursor, this.inputBuffer.length));
-      const before = this.esc(this.inputBuffer.slice(0, cur));
-      const atChar = cur < this.inputBuffer.length ? this.esc(this.inputBuffer[cur]) : " ";
-      const after = cur < this.inputBuffer.length ? this.esc(this.inputBuffer.slice(cur + 1)) : "";
-      this.input.setContent(`{${c.cyan}-fg}❯{/} ${before}{inverse}${atChar}{/inverse}${after}`);
+      
+      // Available space: prompt "❯ " takes 3, plus space for scroll indicators
+      const maxVisible = Math.max(20, cols - 6);
+      
+      // If fits on one line, show it all
+      if (this.inputBuffer.length <= maxVisible) {
+        const before = this.esc(this.inputBuffer.slice(0, cur));
+        const atChar = cur < this.inputBuffer.length ? this.esc(this.inputBuffer[cur]) : " ";
+        const after = cur < this.inputBuffer.length ? this.esc(this.inputBuffer.slice(cur + 1)) : "";
+        this.input.setContent(`{${c.cyan}-fg}❯{/} ${before}{inverse}${atChar}{/inverse}${after}`);
+      } else {
+        // Calculate visible window centered on cursor
+        let halfWindow = Math.floor(maxVisible / 2);
+        let start = Math.max(0, cur - halfWindow);
+        let end = Math.min(this.inputBuffer.length, start + maxVisible);
+        
+        // If at the end, shift back to fill the window
+        if (end - start < maxVisible && start > 0) {
+          start = Math.max(0, end - maxVisible);
+        }
+        
+        const visible = this.inputBuffer.slice(start, end);
+        const localCur = cur - start;
+        const before = this.esc(visible.slice(0, localCur));
+        const atChar = localCur < visible.length ? this.esc(visible[localCur]) : " ";
+        const after = localCur < visible.length ? this.esc(visible.slice(localCur + 1)) : "";
+        
+        const leftScroll = start > 0 ? "…" : "";
+        const rightScroll = end < this.inputBuffer.length ? "…" : "";
+        
+        this.input.setContent(
+          `{${c.cyan}-fg}❯${leftScroll}{/} ${before}{inverse}${atChar}{/inverse}${after}${rightScroll}`
+        );
+      }
     }
     this.scheduleRender();
   }
@@ -406,9 +434,10 @@ export class TUIApp {
   /** Outer width of a message card, derived from the current terminal width. */
   private cardWidth(): number {
     const cols = (this.screen?.width as number) || 80;
-    // Leave room for the chat box padding (2+2) and the card's 2-space indent;
-    // cap so long-line prose stays readable.
-    return Math.max(24, Math.min(cols - 6, 100));
+    // Use 90% of terminal width for better space utilization (opencode-style)
+    // Leave room for the chat box padding (1+1) and the card's 2-space indent.
+    // Max 180 for readability, min 40 for very small terminals.
+    return Math.max(40, Math.min(Math.floor(cols * 0.9) - 4, 180));
   }
 
   /** Render a role message as a bordered, per-role-colored card. */
@@ -496,29 +525,24 @@ export class TUIApp {
     const c = themeEngine.getBlessedColors();
     const cut = (t: string, n: number): string => (t.length > n ? t.slice(0, n - 1) + "…" : t);
     const mark = ok ? `{${c.lime}-fg}✓{/}` : `{${c.error}-fg}✗{/}`;
-    const rail = (ch: string): string => `{${c.textSecondary}-fg}${ch}{/}`;
-    const action = this.esc(cut(humanizeToolCall(name, argsJson), 58));
-    const summary = this.esc(cut(summarizeToolResult(name, argsJson, ok, output), 30));
+    const action = this.esc(cut(humanizeToolCall(name, argsJson), 40));
 
-    // A left-rail "card": status header + a short preview of the output body,
-    // with the remainder collapsed. Left rail only — full borders misalign the
-    // moment blessed word-wraps a line.
-    let card = `\n  ${rail("╭")} ${mark} {${c.textPrimary}-fg}${action}{/}`;
-    if (summary) card += `  {${c.textSecondary}-fg}${summary}{/}`;
-    card += "\n";
+    // Compact inline tool output (opencode-style)
+    let card = `\n  ${mark} {${c.textPrimary}-fg}${action}{/}`;
 
     const stripped = (output || "").replace(/^\[[^\]]*output\]\n/, "").replace(/\s+$/, "");
     const lines = stripped ? stripped.split("\n") : [];
-    const MAX = 5;
-    for (const l of lines.slice(0, MAX)) {
-      card += `  ${rail("│")} {${c.textSecondary}-fg}${this.esc(cut(l, 72))}{/}\n`;
+    
+    // Show first 2 lines inline, rest collapsed
+    if (lines.length > 0) {
+      const preview = lines.slice(0, 2).map(l => this.esc(cut(l, 60))).join(" ");
+      card += ` {${c.textTertiary}-fg}${preview}{/}`;
     }
-    const extra = lines.length - Math.min(lines.length, MAX);
-    card += `  ${rail("╰")}`;
-    if (extra > 0) card += ` {${c.textSecondary}-fg}… ${extra} more line${extra === 1 ? "" : "s"}{/}`;
-    card += "\n";
-
-    this.push(card);
+    
+    const extra = Math.max(0, lines.length - 2);
+    if (extra > 0) card += ` {${c.textSecondary}-fg}[+${extra} line${extra === 1 ? "" : "s"}]{/}`;
+    
+    this.push(card + "\n");
   }
 
   private addSystem(text: string): void {
@@ -578,29 +602,14 @@ export class TUIApp {
     const project =
       this.projectRoot.replace(/\\/g, "/").split("/").filter(Boolean).pop() || "project";
 
-    const banner = [
-      "  ___  ___ _ __ | |_(_)_ __   ___| |",
-      " / __|/ _ \\ '_ \\| __| | '_ \\ / _ \\ |",
-      " \\__ \\  __/ | | | |_| | | | |  __/ |",
-      " |___/\\___|_| |_|\\__|_|_| |_|\\___|_|",
-    ]
-      .map((l) => `{${c.cyan}-fg}${l}{/}`)
-      .join("\n");
-
     const providers =
       available.length === 0
-        ? `{${c.amber}-fg}no provider{/}  {${c.textSecondary}-fg}— type /connect{/}`
-        : `{${c.lime}-fg}●{/}  {${c.textSecondary}-fg}${available.join(" · ")}{/}`;
+        ? `{${c.amber}-fg}no provider{/}`
+        : `{${c.lime}-fg}${available.join(" · ")}{/}`;
 
-    let s = `\n${banner}\n`;
-    s += `\n{${c.cyan}-fg}v${VERSION}{/}  {${c.textSecondary}-fg}· the terminal coding agent — any model, OAuth or key{/}\n`;
-    s += `\n{${c.textSecondary}-fg}project{/}    {${c.textPrimary}-fg}${project}{/}\n`;
-    s += `{${c.textSecondary}-fg}model{/}      {${c.textPrimary}-fg}${model}{/}  {${c.textSecondary}-fg}· agent {/}{${c.textPrimary}-fg}${agent}{/}\n`;
-    s += `{${c.textSecondary}-fg}providers{/}  ${providers}\n`;
-    s += `\n{${c.cyan}-fg}▸{/} {${c.textPrimary}-fg}type a message to start{/}\n`;
-    s += `{${c.cyan}-fg}▸{/} {${c.amber}-fg}/{/} {${c.textPrimary}-fg}for commands & skills{/}  {${c.textSecondary}-fg}— /connect · /model · /skill · /theme{/}\n`;
-    s += `{${c.cyan}-fg}▸{/} {${c.amber}-fg}gsd{/} {${c.textPrimary}-fg}<task>{/}  {${c.textSecondary}-fg}— plan → build → test → ship, autonomously{/}\n`;
-    s += `{${c.cyan}-fg}▸{/} {${c.textSecondary}-fg}tab completes · ↑ history · ctrl+q quit{/}\n`;
+    let s = `\n{${c.cyan}-fg}{bold}sentinel${c.cyan}-fg} v${VERSION}{/}  {${c.textSecondary}-fg}· {/}{${c.textSecondary}-fg}${project}{/}\n`;
+    s += `{${c.textTertiary}-fg}${model} · ${agent} · ${providers}{/}\n`;
+    s += `{${c.textTertiary}-fg}Press / for commands, type to chat, Ctrl+Q to quit{/}`;
     this.push(s);
   }
 
@@ -615,25 +624,25 @@ export class TUIApp {
     const modelName = model.split("/").pop() || model;
     const stateSeg = processing
       ? `{${c.amber}-fg}●{/} {${c.amber}-fg}working{/}`
-      : `{${c.lime}-fg}●{/} {${c.textSecondary}-fg}ready{/}`;
-    const mode = `{${c.textSecondary}-fg}${agent}{/} {${c.textTertiary}-fg}·{/} {${c.textSecondary}-fg}${modelName}{/}`;
+      : `{${c.lime}-fg}●{/}`;
+    const mode = `{${c.textSecondary}-fg}${agent}{/}·{${c.textSecondary}-fg}${modelName}{/}`;
 
     const tok = this.cost.requests > 0
-      ? `${formatTokens(this.cost.totalTokens)} tok`
+      ? `${formatTokens(this.cost.totalTokens)}`
       : `${cm.getMessageCount()} msgs`;
     const ctx = compressionStats.savingsPercent > 0
-      ? `{${c.textSecondary}-fg}${tok}{/} {${c.textTertiary}-fg}·{/} {${c.lime}-fg}${compressionStats.savingsPercent}% saved{/}`
+      ? `{${c.textSecondary}-fg}${tok}{/} {${c.lime}-fg}-${compressionStats.savingsPercent}%{/}`
       : `{${c.textSecondary}-fg}${tok}{/}`;
     const cost = this.cost.requests > 0
-      ? `{${c.textSecondary}-fg}$${formatCost(this.cost.estimatedCostUSD)}{/}`
+      ? `{${c.textSecondary}-fg}${formatCost(this.cost.estimatedCostUSD)}{/}`
       : "";
     const n = sessionManager.getSessionCount();
-    const tabs = `{${c.textTertiary}-fg}${n} tab${n === 1 ? "" : "s"}{/}`;
+    const tabs = n > 1 ? `{${c.textTertiary}-fg}${n}t{/}` : "";
 
     // When the user has scrolled up, flag that live output is still arriving below.
-    const scrollHint = this.stickToBottom ? "" : `{${c.amber}-fg}↓ more below{/}`;
+    const scrollHint = !this.stickToBottom ? `{${c.amber}-fg}↓{/}` : "";
 
-    const sep = `  {${c.textSecondary}-fg}│{/}  `;
+    const sep = ` {${c.border}-fg}|{/} `;
     const segs = [stateSeg, mode, ctx, cost, tabs, scrollHint].filter(Boolean);
     this.status.setContent(" " + segs.join(sep) + " ");
     this.scheduleRender();
@@ -1172,7 +1181,6 @@ export class TUIApp {
           "Context:",
           `  Messages: ${msgs.length}`,
           `  Size: ~${Math.ceil(totalChars / 4)} tokens`,
-          "  Auto-compacts as it fills.",
         ].join("\n")
       );
       return;
