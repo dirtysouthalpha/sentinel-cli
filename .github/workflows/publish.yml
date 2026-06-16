@@ -13,8 +13,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write # enables npm provenance
+      contents: write  # needed to upload release assets
+      id-token: write  # enables npm provenance
     steps:
       - uses: actions/checkout@v4
 
@@ -33,9 +33,21 @@ jobs:
       - name: Test
         run: npm test
 
-      # prepublishOnly runs the build; --access public is required for a scoped
-      # package; --provenance attaches a signed build attestation.
+      # prepublishOnly runs the build (CLI + GUI); --access public is required for a
+      # scoped package; --provenance attaches a signed build attestation.
       - name: Publish
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Pack tarball
+        run: npm pack
+
+      - name: Upload tarball to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          TARBALL=$(ls *.tgz)
+          gh release upload "$TAG" "$TARBALL" --clobber || \
+            gh release create "$TAG" "$TARBALL" --title "Sentinel CLI $TAG" --generate-notes

@@ -18,7 +18,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsup && node scripts/add-shebang.cjs && node scripts/copy-builtins.cjs",
+    "build": "tsup && node scripts/add-shebang.cjs && node scripts/copy-builtins.cjs && npm run build:gui",
+    "build:gui": "cd gui && npm install --no-audit --no-fund && npm run build",
     "dev": "tsup --watch",
     "start": "node dist/cli.js",
     "test": "vitest run",
@@ -64,7 +65,8 @@
   "files": [
     "dist",
     "!dist/**/*.map",
-    "config"
+    "config",
+    "gui/dist"
   ],
   "keywords": [
     "cli",
