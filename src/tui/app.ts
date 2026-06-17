@@ -153,6 +153,11 @@ export class TUIApp {
   private streamRaw = ""; // un-escaped assistant text, re-rendered as a card at each paint
   private streaming = false; // an assistant message is currently streaming
 
+  // Holds a trailing partial ESC byte (0x1b) when a stdin chunk ends on ESC with
+  // no following byte. SSH/ConPTY routinely fragment escape sequences across
+  // reads, so without reassembly the next chunk's "[A" arrives as literal text
+  // (arrow keys leak into the buffer). Prepended to the next chunk in onInputChunk.
+  private escBuf = "";
   // Render coalescing: every mutation marks state dirty and schedules a single
   // paint per tick instead of repainting synchronously (per-token renders are
   // the main source of flicker/lag). `chatDirty` gates the expensive chat
@@ -730,6 +735,13 @@ export class TUIApp {
     // listener; drop everything so keystrokes don't also edit the hidden main
     // buffer and Enter doesn't fire a second, billed AI turn.
     if (this.modalActive) return;
+    // Reassemble escape sequences that were split across reads: prepend any ESC
+    // byte held over from the previous chunk. SSH/ConPTY fragment sequences
+    // routinely, so without this the next chunk's "[A" would land as literal text.
+    if (this.escBuf) {
+      chunk = this.escBuf + chunk;
+      this.escBuf = "";
+    }
     let i = 0;
     while (i < chunk.length) {
       const ch = chunk[i];
@@ -771,6 +783,14 @@ export class TUIApp {
           this.pasteBuf += ch;
           i += 1;
           continue;
+        }
+        // If ESC is the last byte of this chunk with no following byte, the
+        // continuation ("[A", "[O", …) is coming in the next read. Hold the ESC
+        // instead of treating it as a lone keypress — otherwise over SSH/ConPTY
+        // the next chunk's "[A" leaks into the buffer as literal text.
+        if (i === chunk.length - 1) {
+          this.escBuf = ch;
+          return;
         }
         if (this.slashActive) this.hideSlash(); // lone ESC closes the slash menu
         i += 1;
