@@ -246,6 +246,11 @@ class Connection {
         break;
       case "getState":
         this.pushState();
+        // Replay the active session's full conversation so a reconnecting GUI
+        // rebuilds its message blocks instead of blanking. The data is already
+        // in ContextManager + persisted by the session manager; it just wasn't
+        // on the wire before.
+        this.pushHistory();
         break;
       case "getConfig":
         this.pushConfig();
@@ -547,6 +552,33 @@ class Connection {
 
   private pushState(): void {
     this.send({ type: "state", state: this.snapshot() });
+  }
+
+  /**
+   * Replay the active session's conversation as a single `history` frame. Maps
+   * ContextManager messages to HistoryMessage, dropping the system prompt (the
+   * GUI doesn't render it as a turn) and trimming tool content to a sane size.
+   */
+  private pushHistory(): void {
+    const session = sessionManager.getActiveSession();
+    if (!session) {
+      this.send({ type: "history", messages: [] });
+      return;
+    }
+    const messages = session.contextManager.getMessages();
+    const history = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => {
+        const out: { role: "user" | "assistant" | "tool"; content: string; name?: string } = {
+          role: m.role as "user" | "assistant" | "tool",
+          // Tool metadata carries the tool name; surface it for card rendering.
+          content: m.content,
+        };
+        const name = (m.metadata as { name?: string } | undefined)?.name;
+        if (name) out.name = name;
+        return out;
+      });
+    this.send({ type: "history", messages: history });
   }
 
   private snapshot(): StateSnapshot {

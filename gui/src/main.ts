@@ -39,7 +39,8 @@ type ServerMessage =
   | { type: "checkpoints"; items: CheckpointItem[] }
   | { type: "todos"; items: TodoItem[] }
   | { type: "config"; config: ConfigView }
-  | { type: "busy"; busy: boolean };
+  | { type: "busy"; busy: boolean }
+  | { type: "history"; messages: { role: "user" | "assistant" | "tool"; content: string; name?: string }[] };
 
 // ---- connection params (injected by Tauri, or via ?port=&token= in dev) -----
 const params = new URLSearchParams(location.search);
@@ -57,7 +58,7 @@ type Block =
   | { kind: "tool"; tool: string; args: any; argsRaw: string; ok?: boolean; firstLine?: string; full?: string; running?: boolean }
   | { kind: "system"; text: string }
   | { kind: "error"; text: string };
-const blocks: Block[] = [];
+let blocks: Block[] = [];
 let pendingPerm: { tool: string; action?: string; path?: string; reason: string } | null = null;
 let pendingToolArgs = "";
 let todos: TodoItem[] = [];
@@ -688,6 +689,32 @@ export function dispatch(m: ServerMessage) {
     case "todos": todos = m.items || []; if (snap) renderRight(); break;
     case "config": cfg = m.config; if (snap) renderRight(); renderSettingsBody(); break;
     case "done": endStream(); round = 0; if (snap) renderRight(); break;
+    case "history": {
+      // Rebuild the message list from a full conversation replay (sent on
+      // getState / reconnect). Without this a transient WS drop blanks the
+      // chat even though the engine still holds every turn.
+      endStream();
+      blocks = m.messages.map((msg) => {
+        if (msg.role === "user") return { kind: "user", text: msg.content } as Block;
+        if (msg.role === "assistant") return { kind: "assistant", text: msg.content } as Block;
+        // Tool messages are stored as "[Tool: <name>]\n<text>"; surface name +
+        // full text so the tool card renders correctly.
+        const name = msg.name || "";
+        const full = msg.content.replace(/^\[Tool: [^\]]+\]\n?/, "");
+        return {
+          kind: "tool",
+          tool: name,
+          args: {},
+          argsRaw: "",
+          ok: !full.startsWith("ERROR"),
+          firstLine: full.split("\n")[0].slice(0, 200),
+          full,
+          running: false,
+        } as Block;
+      });
+      renderChat();
+      break;
+    }
     default: {
       // Exhaustiveness: if a new ServerMessage variant is added, TS flags this.
       const _never: never = m;

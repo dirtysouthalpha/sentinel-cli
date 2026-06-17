@@ -72,7 +72,19 @@ export type ServerMessage =
   | { type: "checkpoints"; items: { id: string; tool: string; path: string; existed: boolean; timestamp: number }[] }
   | { type: "todos"; items: { content: string; status: "pending" | "in_progress" | "completed" }[] }
   | { type: "config"; config: ConfigView }
-  | { type: "busy"; busy: boolean };
+  | { type: "busy"; busy: boolean }
+  // Full conversation replay: sent after getState (and on reconnect) so the GUI
+  // can rebuild its message blocks. Without it, a transient WS drop blanks the
+  // chat even though ContextManager still holds every turn.
+  | { type: "history"; messages: HistoryMessage[] };
+
+/** One replayed conversation turn for the `history` message. */
+export interface HistoryMessage {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  /** For tool entries, the tool name (so the GUI can render a tool card). */
+  name?: string;
+}
 
 export interface ServeHandshake {
   port: number;

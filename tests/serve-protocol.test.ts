@@ -96,4 +96,16 @@ describe("serve protocol", () => {
     expect(state.type).toBe("state");
     c.ws.close();
   });
+
+  it("replays conversation history on getState (no blank reconnect)", async () => {
+    const c = await open();
+    await c.waitFor((m) => m.type === "hello");
+    // getState now emits both a state snapshot and a history frame, so a
+    // reconnecting GUI rebuilds its message blocks instead of blanking.
+    c.ws.send(JSON.stringify({ type: "getState" }));
+    const history = await c.waitFor((m) => m.type === "history", 4000);
+    expect(history.type).toBe("history");
+    expect(Array.isArray((history as { messages: unknown[] }).messages)).toBe(true);
+    c.ws.close();
+  });
 });
