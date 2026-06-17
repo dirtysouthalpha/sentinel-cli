@@ -1869,23 +1869,26 @@ export class TUIApp {
   }
 
   /**
-   * V9: run a parsed pipeline by delegating each step to an isolated subagent.
-   * Uses the pure `runPipeline` engine (sequential by default; consecutive
-   * `parallel:true` steps run concurrently). Each step's subagent receives the
-   * prior steps' results as context, and a per-step error is recorded without
-   * aborting the rest of the pipeline.
+   * Shared prologue/epilogue for the delegated runners (pipeline / GSD /
+   * autopilot): set isProcessing, own a fresh AbortController, connect MCP once,
+   * build the agent stack, run the body, and on the way out clear processing
+   * state + re-render. The body receives the assembled `subagentTool` and the
+   * run's `signal`; it can throw — errors are surfaced via addError and the
+   * cleanup still runs. This removes ~3× the same ~20-line block.
    */
-  private async runPipelineDelegated(pipeline: Pipeline): Promise<void> {
+  private async runDelegated(
+    body: (deps: { subagentTool: ReturnType<typeof buildAgentBase>["subagentTool"]; signal: AbortSignal }) => Promise<void>
+  ): Promise<void> {
     this.isProcessing = true;
     state.set("isProcessing", true);
-    this.ac = new AbortController(); // so Ctrl+C can cancel the pipeline mid-run
+    this.ac = new AbortController();
     this.renderInput();
 
     try {
       const config = getConfigManager().getAll();
       const agentName = state.get("currentAgent");
 
-      // Connect MCP once (mirrors chatWithAI) so subagents see MCP tools too.
+      // Connect MCP once per session so delegated subagents see MCP tools too.
       if (!this.mcpConnected) {
         this.mcpConnected = true;
         try {
@@ -1895,7 +1898,6 @@ export class TUIApp {
         }
       }
 
-      // Same provider + guarded/MCP-aware executor + subagent stack the main loop uses.
       const { subagentTool } = buildAgentBase({
         config,
         model: state.get("currentModel"),
@@ -1906,36 +1908,7 @@ export class TUIApp {
         ask: (req, reason) => this.askPermission(req, reason),
       });
 
-      this.addSystem(`▶ Running pipeline "${pipeline.name}" (${pipeline.steps.length} step(s))...`);
-
-      const results = await runPipeline(
-        pipeline,
-        async (step, prior) => {
-          if (this.ac?.signal.aborted) return "ERROR: cancelled";
-          const priorBlock = prior.length
-            ? "Prior step results:\n" +
-              prior.map((r) => `### ${r.name}\n${r.result}`).join("\n\n")
-            : "";
-          return subagentTool.execute(
-            {
-              task: step.prompt,
-              context: priorBlock || undefined,
-            },
-            this.ac?.signal
-          );
-        },
-        {
-          onStepStart: (s) =>
-            this.addSystem(`  • step "${s.name}"${s.parallel ? " (parallel)" : ""}...`),
-        }
-      );
-
-      let summary = `Pipeline "${pipeline.name}" complete (${results.length} step(s)):\n`;
-      for (const r of results) {
-        const first = r.result.split("\n")[0].slice(0, 200);
-        summary += `  ${r.result.startsWith("ERROR") ? "✗" : "✓"} ${r.name}: ${first}\n`;
-      }
-      this.addSystem(summary.trimEnd());
+      await body({ subagentTool, signal: this.ac.signal });
 
       const activeId = sessionManager.getActiveSessionId();
       if (activeId) sessionManager.markDirty(activeId);
@@ -1950,6 +1923,48 @@ export class TUIApp {
   }
 
   /**
+   * V9: run a parsed pipeline by delegating each step to an isolated subagent.
+   * Uses the pure `runPipeline` engine (sequential by default; consecutive
+   * `parallel:true` steps run concurrently). Each step's subagent receives the
+   * prior steps' results as context, and a per-step error is recorded without
+   * aborting the rest of the pipeline.
+   */
+  private async runPipelineDelegated(pipeline: Pipeline): Promise<void> {
+    await this.runDelegated(async ({ subagentTool, signal }) => {
+      this.addSystem(`▶ Running pipeline "${pipeline.name}" (${pipeline.steps.length} step(s))...`);
+
+      const results = await runPipeline(
+        pipeline,
+        async (step, prior) => {
+          if (signal.aborted) return "ERROR: cancelled";
+          const priorBlock = prior.length
+            ? "Prior step results:\n" +
+              prior.map((r) => `### ${r.name}\n${r.result}`).join("\n\n")
+            : "";
+          return subagentTool.execute(
+            {
+              task: step.prompt,
+              context: priorBlock || undefined,
+            },
+            signal
+          );
+        },
+        {
+          onStepStart: (s) =>
+            this.addSystem(`  • step "${s.name}"${s.parallel ? " (parallel)" : ""}...`),
+        }
+      );
+
+      let summary = `Pipeline "${pipeline.name}" complete (${results.length} step(s)):\n`;
+      for (const r of results) {
+        const first = r.result.split("\n")[0].slice(0, 200);
+        summary += `  ${r.result.startsWith("ERROR") ? "✗" : "✓"} ${r.name}: ${first}\n`;
+      }
+      this.addSystem(summary.trimEnd());
+    });
+  }
+
+  /**
    * V8: run the autonomous GSD pipeline (plan → implement → test → review → fix)
    * for a single task. Each phase is delegated to an isolated subagent (same
    * guarded + MCP-aware executor stack the main loop and pipelines use), receiving
@@ -1957,42 +1972,13 @@ export class TUIApp {
    * the review output signals a problem. Mirrors `runPipelineDelegated`'s wiring.
    */
   private async runGsdDelegated(task: string): Promise<void> {
-    this.isProcessing = true;
-    state.set("isProcessing", true);
-    this.ac = new AbortController(); // so Ctrl+C can cancel the GSD pipeline mid-run
-    this.renderInput();
-
-    try {
-      const config = getConfigManager().getAll();
-      const agentName = state.get("currentAgent");
-
-      // Connect MCP once (mirrors chatWithAI) so subagents see MCP tools too.
-      if (!this.mcpConnected) {
-        this.mcpConnected = true;
-        try {
-          await this.mcp.connect((config.mcp as Record<string, never>) || {});
-        } catch {
-          // non-fatal: continue with built-in tools only
-        }
-      }
-
-      // Same provider + guarded/MCP-aware executor + subagent stack the main loop uses.
-      const { subagentTool } = buildAgentBase({
-        config,
-        model: state.get("currentModel"),
-        agent: agentName,
-        mcp: this.mcp,
-        permissionMode: this.permissionMode,
-        projectRoot: this.projectRoot,
-        ask: (req, reason) => this.askPermission(req, reason),
-      });
-
+    await this.runDelegated(async ({ subagentTool, signal }) => {
       this.addSystem(`▶ Shipping: "${task}" — autonomous GSD pipeline (plan → implement → test → review → fix)...`);
 
       const results = await runGsd(
         task,
         async (phase, t, prior) => {
-          if (this.ac?.signal.aborted) return "ERROR: cancelled";
+          if (signal.aborted) return "ERROR: cancelled";
           const priorBlock = prior.length
             ? prior.map((p) => `### ${p.phase}\n${p.output}`).join("\n\n")
             : undefined;
@@ -2001,7 +1987,7 @@ export class TUIApp {
               task: buildPhasePrompt(phase, t, prior),
               context: priorBlock,
             },
-            this.ac?.signal
+            signal
           );
         },
         {
@@ -2022,17 +2008,7 @@ export class TUIApp {
         summary += "  (review was clean — no fix phase needed)\n";
       }
       this.addSystem(summary.trimEnd());
-
-      const activeId = sessionManager.getActiveSessionId();
-      if (activeId) sessionManager.markDirty(activeId);
-    } catch (err) {
-      this.addError(err instanceof Error ? err.message : String(err));
-    } finally {
-      this.ac = undefined;
-      this.isProcessing = false;
-      state.set("isProcessing", false);
-      this.renderInput();
-    }
+    });
   }
 
   /**
@@ -2043,36 +2019,11 @@ export class TUIApp {
    * stalls (stops changing anything). Cancellable with Ctrl+C.
    */
   private async runAutonomous(goal: string): Promise<void> {
-    this.isProcessing = true;
-    state.set("isProcessing", true);
-    this.ac = new AbortController();
-    this.renderInput();
-
-    try {
+    await this.runDelegated(async ({ subagentTool, signal }) => {
       const config = getConfigManager().getAll();
       const ap = config.autopilot ?? { maxIterations: 10, maxStalls: 2 };
       const maxIterations = Math.max(1, ap.maxIterations ?? 10);
       const maxStalls = Math.max(1, ap.maxStalls ?? 2);
-      const agentName = state.get("currentAgent");
-
-      if (!this.mcpConnected) {
-        this.mcpConnected = true;
-        try {
-          await this.mcp.connect((config.mcp as Record<string, never>) || {});
-        } catch {
-          // non-fatal: continue with built-in tools only
-        }
-      }
-
-      const { subagentTool } = buildAgentBase({
-        config,
-        model: state.get("currentModel"),
-        agent: agentName,
-        mcp: this.mcp,
-        permissionMode: this.permissionMode,
-        projectRoot: this.projectRoot,
-        ask: (req, reason) => this.askPermission(req, reason),
-      });
 
       this.addSystem(`🤖 {bold}Autopilot engaged.{/} Ctrl+C to stop.`);
 
@@ -2087,21 +2038,12 @@ export class TUIApp {
         costSpent: () => usageTracker.snapshot().estimatedCostUSD,
         resume: true, // auto-resume a prior interrupted run for the same goal
         runSubagent: (args, sig) => subagentTool.execute(args, sig),
-        signal: this.ac.signal,
+        signal,
         log: (m) => this.addSystem(m),
       });
 
       this.addSystem("\n" + summarizeAutopilot(result));
-      const activeId = sessionManager.getActiveSessionId();
-      if (activeId) sessionManager.markDirty(activeId);
-    } catch (err) {
-      this.addError(err instanceof Error ? err.message : String(err));
-    } finally {
-      this.ac = undefined;
-      this.isProcessing = false;
-      state.set("isProcessing", false);
-      this.renderInput();
-    }
+    });
   }
 
   private createNewTab(): void {
