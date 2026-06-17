@@ -394,4 +394,81 @@ describe("AgentRunner", () => {
     expect(toolResults[0]).not.toContain("AKIAIOSFODNN7EXAMPLE");
     expect(toolResults[0]).not.toContain("sk-ant-abc123def456ghi789jkl");
   });
+
+  it("(parallel) runs independent tool calls concurrently, not serially", async () => {
+    // Two slow tool calls in ONE assistant turn. If dispatched serially they
+    // take ~2x the delay; in parallel they overlap. Assert the wall-clock is
+    // closer to one delay than two, proving fan-out actually happens.
+    const DELAY = 120;
+    const tcs = [toolCall("bash", { command: "a" }), toolCall("bash", { command: "b" })];
+    const provider = new FakeProvider([
+      { content: "", model: "m", toolCalls: tcs },
+      { content: "done", model: "m" },
+    ]);
+    const ctx = new FakeContext();
+    const runner = new AgentRunner(
+      makeDeps(provider, ctx, {
+        executeTool: async (tc: ToolCall) => {
+          const start = Date.now();
+          await new Promise((r) => setTimeout(r, DELAY));
+          return {
+            role: "tool",
+            content: `ran ${tc.name} after ${Date.now() - start}ms`,
+            name: tc.name,
+          } as ChatMessage;
+        },
+        extractToolCalls: () => null,
+      }),
+      { maxRounds: 5 }
+    );
+
+    const start = Date.now();
+    await runner.run("go");
+    const elapsed = Date.now() - start;
+
+    // Both ran, and they overlapped: total < sum of the two delays (with slack
+    // for scheduling). Serial execution would be >= 2*DELAY.
+    expect(elapsed).toBeLessThan(DELAY * 2);
+  });
+
+  it("(parallel) emits toolStart for all calls before any toolResult, appends results in call order", async () => {
+    // Two calls where the SECOND resolves first. toolResult must still be
+    // emitted in call order (a, then b), and tool messages appended in order so
+    // OpenAI-style call/result linkage stays correct.
+    const tcs = [toolCall("bash", { command: "a" }, "id_a"), toolCall("bash", { command: "b" }, "id_b")];
+    const provider = new FakeProvider([
+      { content: "", model: "m", toolCalls: tcs },
+      { content: "done", model: "m" },
+    ]);
+    const ctx = new FakeContext();
+    const order: string[] = [];
+    const runner = new AgentRunner(
+      makeDeps(provider, ctx, {
+        executeTool: async (tc: ToolCall) => {
+          // 'b' finishes before 'a' to prove results are re-ordered to call order.
+          if (tc.id === "id_a") await new Promise((r) => setTimeout(r, 40));
+          return { role: "tool", content: `result-${tc.id}`, name: tc.name } as ChatMessage;
+        },
+        extractToolCalls: () => null,
+      }),
+      { maxRounds: 5 }
+    );
+    runner.on("toolStart", (name) => order.push(`start:${name}`));
+    runner.on("toolResult", (name) => order.push(`result:${name}`));
+
+    await runner.run("go");
+
+    // All starts announced before any result.
+    const firstResultIdx = order.findIndex((s) => s.startsWith("result:"));
+    expect(order.slice(0, firstResultIdx)).toEqual(["start:bash", "start:bash"]);
+    // Results in CALL order (a then b), despite b finishing first.
+    expect(order.slice(firstResultIdx)).toEqual(["result:bash", "result:bash"]);
+    // Context messages follow call order too.
+    const toolMsgs = ctx.messages.filter((m) => m.role === "tool");
+    expect(toolMsgs.map((m) => m.toolCallId)).toEqual(["id_a", "id_b"]);
+    expect(toolMsgs.map((m) => m.content)).toEqual([
+      "[Tool: bash]\nresult-id_a",
+      "[Tool: bash]\nresult-id_b",
+    ]);
+  });
 });

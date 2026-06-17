@@ -198,28 +198,57 @@ export class AgentRunner extends EventEmitter {
           break;
         }
 
-        // Run the tool loop, THEN emit roundEnd after it.
-        for (const tc of toolCalls!) {
-          if (signal?.aborted) {
-            stopReason = "aborted";
-            break;
-          }
+        // Run the round's tool calls in parallel (independent calls — e.g. the
+        // model fanning out several subagent/search/bash calls — execute
+        // concurrently for throughput). Results are collected position-indexed
+        // and then emitted/appended IN CALL ORDER so: (a) toolResult UI events
+        // stay deterministic, and (b) tool messages follow the same order as the
+        // assistant's tool_calls (OpenAI requires a result per call, in order).
+        // A single shared AbortSignal is checked before each call starts.
+        const calls = toolCalls!;
+        // Announce every call up front so the UI shows the full fan-out.
+        for (const tc of calls) this.emit("toolStart", tc.name, tc.arguments);
 
-          this.emit("toolStart", tc.name, tc.arguments);
-          const resultMsg = await this.executeTool(tc);
-          // Scrub secrets from untrusted tool output at the trust boundary:
-          // this single redaction covers the UI event, the message added to
-          // context (hence anything sent to a model provider), and anything
-          // the session manager persists to disk. A `bash`/`file` result that
-          // echoes AWS_KEY=AKIA... or a bearer token is masked before it can
-          // leave the process or be written to a transcript.
-          const resultText = redact(contentToText(resultMsg.content));
-          const ok = !resultText.startsWith("ERROR");
-          const firstLine = resultText.split("\n")[0].slice(0, 200);
-          this.emit("toolResult", tc.name, ok, firstLine, resultText);
-          this.context.addMessage("tool", `[Tool: ${resultMsg.name}]\n${resultText}`, {
-            toolCallId: tc.id,
-            name: tc.name,
+        const processed = await Promise.all(
+          calls.map(async (tc): Promise<{
+            tc: ToolCall;
+            text: string;
+            ok: boolean;
+            firstLine: string;
+            aborted: boolean;
+          } | null> => {
+            if (signal?.aborted) {
+              return { tc, text: "", ok: false, firstLine: "", aborted: true };
+            }
+            const resultMsg = await this.executeTool(tc);
+            // Scrub secrets from untrusted tool output at the trust boundary:
+            // this single redaction covers the UI event, the message added to
+            // context (hence anything sent to a model provider), and anything
+            // the session manager persists to disk. A `bash`/`file` result that
+            // echoes AWS_KEY=AKIA... or a bearer token is masked before it can
+            // leave the process or be written to a transcript.
+            const resultText = redact(contentToText(resultMsg.content));
+            return {
+              tc,
+              text: resultText,
+              ok: !resultText.startsWith("ERROR"),
+              firstLine: resultText.split("\n")[0].slice(0, 200),
+              aborted: false,
+            };
+          })
+        );
+
+        // Emit + append in original call order, not completion order.
+        for (const r of processed) {
+          if (!r) continue;
+          if (r.aborted) {
+            stopReason = "aborted";
+            continue;
+          }
+          this.emit("toolResult", r.tc.name, r.ok, r.firstLine, r.text);
+          this.context.addMessage("tool", `[Tool: ${r.tc.name}]\n${r.text}`, {
+            toolCallId: r.tc.id,
+            name: r.tc.name,
           });
         }
 
