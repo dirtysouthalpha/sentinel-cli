@@ -11,17 +11,20 @@ export class TabManager {
   private onSwitch: (session: Session) => void;
   private onClose: (sessionId: string) => void;
   private onCreate: () => void;
+  private onModalActive: (active: boolean) => void;
 
   constructor(options: {
     screen: blessed.Widgets.Screen;
     onSwitch: (session: Session) => void;
     onClose: (sessionId: string) => void;
     onCreate: () => void;
+    onModalActive?: (active: boolean) => void;
   }) {
     this.screen = options.screen;
     this.onSwitch = options.onSwitch;
     this.onClose = options.onClose;
     this.onCreate = options.onCreate;
+    this.onModalActive = options.onModalActive ?? (() => {});
 
     this.tabBar = createTabBar({
       screen: this.screen,
@@ -104,6 +107,8 @@ export class TabManager {
       screen: this.screen,
       currentTitle: session.title,
       existingTitles,
+      onOpen: () => this.onModalActive(true),
+      onClose: () => this.onModalActive(false),
       onConfirm: (newTitle) => {
         sessionManager.renameSession(sessionId, newTitle);
         this.refresh();

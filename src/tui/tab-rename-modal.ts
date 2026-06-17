@@ -8,11 +8,16 @@ export interface TabRenameModalOptions {
   existingTitles: string[];
   onConfirm: (newTitle: string) => void;
   onCancel: () => void;
+  /** Called when the modal opens/closes so the host can suppress its own input
+   *  handler — otherwise keystrokes double-feed the main input and Enter fires
+   *  a phantom AI turn. */
+  onOpen?: () => void;
+  onClose?: () => void;
 }
 
 export function showTabRenameModal(options: TabRenameModalOptions): void {
   const c = themeEngine.getBlessedColors();
-  const { screen, currentTitle, existingTitles, onConfirm, onCancel } = options;
+  const { screen, currentTitle, existingTitles, onConfirm, onCancel, onOpen, onClose } = options;
 
   const width = 50;
   const height = 7;
@@ -83,6 +88,7 @@ export function showTabRenameModal(options: TabRenameModalOptions): void {
     overlay.destroy();
     box.destroy();
     screen.render();
+    onClose?.();
   }
 
   function handleKey(ch: string, key: { name: string; full: string }): void {
@@ -115,12 +121,9 @@ export function showTabRenameModal(options: TabRenameModalOptions): void {
 
   screen.program.on("keypress", handleKey);
 
-  const originalCleanup = cleanup;
-  const wrappedCleanup = () => {
-    screen.program.removeListener("keypress", handleKey);
-    originalCleanup();
-  };
-
   overlay.on("destroy", () => screen.program.removeListener("keypress", handleKey));
   box.on("destroy", () => screen.program.removeListener("keypress", handleKey));
+
+  // Signal the host to suppress its own input handler while we're capturing keys.
+  onOpen?.();
 }

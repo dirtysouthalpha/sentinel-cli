@@ -125,6 +125,11 @@ export class TUIApp {
   // steps) — the second overwrote the first, which then never resolved.
   private permissionQueue: Array<{ label: string; reason: string; resolve: (allow: boolean) => void }> = [];
   private permissionActive = false;
+  // True while a modal (e.g. tab-rename) is capturing keypresses via its own
+  // screen.program listener. While set, the raw-stdin handler ignores input so
+  // keystrokes don't also feed the hidden main input buffer (and Enter doesn't
+  // double-submit: once to the modal, once as a billed AI turn).
+  private modalActive = false;
 
   // V11 semantic repo index (lite TF-IDF). Built lazily by /index or /search.
   private repoIndex?: RepoIndex;
@@ -200,6 +205,7 @@ export class TUIApp {
       onSwitch: (session) => this.onTabSwitch(session),
       onClose: (id) => this.onTabClose(id),
       onCreate: () => this.createNewTab(),
+      onModalActive: (active) => this.setModalActive(active),
     });
 
     this.tabBarWidget = this.tabManager.getTabBar();
@@ -720,6 +726,10 @@ export class TUIApp {
    * byte-by-byte loop that leaked `[A`/`[D` into the buffer.
    */
   private onInputChunk(chunk: string): void {
+    // A modal (tab-rename) is capturing input via its own screen.program
+    // listener; drop everything so keystrokes don't also edit the hidden main
+    // buffer and Enter doesn't fire a second, billed AI turn.
+    if (this.modalActive) return;
     let i = 0;
     while (i < chunk.length) {
       const ch = chunk[i];
@@ -1688,6 +1698,16 @@ export class TUIApp {
       this.permissionQueue.push({ label, reason, resolve });
       if (!this.permissionActive) this.showNextPermission();
     });
+  }
+
+  /**
+   * Toggle input suppression while a modal (tab-rename) is open. While active
+   * the raw-stdin handler ignores all keys so they aren't double-fed into the
+   * main input buffer (and Enter doesn't submit a phantom AI turn). Mirrors the
+   * permissionActive gate. Public so TabManager can call it around the modal.
+   */
+  setModalActive(active: boolean): void {
+    this.modalActive = active;
   }
 
   /** Render the prompt for the head of the permission queue (if any). */
