@@ -72,7 +72,7 @@ export class ContextManager {
     if (clamped >= this.messages.length) return 0;
     const dropped = this.messages.length - clamped;
     this.messages = this.messages.slice(0, clamped);
-    log.debug({ msg: "truncated context", kept: clamped, dropped });
+    log.debug(`truncated context (kept ${clamped}, dropped ${dropped})`);
     return dropped;
   }
 
