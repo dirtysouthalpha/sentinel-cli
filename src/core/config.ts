@@ -1,9 +1,10 @@
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { DEFAULT_CONFIG, SentinelConfig } from "./types.js";
 import { events } from "./events.js";
 import { createLogger } from "../utils/logger.js";
+import { writeAtomicFileSync } from "../utils/atomic-write.js";
 
 const log = createLogger({ prefix: "config" });
 
@@ -154,7 +155,10 @@ export class ConfigManager {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(path, JSON.stringify(this.config, null, 2), "utf-8");
+    // Atomic write (temp + rename) so a crash mid-save can't truncate the
+    // config — it holds provider API keys, and a torn file would lock the
+    // user out.
+    writeAtomicFileSync(path, JSON.stringify(this.config, null, 2));
     log.info(`Config saved to ${path}`);
   }
 

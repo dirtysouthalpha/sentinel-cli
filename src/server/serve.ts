@@ -54,6 +54,31 @@ export interface ServeOptions {
 }
 
 /**
+ * Accept loopback http(s) origins and Tauri's custom schemes; reject everything
+ * else so a malicious local web page can't open a WebSocket to the engine even
+ * if it recovers the token. Browsers always send Origin on ws://; non-browser
+ * clients (the Tauri shell, CLI drivers) typically omit it and are allowed by
+ * the caller's `origin &&` guard. Exported for tests.
+ */
+export function isAllowedOrigin(origin: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  // Node keeps the brackets in hostname for IPv6 literals (e.g. "[::1]");
+  // strip them for comparison.
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1") return true;
+  // Tauri renders the webview under a custom scheme (tauri://localhost or
+  // https://tauri.localhost on Windows).
+  if (parsed.protocol === "tauri:") return true;
+  if (host === "tauri.localhost") return true;
+  return false;
+}
+
+/**
  * Start the engine as a local WebSocket server. Providers/tools/registries must
  * already be initialized by the caller (cli.ts serve command). Prints a single
  * `{port, token, pid}` JSON line on stdout, then never writes to stdout again so
@@ -106,6 +131,16 @@ export async function runServe(opts: ServeOptions): Promise<{ port: number; toke
     const url = new URL(req.url || "/", "http://127.0.0.1");
     if (url.searchParams.get("token") !== token) {
       ws.close(1008, "bad token");
+      return;
+    }
+    // Origin allow-list: the engine listens on 127.0.0.1 only, but a malicious
+    // local web page could still try a cross-site WS handshake (browsers send
+    // Origin on ws://). Accept loopback / Tauri origins and clients that send
+    // no Origin (non-browser tools); reject anything else so a web page can't
+    // drive the engine even if it somehow learns the token.
+    const origin = req.headers.origin;
+    if (origin && !isAllowedOrigin(origin)) {
+      ws.close(1008, "bad origin");
       return;
     }
     new Connection(ws, projectRoot, mcp).start();

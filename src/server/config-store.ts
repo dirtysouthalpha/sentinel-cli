@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
+import { writeAtomicFileSync } from "../utils/atomic-write.js";
 
 /**
  * Read/write the GLOBAL Sentinel config (~/.config/sentinel/config.json) so
@@ -24,7 +25,7 @@ export function readGlobalConfig(): Record<string, unknown> {
 export function writeGlobalConfig(cfg: Record<string, unknown>): void {
   const p = globalConfigPath();
   mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, JSON.stringify(cfg, null, 2), "utf-8");
+  writeAtomicFileSync(p, JSON.stringify(cfg, null, 2));
 }
 
 type AnyRec = Record<string, unknown>;
