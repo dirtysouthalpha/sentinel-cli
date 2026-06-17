@@ -199,8 +199,8 @@ program
   .option("--max-steps <n>", "Maximum tool rounds")
   .option("--json", "Emit newline-delimited JSON events instead of text")
   .option("--project <path>", "Project root directory")
-  .option("--permission-mode <mode>", "Permission mode: yolo | auto | gated (default: yolo)")
-  .option("--yes", "Auto-approve permission prompts (non-interactive)")
+  .option("--permission-mode <mode>", "Permission mode: gated | auto | yolo (default: gated)")
+  .option("--yes", "Auto-approve permission prompts (non-interactive). Equivalent to --permission-mode yolo for unattended/CI runs")
   .action(async (task, opts, command) => {
     // --model/--project are also defined on the root command, so commander binds
     // them to the global opts; merge so subcommand flags are honored either way.
@@ -244,9 +244,12 @@ program
     const toolDefs = [...getToolDefinitions(), ...mcp.getToolDefs()];
     const mcpAware = createMcpAwareExecutor(mcp, executeToolCall);
 
-    // R2: enforce permissions + checkpoint mutations. Default mode is "yolo"
-    // (unchanged behavior); --permission-mode auto|gated turns on guardrails.
-    const mode: PermissionMode = (opts.permissionMode as PermissionMode) || "yolo";
+    // R2: enforce permissions + checkpoint mutations. Default mode is "gated"
+    // (reads allowed; edits/bash/network ask) so a headless run can't silently
+    // mutate the workspace or run commands without opt-in. --yes auto-approves
+    // the asks (the unattended/CI path). Pass --permission-mode yolo only when
+    // you explicitly want full auto-allow with no guardrails.
+    const mode: PermissionMode = (opts.permissionMode as PermissionMode) || "gated";
     const autoApprove = !!opts.yes;
     const engine = new PermissionEngine(mode, config.permissions as any, projectRoot);
     const checkpoints = new CheckpointManager(projectRoot);
