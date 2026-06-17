@@ -671,7 +671,7 @@ export class TUIApp {
 
     const activeId = sessionManager.getActiveSessionId();
     if (activeId) {
-      sessionManager.updateSessionCost(activeId, usage.totalTokens, turnCost);
+      sessionManager.updateSessionCost(activeId, usage, turnCost);
     }
 
     this.refreshStatus();
@@ -2114,13 +2114,10 @@ export class TUIApp {
     this.transcript = capTranscript(this.transcript, MAX_TRANSCRIPT_LINES);
     this.stickToBottom = true; // land at the live view when switching tabs
 
-    this.cost = {
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      requests: 0,
-      estimatedCostUSD: session.cost.estimatedCostUSD,
-    };
+    // Restore the FULL cost tracker from the session, not just dollars —
+    // previously token/request tallies were zeroed while cost survived, so
+    // /cost showed "0 tokens, 0 requests, $0.42" after a tab switch.
+    this.cost = { ...session.cost };
 
     this.refreshStatus();
     this.render();

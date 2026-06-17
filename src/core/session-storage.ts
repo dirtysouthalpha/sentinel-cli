@@ -14,7 +14,12 @@ export interface SessionData {
   model: string;
   agent: string;
   cost: {
+    // Full tracker; older persisted sessions may omit the extra fields (the
+    // loader defaults them to 0). Kept permissive so load never throws.
+    promptTokens?: number;
+    completionTokens?: number;
     totalTokens: number;
+    requests?: number;
     estimatedCostUSD: number;
   };
   context: SerializedContext | null;

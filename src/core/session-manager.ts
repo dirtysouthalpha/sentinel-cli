@@ -17,7 +17,13 @@ export interface Session {
   agent: string;
   pinned: boolean;
   cost: {
+    // Full cost tracker so tab switches restore token/request tallies, not
+    // just dollars. Older persisted sessions may have only totalTokens +
+    // estimatedCostUSD; callers default the missing fields to 0.
+    promptTokens: number;
+    completionTokens: number;
     totalTokens: number;
+    requests: number;
     estimatedCostUSD: number;
   };
   contextManager: ContextManager;
@@ -54,7 +60,7 @@ class SessionManager {
       model: options?.model || state.get("currentModel"),
       agent: options?.agent || state.get("currentAgent"),
       pinned: false,
-      cost: { totalTokens: 0, estimatedCostUSD: 0 },
+      cost: { promptTokens: 0, completionTokens: 0, totalTokens: 0, requests: 0, estimatedCostUSD: 0 },
       contextManager: new ContextManager(id),
     };
 
@@ -235,7 +241,16 @@ class SessionManager {
         model: data.model,
         agent: data.agent,
         pinned: data.pinned || false,
-        cost: data.cost || { totalTokens: 0, estimatedCostUSD: 0 },
+        // Normalize persisted cost: older sessions stored only {totalTokens,
+        // estimatedCostUSD}. Default the rest to 0 so tab switches restore a
+        // complete tracker instead of showing "0 tokens, 0 requests, $X".
+        cost: {
+          promptTokens: data.cost?.promptTokens ?? 0,
+          completionTokens: data.cost?.completionTokens ?? 0,
+          totalTokens: data.cost?.totalTokens ?? 0,
+          requests: data.cost?.requests ?? 0,
+          estimatedCostUSD: data.cost?.estimatedCostUSD ?? 0,
+        },
         contextManager,
       };
 
@@ -262,10 +277,27 @@ class SessionManager {
     state.set("sessions", sessionList);
   }
 
-  updateSessionCost(id: string, tokens: number, costUSD: number): void {
+  /**
+   * Accumulate one turn's usage into the session's cost tracker. Takes the full
+   * breakdown so tab switches can restore prompt/completion/request tallies,
+   * not just dollars. The legacy (tokens, costUSD) shape is normalized by the
+   * optional fields defaulting to 0.
+   */
+  updateSessionCost(
+    id: string,
+    usage: {
+      promptTokens?: number;
+      completionTokens?: number;
+      totalTokens?: number;
+    },
+    costUSD: number
+  ): void {
     const session = this.sessions.get(id);
     if (!session) return;
-    session.cost.totalTokens += tokens;
+    session.cost.promptTokens += usage.promptTokens ?? 0;
+    session.cost.completionTokens += usage.completionTokens ?? 0;
+    session.cost.totalTokens += usage.totalTokens ?? 0;
+    session.cost.requests += 1;
     session.cost.estimatedCostUSD += costUSD;
     session.updatedAt = Date.now();
     this.markDirty(id);

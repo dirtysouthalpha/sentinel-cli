@@ -537,7 +537,7 @@ class Connection {
     const turnCost = estimateCostUSD(state.get("currentModel") || "", u.promptTokens, u.completionTokens);
     this.cost.estimatedCostUSD += turnCost;
     const id = sessionManager.getActiveSessionId();
-    if (id) sessionManager.updateSessionCost(id, u.totalTokens, turnCost);
+    if (id) sessionManager.updateSessionCost(id, u, turnCost);
   }
 
   private touchSession(fn: (id: string) => void): void {
