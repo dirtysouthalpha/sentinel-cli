@@ -38,6 +38,21 @@ import {
 } from "./input.js";
 import { formatTokens, formatCost, humanizeToolCall, summarizeToolResult } from "./format.js";
 import { CommandHost } from "./commands/types.js";
+import {
+  handleCost,
+  handleUsage,
+  handleAbout,
+  handleContext,
+  handleCompact,
+  handleClear,
+  handleSetupHelp,
+  handleProviders,
+  handleTheme,
+  handlePermissions,
+  handlePlan,
+  handleCheckpoints,
+  handleUndo,
+} from "./commands/info.js";
 import { handleMarketplace, handleWorkspaceCommand, handleTeamCommand } from "./commands/registry-commands.js";
 import { handleExportCommand, handleBranchCommand } from "./commands/session-commands.js";
 import { handleCmdSearch } from "./commands/cmd-search.js";
@@ -1108,18 +1123,10 @@ export class TUIApp {
     }
 
     if (parsed.name === "clear") {
-      // Clear BOTH the visible transcript AND the conversation context the model
-      // receives. Previously this only reset the render buffer, so the model kept
-      // the full prior conversation — full token cost and "remembered" content
-      // after the user expected a clean slate.
-      this.getContextManager().clear();
-      this.cost = {
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-        requests: 0,
-        estimatedCostUSD: 0,
-      };
+      // Delegate the data reset (context + cost) to the extracted handler, then
+      // do the UI-only reset here (transcript/welcome). Keeps the B1 invariant
+      // — context is wiped, not just the render buffer — in one tested place.
+      handleClear(this.commandHost(), parsed.args);
       this.transcript = "";
       this.streamRaw = "";
       this.stream = "";
@@ -1131,13 +1138,7 @@ export class TUIApp {
     }
 
     if (parsed.name === "compact") {
-      const cm = this.getContextManager();
-      const before = cm.getMessageCount();
-      cm.compact();
-      const after = cm.getMessageCount();
-      this.addSystem(`Compacted: ${before} → ${after} messages.`);
-      const activeId = sessionManager.getActiveSessionId();
-      if (activeId) sessionManager.markDirty(activeId);
+      handleCompact(this.commandHost(), parsed.args);
       return;
     }
 
@@ -1152,26 +1153,17 @@ export class TUIApp {
     }
 
     if (parsed.name === "cost") {
-      this.addSystem(
-        [
-          "Session cost:",
-          `  Prompt:     ${this.cost.promptTokens.toLocaleString()} tokens`,
-          `  Completion: ${this.cost.completionTokens.toLocaleString()} tokens`,
-          `  Total:      ${this.cost.totalTokens.toLocaleString()} tokens`,
-          `  Requests:   ${this.cost.requests}`,
-          `  Est. cost:  $${this.cost.estimatedCostUSD.toFixed(4)}`,
-        ].join("\n")
-      );
+      handleCost(this.commandHost(), parsed.args);
       return;
     }
 
     if (parsed.name === "usage") {
-      this.addSystem(usageTracker.render());
+      handleUsage(this.commandHost(), parsed.args);
       return;
     }
 
     if (parsed.name === "about") {
-      this.addSystem(buildAbout(VERSION));
+      handleAbout(this.commandHost(), parsed.args);
       return;
     }
 
@@ -1209,79 +1201,30 @@ export class TUIApp {
     }
 
     if (parsed.name === "context") {
-      const cm = this.getContextManager();
-      const msgs = cm.getMessages();
-      const totalChars = msgs.reduce((sum, m) => sum + m.content.length, 0);
-      this.addSystem(
-        [
-          "Context:",
-          `  Messages: ${msgs.length}`,
-          `  Size: ~${Math.ceil(totalChars / 4)} tokens`,
-          "  Auto-compacts as it fills.",
-        ].join("\n")
-      );
+      handleContext(this.commandHost(), parsed.args);
       return;
     }
 
     // /setup shows provider-connection help. /connect (below) handles the
     // keyless Claude OAuth router and the generic help for a bare /connect.
     if (parsed.name === "setup") {
-      this.addSystem(
-        [
-          "Connect an AI provider:",
-          "  Wizard:  run  node dist/cli.js setup  in a terminal",
-          "  Env var: set ZAI_API_KEY=your-key  (or ANTHROPIC_API_KEY / OPENAI_API_KEY)",
-          "  Config:  add a provider block to sentinel.json",
-          "  Then switch with:  /model zai/glm-4.6",
-        ].join("\n")
-      );
+      handleSetupHelp(this.commandHost(), parsed.args);
       return;
     }
 
     if (parsed.name === "theme") {
-      const name = parsed.args[0];
-      if (!name) {
-        let list = "Themes:\n";
-        for (const t of themeEngine.getAllThemes()) {
-          const cur = t.name === themeEngine.getTheme().name ? "  ←" : "";
-          list += `  ${t.name.padEnd(12)} ${t.display}${cur}\n`;
-        }
-        this.addSystem(list.trimEnd());
-        return;
-      }
-      if (themeEngine.setTheme(name)) {
-        state.set("currentTheme", name);
-        this.addSystem(`Theme → ${themeEngine.getTheme().display}`);
-      } else {
-        this.addError(`Unknown theme: ${name}`);
-      }
+      handleTheme(this.commandHost(), parsed.args);
       return;
     }
 
     if (parsed.name === "permissions" || parsed.name === "perms") {
-      const mode = parsed.args[0];
-      if (!mode) {
-        this.addSystem(`Permission mode: ${this.permissionMode}  (yolo | auto | gated | plan)`);
-        return;
-      }
-      if (mode === "yolo" || mode === "auto" || mode === "gated" || mode === "plan") {
-        this.permissionMode = mode;
-        this.addSystem(`Permission mode → ${mode}`);
-      } else {
-        this.addError(`Unknown mode: ${mode}. Use yolo | auto | gated | plan.`);
-      }
+      handlePermissions(this.commandHost(), parsed.args);
       return;
     }
 
     // /plan toggles read-only research mode; /plan off restores yolo.
     if (parsed.name === "plan") {
-      if (parsed.args[0] === "off") {
-        this.permissionMode = "yolo";
-        this.addSystem("Plan mode off → yolo. Edits/commands re-enabled.");
-      } else {
-        this.permissionMode = "plan";
-        this.addSystem("Plan mode on (read-only). I'll research and propose a plan; edits/commands are blocked until you `/plan off`.");
-      }
+      handlePlan(this.commandHost(), parsed.args);
       return;
     }
 
@@ -1335,26 +1278,12 @@ export class TUIApp {
     }
 
     if (parsed.name === "checkpoints") {
-      const cps = new CheckpointManager(this.projectRoot).list();
-      if (cps.length === 0) {
-        this.addSystem("No checkpoints yet. They're created when the agent edits files.");
-        return;
-      }
-      let msg = `Checkpoints (${cps.length}, newest last):\n`;
-      for (const c of cps) {
-        msg += `  ${c.id}  ${c.tool.padEnd(6)} ${c.existed ? "edit  " : "create"}  ${c.path}\n`;
-      }
-      this.addSystem(msg.trimEnd());
+      handleCheckpoints(this.commandHost(), parsed.args);
       return;
     }
 
     if (parsed.name === "undo") {
-      const cp = new CheckpointManager(this.projectRoot).undoLast();
-      if (!cp) {
-        this.addSystem("Nothing to undo.");
-        return;
-      }
-      this.addSystem(`Undid ${cp.tool} ${cp.existed ? "edit" : "create"} of ${cp.path}`);
+      handleUndo(this.commandHost(), parsed.args);
       return;
     }
 
@@ -1433,12 +1362,7 @@ export class TUIApp {
     }
 
     if (parsed.name === "providers") {
-      const available = providerManager.getAvailableProviderNames();
-      let msg = "Providers:\n";
-      for (const name of providerManager.getAllProviderNames()) {
-        msg += `  ${name.padEnd(12)} ${available.includes(name) ? "ok" : "no key"}\n`;
-      }
-      this.addSystem(msg.trimEnd());
+      handleProviders(this.commandHost(), parsed.args);
       return;
     }
 
@@ -1640,6 +1564,29 @@ export class TUIApp {
       addSystem: (t) => this.addSystem(t),
       addError: (t) => this.addError(t),
       chatWithAI: (m) => this.chatWithAI(m),
+      getCost: () => this.cost,
+      resetCost: () => {
+        this.cost = {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          requests: 0,
+          estimatedCostUSD: 0,
+        };
+      },
+      getContext: () => this.getContextManager(),
+      markSessionDirty: () => {
+        const id = sessionManager.getActiveSessionId();
+        if (id) sessionManager.markDirty(id);
+      },
+      requestRender: () => {
+        this.refreshStatus();
+        this.scheduleRender();
+      },
+      getPermissionMode: () => this.permissionMode,
+      setPermissionMode: (mode) => {
+        this.permissionMode = mode;
+      },
     };
   }
 

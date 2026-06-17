@@ -192,6 +192,11 @@ export class ContextManager {
     return this.messages.reduce((sum, m) => sum + (m.tokenEstimate || estimateTokens(m.content)), 0);
   }
 
+  /** Sum of raw content character counts (for /context display). */
+  getCharTotal(): number {
+    return this.messages.reduce((sum, m) => sum + m.content.length, 0);
+  }
+
   getMessageCount(): number {
     return this.messages.length;
   }
