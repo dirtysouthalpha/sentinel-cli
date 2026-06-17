@@ -1,5 +1,6 @@
 import { AIProvider, ChatMessage, ToolCall, ToolDef } from "../ai/types.js";
 import { AgentRunner, ContextManagerLike } from "./agent-runner.js";
+import { agentRegistry } from "../agents/registry.js";
 
 /**
  * Subagents (V1 orchestration core). The model can delegate a focused sub-task to
@@ -231,6 +232,14 @@ export function createSubagentTool(deps: SubagentDeps): SubagentToolHandle {
         type: "object",
         properties: {
           task: { type: "string", description: "The complete, self-contained task for the subagent to perform." },
+          agent: {
+            type: "string",
+            description:
+              "Optional: name of a registered specialist agent to delegate to (e.g. 'architect', 'code', 'debug'). " +
+              "When set, the subagent runs with THAT agent's system prompt and step budget instead of the " +
+              "generic subagent framing — so an orchestrator can actually target a specialist. Omit for a " +
+              "general-purpose subagent.",
+          },
           context: { type: "string", description: "Optional background the subagent needs (paths, constraints, prior findings)." },
           outputSchema: {
             type: "object",
@@ -264,8 +273,27 @@ export function createSubagentTool(deps: SubagentDeps): SubagentToolHandle {
       : "";
 
     const context = new IsolatedContext();
-    const sys = deps.systemPrompt ? `${deps.systemPrompt}\n\n${DEFAULT_SUBAGENT_PROMPT}` : DEFAULT_SUBAGENT_PROMPT;
+
+    // Resolve a named specialist agent (the orchestrator pattern): when `agent`
+    // names a registered agent, the subagent runs under THAT agent's system
+    // prompt + step budget, not the generic framing. Previously the subagent
+    // always inherited the parent's prompt, so orchestrator.md's "delegate to
+    // the architect/code specialist" described a capability the runtime lacked.
+    const agentName = typeof args.agent === "string" ? args.agent.trim() : "";
+    const specialist = agentName ? agentRegistry.get(agentName) : undefined;
+    if (agentName && !specialist) {
+      return `ERROR: unknown agent "${agentName}". Available: ${agentRegistry.getNames().join(", ") || "(none)"}`;
+    }
+    const basePrompt = specialist?.systemPrompt ?? deps.systemPrompt ?? "";
+    const subagentFraming = specialist ? "" : `\n\n${DEFAULT_SUBAGENT_PROMPT}`;
+    const sys = basePrompt ? `${basePrompt}${subagentFraming}` : DEFAULT_SUBAGENT_PROMPT;
     context.setSystemPrompt(sys);
+
+    // Prefer the specialist's step budget when delegated, then the deps default.
+    const rounds = specialist?.steps
+      ? Math.max(1, Math.floor(specialist.steps))
+      : deps.maxRounds ?? 10;
+    const model = specialist?.model ?? deps.model;
 
     const runner = new AgentRunner(
       {
@@ -275,7 +303,7 @@ export function createSubagentTool(deps: SubagentDeps): SubagentToolHandle {
         executeTool: deps.executeTool,
         extractToolCalls: deps.extractToolCalls,
       },
-      { model: deps.model, maxRounds: deps.maxRounds ?? 10, maxContextTokens: 120000 }
+      { model, maxRounds: rounds, maxContextTokens: 120000 }
     );
     if (deps.onUsage) runner.on("usage", deps.onUsage);
 

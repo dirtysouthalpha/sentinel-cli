@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createSubagentTool, createSubagentAwareExecutor, SUBAGENT_TOOL_NAME } from "../src/core/subagent.js";
+import { agentRegistry } from "../src/agents/registry.js";
 import {
   AIProvider,
   ChatMessage,
@@ -114,5 +115,63 @@ describe("subagent", () => {
     const delegated = await exec(tc(SUBAGENT_TOOL_NAME, { task: "do it" }));
     expect(delegated.content).toBe("done");
     expect(baseCalled).toBe(1); // base NOT called for the subagent tool
+  });
+
+  it("delegates to a named specialist agent's system prompt (orchestrator pattern)", async () => {
+    // Register a specialist with a distinctive prompt + step budget.
+    agentRegistry.register({
+      name: "architect-test",
+      description: "x",
+      mode: "primary",
+      systemPrompt: "YOU ARE THE ARCHITECT SPECIALIST.",
+      steps: 7,
+      source: "builtin",
+    });
+    const provider = new FakeProvider([{ content: "designed the module split", model: "m" }]);
+    const handle = createSubagentTool({
+      provider,
+      toolDefs: [],
+      executeTool: async (c) => ({ role: "tool", content: "", name: c.name }),
+      extractToolCalls: () => null,
+      systemPrompt: "PARENT BASE PROMPT",
+      maxRounds: 3,
+    });
+
+    const out = await handle.execute({ task: "design X", agent: "architect-test" });
+    expect(out).toBe("designed the module split");
+
+    // The child ran under the SPECIALIST's prompt, NOT the parent's, and the
+    // generic subagent framing was omitted (specialist framing is authoritative).
+    const sys = provider.seenMessages[0][0];
+    expect(sys.role).toBe("system");
+    expect(sys.content).toContain("YOU ARE THE ARCHITECT SPECIALIST.");
+    expect(sys.content).not.toContain("PARENT BASE PROMPT");
+    expect(sys.content).not.toContain("focused subagent");
+
+    agentRegistry.clear();
+  });
+
+  it("rejects delegation to an unknown agent with the list of available names", async () => {
+    agentRegistry.register({
+      name: "only-one",
+      description: "x",
+      mode: "primary",
+      systemPrompt: "p",
+      source: "builtin",
+    });
+    const provider = new FakeProvider([{ content: "should not run", model: "m" }]);
+    const handle = createSubagentTool({
+      provider,
+      toolDefs: [],
+      executeTool: async (c) => ({ role: "tool", content: "", name: c.name }),
+      extractToolCalls: () => null,
+    });
+
+    const out = await handle.execute({ task: "x", agent: "nonexistent" });
+    expect(out).toMatch(/unknown agent "nonexistent"/);
+    expect(out).toContain("only-one");
+    expect(provider.calls).toBe(0); // never invoked the model
+
+    agentRegistry.clear();
   });
 });
