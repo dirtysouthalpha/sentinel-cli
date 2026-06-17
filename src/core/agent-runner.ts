@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import { AIProvider, ChatMessage, ChatResponse, ToolCall, ToolDef, contentToText } from "../ai/types.js";
+import { redact } from "./redact.js";
 
 /** Heuristic: did the provider reject the request for being too long for the model's context? */
 function isContextOverflow(err: unknown): boolean {
@@ -206,7 +207,13 @@ export class AgentRunner extends EventEmitter {
 
           this.emit("toolStart", tc.name, tc.arguments);
           const resultMsg = await this.executeTool(tc);
-          const resultText = contentToText(resultMsg.content);
+          // Scrub secrets from untrusted tool output at the trust boundary:
+          // this single redaction covers the UI event, the message added to
+          // context (hence anything sent to a model provider), and anything
+          // the session manager persists to disk. A `bash`/`file` result that
+          // echoes AWS_KEY=AKIA... or a bearer token is masked before it can
+          // leave the process or be written to a transcript.
+          const resultText = redact(contentToText(resultMsg.content));
           const ok = !resultText.startsWith("ERROR");
           const firstLine = resultText.split("\n")[0].slice(0, 200);
           this.emit("toolResult", tc.name, ok, firstLine, resultText);

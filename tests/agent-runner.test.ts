@@ -360,4 +360,38 @@ describe("AgentRunner", () => {
     expect(result.stopReason).toBe("no_tool_calls");
     expect(result.finalContent).toBe("all done");
   });
+
+  it("(redact) scrubs secrets from tool output before it reaches context/provider/transcript", async () => {
+    // A bash result that echoes a real-looking AWS key + bearer token. The
+    // secret must be masked in (a) the toolResult event and (b) the tool
+    // message added to context — the same message a provider receives and a
+    // session manager persists. This is the S2 trust-boundary invariant.
+    const leaky = "export AWS_SECRET_KEY=AKIAIOSFODNN7EXAMPLE\nAuthorization: Bearer sk-ant-abc123def456ghi789jkl";
+    const tc = toolCall("bash", { command: "env" });
+    const provider = new FakeProvider([
+      { content: "", model: "m", toolCalls: [tc] },
+      { content: "done", model: "m" },
+    ]);
+    const ctx = new FakeContext();
+    const toolResults: string[] = [];
+    const runner = new AgentRunner(
+      makeDeps(provider, ctx, {
+        executeTool: (_tc: ToolCall) =>
+          Promise.resolve({ role: "tool", content: leaky, name: "bash" } as ChatMessage),
+      }),
+      { maxRounds: 5 }
+    );
+    runner.on("toolResult", (_n, _ok, _first, full) => toolResults.push(full));
+
+    await runner.run("go");
+
+    // The raw AKIA / sk-ant tokens must never appear downstream.
+    const toolMsg = ctx.messages.find((m) => m.role === "tool")!.content;
+    expect(toolMsg).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(toolMsg).not.toContain("sk-ant-abc123def456ghi789jkl");
+    // The masked form keeps a short prefix for debuggability.
+    expect(toolMsg).toContain("sk-a");
+    expect(toolResults[0]).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(toolResults[0]).not.toContain("sk-ant-abc123def456ghi789jkl");
+  });
 });
