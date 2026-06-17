@@ -25,6 +25,7 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
           lineEnd: { type: "number", description: "Ending line number (for edit/preview actions)" },
           searchLines: { type: "array", description: "List of lines to find (for edit/preview actions)" },
           strictWhitespace: { type: "boolean", description: "Require exact whitespace match" },
+          replaceAll: { type: "boolean", description: "Replace every occurrence (for edit). Default false: editing is refused if the search text appears more than once, to avoid editing the wrong one" },
         },
         required: ["action", "path"],
       },

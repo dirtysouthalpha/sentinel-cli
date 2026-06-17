@@ -120,15 +120,34 @@ export function createFileTool(projectRoot: string): ToolDef {
             const lineStart = (args.lineStart as number | undefined);
             const lineEnd = (args.lineEnd as number | undefined);
 
+            // Line-range edits are positional: splice the target lines out and
+            // the replacement text in by index. This must NOT go through the
+            // text-match path below — content.replace() would hit the first
+            // textual occurrence, which is the wrong line when an earlier line
+            // repeats the same text.
+            if (lineStart !== undefined && lineEnd !== undefined) {
+              const lines = content.split("\n");
+              const start = Math.max(1, lineStart);
+              const end = Math.min(lines.length, lineEnd);
+              if (start > end || start > lines.length) {
+                return { success: false, output: "", error: `Line range ${lineStart}-${lineEnd} out of bounds (file has ${lines.length} lines)` };
+              }
+              const oldLines = lines.slice(start - 1, end);
+              const replaced = lines.slice(0, start - 1)
+                .concat(replaceText.split("\n"))
+                .concat(lines.slice(end));
+              writeFileSync(path, replaced.join("\n"), encoding);
+              return {
+                success: true,
+                output: `Edited ${path} (lines ${start}-${end}: ${oldLines.length} -> ${replaceText.split("\n").length} lines)`,
+                data: { editedLines: start, bytesChanged: replaceText.length - oldLines.join("\n").length },
+              };
+            }
+
             let actualOldText: string;
             let searchResult: { found: boolean; matchLine?: number; matchStart?: number };
 
-            if (lineStart !== undefined && lineEnd !== undefined) {
-              const lines = content.split("\n");
-              const selectedLines = lines.slice(lineStart - 1, lineEnd);
-              actualOldText = selectedLines.join("\n");
-              searchResult = { found: true, matchLine: lineStart };
-            } else if (searchLines.length > 0) {
+            if (searchLines.length > 0) {
               actualOldText = searchLines.join("\n");
               searchResult = { found: true };
             } else if (anchorHash) {
@@ -176,7 +195,28 @@ export function createFileTool(projectRoot: string): ToolDef {
               return { success: false, output: "", error: `Text not found in file. Check content and whitespace.` };
             }
 
-            const newContent = content.replace(actualOldText, replaceText);
+            // Uniqueness guard (mirrors the patch tool): if the match text
+            // appears more than once, refuse rather than silently editing the
+            // first occurrence — which is the wrong one half the time. Opt in to
+            // replace-all explicitly. (Line-range edits are handled above and
+            // bypass this entirely.)
+            const replaceAll = !!args.replaceAll;
+            if (!replaceAll) {
+              const occurrences = content.split(actualOldText).length - 1;
+              if (occurrences > 1) {
+                return {
+                  success: false,
+                  output: "",
+                  error:
+                    `Found ${occurrences} occurrences of the search text. ` +
+                    `Provide more surrounding context for a unique match, or set replaceAll: true to replace all.`,
+                };
+              }
+            }
+
+            const newContent = replaceAll
+              ? content.split(actualOldText).join(replaceText)
+              : content.replace(actualOldText, replaceText);
             writeFileSync(path, newContent, encoding);
 
             return {
