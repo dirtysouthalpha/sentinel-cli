@@ -42,6 +42,20 @@ class AgentRegistry {
     return this.getAll().filter((a) => a.mode === mode);
   }
 
+  /**
+   * Resolve the agentic-loop round budget for an agent. Honors the agent's
+   * `steps` frontmatter (parsed by the loader but historically ignored — both
+   * call sites used the hardcoded `gsd ? 30 : 15`). Falls back to that legacy
+   * default so behavior is unchanged for agents without a `steps` field, and
+   * clamps to a sane minimum.
+   */
+  roundsFor(name: string, fallback = name === "gsd" ? 30 : 15): number {
+    const agent = this.agents.get(name);
+    const steps = agent?.steps;
+    if (typeof steps === "number" && steps >= 1) return Math.max(1, Math.floor(steps));
+    return fallback;
+  }
+
   clear(): void {
     this.agents.clear();
   }

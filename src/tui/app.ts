@@ -1804,7 +1804,7 @@ export class TUIApp {
           executeTool: topExecute,
           extractToolCalls,
         },
-        { model: runnerModel, maxRounds: agentName === "gsd" ? 30 : 15, maxContextTokens: 84000 }
+        { model: runnerModel, maxRounds: agentRegistry.roundsFor(agentName), maxContextTokens: 84000 }
       );
 
       this.ac = new AbortController();

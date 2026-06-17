@@ -318,7 +318,9 @@ program
       ? createHookAwareExecutor(config.hooks, parentExecute, defaultRunShell)
       : parentExecute;
 
-    const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : agentName === "gsd" ? 30 : 15;
+    // Honor the agent's `steps` frontmatter (e.g. orchestrator=80, gsd=50)
+    // instead of the hardcoded gsd?30:15. --max-steps still overrides.
+    const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : agentRegistry.roundsFor(agentName);
     const runner = new AgentRunner(
       {
         provider,
