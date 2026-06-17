@@ -1,11 +1,28 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { createInterface } from "readline";
 import { DEFAULT_CONFIG, SentinelConfig } from "../core/types.js";
+import { getSecretStore } from "../core/secrets/store.js";
+import { providerKeyName } from "../core/secrets/resolver.js";
+import { writeAtomicFileSync } from "../utils/atomic-write.js";
 
 const CONFIG_DIR = join(homedir(), ".config", "sentinel");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+
+/**
+ * Persist a provider API key to the platform secret store and return the
+ * `keyring://<provider>` marker to write into config (so the config never holds
+ * the plaintext). Falls back to the plaintext value if no store is available —
+ * logged loudly so the user knows their key is on disk.
+ */
+async function storeKey(provider: string, value: string): Promise<string> {
+  const store = await getSecretStore();
+  const ok = await store.set(providerKeyName(provider), value.trim());
+  if (ok) return `keyring://${provider}`;
+  console.warn(`  ! could not use ${store.kind}; key will be stored as PLAINTEXT in config.`);
+  return value.trim();
+}
 
 function question(prompt: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -28,7 +45,7 @@ function saveConfig(config: SentinelConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  writeAtomicFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
   console.log(`\n  Config saved to ${CONFIG_FILE}`);
 }
 
@@ -50,9 +67,10 @@ export async function runSetup(): Promise<void> {
   console.log("");
   const zaiKey = await question("  Z.ai API key (or Enter to skip): ");
   if (zaiKey) {
+    const storedApiKey = await storeKey("zai", zaiKey);
     if (!config.provider) config.provider = {};
     (config.provider as Record<string, unknown>).zai = {
-      options: { apiKey: zaiKey },
+      options: { apiKey: storedApiKey },
       models: {
         "glm-5.1": { name: "GLM-5.1 (Most Capable)" },
         "glm-4.6": { name: "GLM-4.6 (Recommended)" },
@@ -75,9 +93,10 @@ export async function runSetup(): Promise<void> {
   console.log("");
   const anthropicKey = await question("  Anthropic API key (or Enter to skip): ");
   if (anthropicKey) {
+    const storedApiKey = await storeKey("anthropic", anthropicKey);
     if (!config.provider) config.provider = {};
     (config.provider as Record<string, unknown>).anthropic = {
-      options: { apiKey: anthropicKey },
+      options: { apiKey: storedApiKey },
       models: {
         "claude-sonnet": { name: "Claude Sonnet" },
         "claude-haiku": { name: "Claude Haiku" },
@@ -96,9 +115,10 @@ export async function runSetup(): Promise<void> {
   console.log("");
   const openaiKey = await question("  OpenAI API key (or Enter to skip): ");
   if (openaiKey) {
+    const storedApiKey = await storeKey("openai", openaiKey);
     if (!config.provider) config.provider = {};
     (config.provider as Record<string, unknown>).openai = {
-      options: { apiKey: openaiKey },
+      options: { apiKey: storedApiKey },
       models: {
         "gpt-4o": { name: "GPT-4o" },
         "gpt-4o-mini": { name: "GPT-4o Mini" },
@@ -145,9 +165,10 @@ export async function runSetup(): Promise<void> {
     const customUrl = await question("  API base URL: ");
     const customKey = await question("  API key: ");
     if (customName && customUrl) {
+      const storedApiKey = customKey ? await storeKey(customName, customKey) : undefined;
       if (!config.provider) config.provider = {};
       (config.provider as Record<string, unknown>)[customName] = {
-        options: { baseURL: customUrl, apiKey: customKey },
+        options: { baseURL: customUrl, ...(storedApiKey ? { apiKey: storedApiKey } : {}) },
         models: {},
       };
       console.log(`  OK ${customName} configured`);

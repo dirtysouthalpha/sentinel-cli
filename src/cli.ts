@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { TUIApp } from "./tui/app.js";
 import { getConfigManager } from "./core/config.js";
+import type { SentinelConfig } from "./core/types.js";
 import { state } from "./core/state.js";
 import { events } from "./core/events.js";
 import { providerManager } from "./ai/provider.js";
@@ -41,6 +42,7 @@ import { runAutopilotSession, summarizeAutopilot } from "./core/autopilot-sessio
 import { usageTracker } from "./core/usage-tracker.js";
 import { estimateCostUSD } from "./core/pricing.js";
 import { writeRouterConfig, routerStartHelp, probeRouter, DEFAULT_ROUTER_URL } from "./core/router-connect.js";
+import { primeEnvFromKeyring, migrateLegacyKeys, applyScrubMarker } from "./core/secrets/bootstrap.js";
 import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
@@ -68,6 +70,28 @@ function loadRegistries(installRoot: string, skillPaths: string[]): void {
   const agents = loadAllAgents(installRoot);
   for (const agent of agents) {
     agentRegistry.register(agent);
+  }
+}
+
+/**
+ * Resolve provider keys before initializeFromConfig: prime process.env from the
+ * platform secret store (keyring/DPAPI/encrypted file), and run the one-time
+ * migration that scrubs legacy plaintext out of config.json. Safe to call on
+ * every agent-loop start — migration is idempotent, env priming skips vars
+ * already set. Errors are non-fatal: env/plaintext still work as before.
+ */
+async function bootstrapKeys(config: SentinelConfig, projectRoot: string): Promise<void> {
+  try {
+    await primeEnvFromKeyring(config.provider as Record<string, unknown>);
+    const scrub = await migrateLegacyKeys(config.provider as Record<string, unknown>);
+    if (scrub.length > 0) {
+      // Persist the scrubbed config so plaintext keys are gone for good.
+      applyScrubMarker(config.provider as Record<string, unknown>, scrub);
+      getConfigManager(projectRoot).save();
+      log.info(`scrubbed plaintext keys for ${scrub.join(", ")} (moved to secret store)`);
+    }
+  } catch (err) {
+    log.warn(`key bootstrap failed (continuing with env/plaintext): ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -207,6 +231,7 @@ program
     const merged = command.optsWithGlobals();
     const projectRoot = merged.project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
+    await bootstrapKeys(config, projectRoot);
     providerManager.initializeFromConfig(config.provider as any);
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
@@ -374,6 +399,7 @@ program
     const merged = command.optsWithGlobals();
     const projectRoot = merged.project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
+    await bootstrapKeys(config, projectRoot);
     providerManager.initializeFromConfig(config.provider as any);
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
@@ -560,6 +586,7 @@ program
     setLogLevel("silent");
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
+    await bootstrapKeys(config, projectRoot);
     providerManager.initializeFromConfig(config.provider as any);
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
@@ -579,6 +606,7 @@ program
     setLogLevel("warn");
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
+    await bootstrapKeys(config, projectRoot);
     providerManager.initializeFromConfig(config.provider as any);
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
@@ -622,6 +650,7 @@ async function runMain(options: {
     state.set("currentAgent", config.default_agent);
   }
 
+  await bootstrapKeys(config, projectRoot);
   providerManager.initializeFromConfig(config.provider as any);
 
   toolManager.initialize(projectRoot);
