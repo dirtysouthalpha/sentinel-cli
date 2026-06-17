@@ -32,7 +32,7 @@ class ToolManager {
     this.register(createSearchTool(projectRoot));
     this.register(createWebTool());
     this.register(createPatchTool(projectRoot));
-    this.register(createBrowserTool());
+    this.register(createBrowserTool(projectRoot));
     log.info(`Initialized ${this.tools.size} tools`);
   }
 
