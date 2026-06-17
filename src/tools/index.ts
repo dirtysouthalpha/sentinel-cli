@@ -1,6 +1,6 @@
 import { ToolDef } from "./types.js";
 import { createFileTool } from "./file.js";
-import { createBashTool } from "./bash.js";
+import { createBashTool, BashToolOptions } from "./bash.js";
 import { createGitTool } from "./git.js";
 import { createSearchTool } from "./search.js";
 import { createWebTool } from "./web.js";
@@ -24,16 +24,16 @@ class ToolManager {
     return ToolManager.instance;
   }
 
-  initialize(projectRoot: string): void {
+  initialize(projectRoot: string, bashOpts: BashToolOptions = {}): void {
     this.tools.clear();
     this.register(createFileTool(projectRoot));
-    this.register(createBashTool(projectRoot));
+    this.register(createBashTool(projectRoot, bashOpts));
     this.register(createGitTool(projectRoot));
     this.register(createSearchTool(projectRoot));
     this.register(createWebTool());
     this.register(createPatchTool(projectRoot));
     this.register(createBrowserTool(projectRoot));
-    log.info(`Initialized ${this.tools.size} tools`);
+    log.info(`Initialized ${this.tools.size} tools${bashOpts.sandbox ? " (bash sandboxed)" : ""}`);
   }
 
   register(tool: ToolDef): void {

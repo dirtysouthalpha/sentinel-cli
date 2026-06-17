@@ -225,6 +225,8 @@ program
   .option("--project <path>", "Project root directory")
   .option("--permission-mode <mode>", "Permission mode: gated | auto | yolo (default: gated)")
   .option("--yes", "Auto-approve permission prompts (non-interactive). Equivalent to --permission-mode yolo for unattended/CI runs")
+  .option("--sandbox", "Run bash commands in a bubblewrap sandbox (Linux+bwrap): FS confined to project, network blocked. Recommended for unattended runs")
+  .option("--sandbox-net", "Allow network inside the sandbox (for installs/fetches); pairs with --sandbox")
   .action(async (task, opts, command) => {
     // --model/--project are also defined on the root command, so commander binds
     // them to the global opts; merge so subcommand flags are honored either way.
@@ -233,7 +235,10 @@ program
     const config = getConfigManager(projectRoot).load();
     await bootstrapKeys(config, projectRoot);
     providerManager.initializeFromConfig(config.provider as any);
-    toolManager.initialize(projectRoot);
+    toolManager.initialize(projectRoot, {
+      sandbox: !!opts.sandbox,
+      sandboxAllowNetwork: !!opts.sandboxNet,
+    });
     loadRegistries(getInstallRoot(), config.skills.paths);
 
     const explicitModel = merged.model as string | undefined;
@@ -395,13 +400,22 @@ program
   .option("--max-minutes <n>", "Stop after this many wall-clock minutes")
   .option("--max-cost <usd>", "Stop after this estimated spend (USD)")
   .option("--resume", "Resume a prior interrupted run for the same goal")
+  .option("--sandbox", "Run bash in a bubblewrap sandbox (FS confined to project, network blocked). Default ON for autopilot when bwrap is available")
+  .option("--no-sandbox", "Disable the autopilot sandbox even when bwrap is available")
+  .option("--sandbox-net", "Allow network inside the sandbox (installs/fetches)")
   .action(async (goal, opts, command) => {
     const merged = command.optsWithGlobals();
     const projectRoot = merged.project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
     await bootstrapKeys(config, projectRoot);
     providerManager.initializeFromConfig(config.provider as any);
-    toolManager.initialize(projectRoot);
+    // Autopilot is the unattended path — sandbox by default when bwrap is
+    // present, unless --no-sandbox is passed. --sandbox forces it on explicitly.
+    const useSandbox = opts.sandbox === true || (opts.sandbox === undefined && opts.noSandbox !== true);
+    toolManager.initialize(projectRoot, {
+      sandbox: useSandbox,
+      sandboxAllowNetwork: !!opts.sandboxNet,
+    });
     loadRegistries(getInstallRoot(), config.skills.paths);
 
     const explicitModel = merged.model as string | undefined;
