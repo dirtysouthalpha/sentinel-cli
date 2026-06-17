@@ -1078,10 +1078,25 @@ export class TUIApp {
     }
 
     if (parsed.name === "clear") {
+      // Clear BOTH the visible transcript AND the conversation context the model
+      // receives. Previously this only reset the render buffer, so the model kept
+      // the full prior conversation — full token cost and "remembered" content
+      // after the user expected a clean slate.
+      this.getContextManager().clear();
+      this.cost = {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        requests: 0,
+        estimatedCostUSD: 0,
+      };
       this.transcript = "";
+      this.streamRaw = "";
       this.stream = "";
       this.printWelcome();
       this.addSystem("Cleared.");
+      this.refreshStatus();
+      this.scheduleRender();
       return;
     }
 
