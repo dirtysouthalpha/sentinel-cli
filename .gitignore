@@ -1,0 +1,32 @@
+node_modules/
+dist/
+*.tgz
+.env
+.env.local
+.sentinel/
+sentinel.json
+coverage/
+.plans/
+*.map
+
+# Local test workspace with credentials — never commit
+playground/
+start-sentinel.cmd
+
+# build/test temp artifacts
+*.timestamp-*.mjs
+*.bundled_*.mjs
+push-to-github.ps1
+
+# dev/scratch
+.playwright-mcp/
+design-ref.png
+gui-[0-9].png
+gui/dist/
+gui/src-tauri/target/
+
+# cloned reference repos (study only; own git histories)
+_ref/
+_inkcheck.tsx
+state/
+*.db

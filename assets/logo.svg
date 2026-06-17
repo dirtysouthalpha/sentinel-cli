@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#06080C"/>
+      <stop offset="100%" style="stop-color:#0B0F18"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00D4FF"/>
+      <stop offset="100%" style="stop-color:#00A8CC"/>
+    </linearGradient>
+    <linearGradient id="magentaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF2E63"/>
+      <stop offset="100%" style="stop-color:#CC0044"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glowStrong">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="80" fill="url(#bgGrad)"/>
+  <rect x="8" y="8" width="496" height="496" rx="76" fill="none" stroke="#1A2236" stroke-width="2"/>
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="none" stroke="#00D4FF" stroke-width="1" opacity="0.3"/>
+  <g filter="url(#glow)">
+    <line x1="60" y1="420" x2="452" y2="420" stroke="#00D4FF" stroke-width="1" opacity="0.2"/>
+    <line x1="60" y1="440" x2="452" y2="440" stroke="#00D4FF" stroke-width="0.5" opacity="0.1"/>
+    <line x1="60" y1="460" x2="452" y2="460" stroke="#00D4FF" stroke-width="0.5" opacity="0.05"/>
+    <line x1="150" y1="350" x2="150" y2="480" stroke="#00D4FF" stroke-width="0.5" opacity="0.1"/>
+    <line x1="250" y1="350" x2="250" y2="480" stroke="#00D4FF" stroke-width="0.5" opacity="0.1"/>
+    <line x1="350" y1="350" x2="350" y2="480" stroke="#00D4FF" stroke-width="0.5" opacity="0.1"/>
+  </g>
+  <g filter="url(#glowStrong)">
+    <polygon points="256,80 140,180 180,180 180,320 220,320 220,220 240,220 240,280 272,280 272,220 292,220 292,320 332,320 332,180 372,180" fill="url(#cyanGrad)"/>
+    <rect x="220" y="320" width="72" height="4" fill="#FF2E63" rx="2"/>
+    <circle cx="180" cy="350" r="4" fill="#00D4FF"/>
+    <circle cx="256" cy="350" r="4" fill="#00D4FF"/>
+    <circle cx="332" cy="350" r="4" fill="#00D4FF"/>
+    <line x1="184" y1="350" x2="252" y2="350" stroke="#00D4FF" stroke-width="1" opacity="0.6"/>
+    <line x1="260" y1="350" x2="328" y2="350" stroke="#00D4FF" stroke-width="1" opacity="0.6"/>
+  </g>
+  <text x="256" y="400" font-family="'Courier New', monospace" font-size="36" font-weight="bold" fill="#00D4FF" text-anchor="middle" filter="url(#glow)">SENTINEL</text>
+  <text x="256" y="432" font-family="'Courier New', monospace" font-size="16" fill="#FF2E63" text-anchor="middle" letter-spacing="8" filter="url(#glow)">CLI</text>
+</svg>

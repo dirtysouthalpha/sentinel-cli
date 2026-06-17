@@ -1,0 +1,81 @@
+{
+  "name": "@dirtysouthalpha/sentinel-cli",
+  "version": "1.2.0",
+  "description": "AI-powered development CLI with cyberpunk aesthetic",
+  "type": "module",
+  "author": "DirtySouthAlpha",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dirtysouthalpha/sentinel-cli.git"
+  },
+  "homepage": "https://github.com/dirtysouthalpha/sentinel-cli#readme",
+  "bugs": {
+    "url": "https://github.com/dirtysouthalpha/sentinel-cli/issues"
+  },
+  "bin": {
+    "sentinel": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup && node scripts/add-shebang.cjs && node scripts/copy-builtins.cjs",
+    "dev": "tsup --watch",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "eval": "node evals/run.mjs",
+    "lint": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "blessed": "^0.1.81",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "glob": "^10.3.10",
+    "headroom-ai": "^0.22.4",
+    "ink": "^5.2.1",
+    "openai": "^4.67.3",
+    "ora": "^8.0.1",
+    "puppeteer": "^24.15.0",
+    "react": "^18.3.1",
+    "ws": "^8.21.0",
+    "yaml": "^2.4.1"
+  },
+  "devDependencies": {
+    "@types/blessed": "^0.1.25",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.31",
+    "@types/ws": "^8.18.1",
+    "ink-testing-library": "^4.0.0",
+    "rimraf": "^5.0.7",
+    "tsup": "^8.1.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.9"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.map",
+    "config"
+  ],
+  "keywords": [
+    "cli",
+    "ai",
+    "coding",
+    "tui",
+    "development"
+  ],
+  "license": "MIT",
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "puppeteer@24.43.1": true
+  }
+}

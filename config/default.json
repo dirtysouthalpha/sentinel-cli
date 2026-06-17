@@ -1,0 +1,32 @@
+{
+  "$schema": "https://sentinel-cli.dev/config.json",
+  "model": "anthropic/claude-sonnet",
+  "small_model": "anthropic/claude-haiku",
+  "provider": {},
+  "theme": "cyberpunk",
+  "custom_css": "",
+  "permissions": {
+    "bash": "ask",
+    "edit": {
+      "src/**": "allow",
+      "*": "ask"
+    },
+    "read": "allow",
+    "skill": {
+      "*": "allow"
+    }
+  },
+  "skills": {
+    "paths": ["./.sentinel/skills", "~/.config/sentinel/skills"],
+    "urls": []
+  },
+  "mcp": {},
+  "default_agent": "code",
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
+  "share": "manual",
+  "autoupdate": "notify",
+  "snapshot": true
+}
