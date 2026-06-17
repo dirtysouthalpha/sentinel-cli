@@ -16,6 +16,7 @@ import { renderCard } from "./cards.js";
 import { resolveSelection, mergeModels } from "./switcher.js";
 import { skillRegistry } from "../skills/registry.js";
 import { agentRegistry } from "../agents/registry.js";
+import { composeChatBody, ChatBodyMemo } from "./render-chat.js";
 import { expandMentions } from "../core/mentions.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
@@ -179,6 +180,10 @@ export class TUIApp {
   // setContent so a keystroke-only paint doesn't re-parse the whole transcript.
   private renderScheduled = false;
   private chatDirty = false;
+  // Memo of the last chat body string painted, so redundant paints (coalesced
+  // scheduleRender calls, or a stream token that produced identical output)
+  // skip the expensive box.setContent re-tokenize. See render-chat.ts.
+  private bodyMemo = new ChatBodyMemo();
   // Auto-follow the bottom only while the user is already there, so scrolling up
   // during a run isn't yanked back down.
   private stickToBottom = true;
@@ -353,13 +358,20 @@ export class TUIApp {
     if (this.destroyed) return;
     try {
       if (this.chatDirty) {
-        // The in-progress assistant message is rendered fresh each paint (from
-        // streamRaw) so its card grows/wraps correctly; it's baked into the
-        // transcript by endAssistant. This is one message, not the whole history.
-        const tail = this.streaming ? "\n" + this.assistantCard(this.streamRaw) + "\n" : "";
-        this.chat.setContent(this.transcript + tail);
+        // Compose the full body once (pure helper) and skip the expensive
+        // box.setContent re-tokenize when it's identical to the last paint
+        // (coalesced renders, or a stream token that produced no visible change).
+        const body = composeChatBody({
+          transcript: this.transcript,
+          streamRaw: this.streamRaw,
+          streaming: this.streaming,
+          renderAssistantCard: (raw) => this.assistantCard(raw),
+        });
         this.chatDirty = false;
-        if (this.stickToBottom) this.chat.setScrollPerc(100);
+        if (this.bodyMemo.changed(body)) {
+          this.chat.setContent(body);
+          if (this.stickToBottom) this.chat.setScrollPerc(100);
+        }
       }
       this.screen.render();
       // Blessed positions/shows the hardware cursor during render; re-hide it so
@@ -1130,6 +1142,7 @@ export class TUIApp {
       this.transcript = "";
       this.streamRaw = "";
       this.stream = "";
+      this.bodyMemo.reset();
       this.printWelcome();
       this.addSystem("Cleared.");
       this.refreshStatus();
@@ -2007,6 +2020,7 @@ export class TUIApp {
   private onTabSwitch(session: Session): void {
     this.transcript = "";
     this.stream = "";
+    this.bodyMemo.reset(); // force a full repaint of the new tab's transcript
 
     const msgs = session.contextManager.getMessages();
     for (const msg of msgs) {
