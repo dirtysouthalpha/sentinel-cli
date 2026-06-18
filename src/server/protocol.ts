@@ -22,6 +22,9 @@ export interface StateSnapshot {
   /** The active theme as a CSS-variable map (colorsToCSS), so the GUI can apply
    *  the full palette instead of collapsing 16 themes to 5 accent buckets. */
   themeVars: Record<string, string>;
+  /** True when no provider is usable yet — the GUI/TUI should intercept with the
+   *  onboarding wizard instead of letting the first message fail. */
+  needsOnboarding: boolean;
 }
 
 // ---- client -> server -------------------------------------------------------
@@ -50,7 +53,9 @@ export type ClientMessage =
   | { type: "removeMcp"; name: string }
   | { type: "toggleMcp"; name: string; enabled: boolean }
   // D2: @-mention file autocomplete — client queries, server globs the project.
-  | { type: "listFiles"; query: string };
+  | { type: "listFiles"; query: string }
+  // Onboarding: the GUI wizard submits the user's provider/key/model choice.
+  | { type: "configure"; providerId: string; model: string; apiKey?: string; baseURL?: string };
 
 export interface ConfigView {
   providers: { name: string; hasKey: boolean; baseURL?: string; defaultModel?: string; builtin: boolean; available: boolean }[];

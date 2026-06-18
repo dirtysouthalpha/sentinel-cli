@@ -77,6 +77,8 @@ describe("serve protocol", () => {
       // C4: the active theme ships as a CSS-var map so the GUI applies the full palette.
       expect(typeof hello.state.themeVars).toBe("object");
       expect(hello.state.themeVars).not.toBeNull();
+      // Onboarding: the snapshot tells the GUI whether to intercept first run.
+      expect(typeof hello.state.needsOnboarding).toBe("boolean");
     }
     c.ws.close();
   });

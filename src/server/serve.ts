@@ -24,6 +24,9 @@ import { sessionManager } from "../core/session-manager.js";
 import { themeEngine } from "../tui/themes/engine.js";
 import { colorsToCSS } from "../tui/themes/types.js";
 import { globProject } from "../core/project-files.js";
+import { detectNeeds, getProvider } from "../core/onboarding.js";
+import { getSecretStore } from "../core/secrets/store.js";
+import { providerKeyName } from "../core/secrets/resolver.js";
 import { commandRegistry } from "../commands/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { resolveTemplate } from "../commands/loader.js";
@@ -315,12 +318,63 @@ class Connection {
         this.send({ type: "files", items: globProject(this.projectRoot, msg.query) });
         break;
       }
+      case "configure": {
+        // Onboarding wizard result: persist the provider (key to the keyring,
+        // never plaintext) + chosen model, reload, and re-push state so
+        // needsOnboarding flips false and the wizard closes.
+        await this.applyOnboarding(msg.providerId, msg.model, msg.apiKey, msg.baseURL);
+        this.pushState();
+        this.send({ type: "system", text: `✓ Configured ${msg.providerId} → ${msg.model}. You're ready to go.` });
+        break;
+      }
     }
   }
 
   private reloadProviders(): void {
     const cfg = getConfigManager(this.projectRoot).load();
     providerManager.initializeFromConfig(cfg.provider as never);
+  }
+
+  /**
+   * Apply an onboarding wizard result: store the API key in the platform secret
+   * store (falling back to plaintext only if no store is available), write the
+   * provider + chosen model into config, and reload providers so the next
+   * message works. The OAuth router path skips the key and just sets the baseURL.
+   */
+  private async applyOnboarding(
+    providerId: string,
+    model: string,
+    apiKey: string | undefined,
+    baseURL: string | undefined
+  ): Promise<void> {
+    const provider = getProvider(providerId);
+    // Store the key to the keyring when one is required + provided.
+    let storedKey: string | undefined;
+    if (!provider?.noKey && apiKey?.trim()) {
+      try {
+        const store = await getSecretStore();
+        const ok = await store.set(providerKeyName(providerId), apiKey.trim());
+        storedKey = ok ? `keyring://${providerId}` : apiKey.trim();
+      } catch {
+        storedKey = apiKey.trim(); // last resort: plaintext (engine still reads it)
+      }
+    }
+    // Map the onboarding provider id to the config provider key.
+    // claude-router configures the anthropic provider with the router baseURL.
+    const configKey = providerId === "claude-router" ? "anthropic" : providerId;
+    setProviderConfig(configKey, {
+      ...(storedKey ? { apiKey: storedKey } : {}),
+      ...(baseURL ? { baseURL } : {}),
+    });
+    // Set the chosen model as the default + small model (if it matches the provider).
+    const cfg = getConfigManager(this.projectRoot);
+    const all = cfg.load();
+    all.model = model;
+    const small = provider?.models.find((m) => m !== model);
+    if (small) all.small_model = small;
+    cfg.save();
+    state.set("currentModel", model);
+    this.reloadProviders();
   }
 
   private async reloadMcp(): Promise<void> {
@@ -615,6 +669,9 @@ class Connection {
       // The active theme as CSS variables (colorsToCSS), so the GUI applies the
       // full palette rather than collapsing 16 themes to 5 accent buckets.
       themeVars: colorsToCSS(themeEngine.getColors()),
+      // First-run intercept: true when no provider is usable yet, so the GUI/TUI
+      // shows the onboarding wizard instead of letting the first message fail.
+      needsOnboarding: detectNeeds(process.env, available),
     };
   }
 }

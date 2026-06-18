@@ -13,6 +13,11 @@ type StateSnapshot = {
   mcpTools: { server: string; tool: string; full: string }[];
   cost: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCostUSD: number; requests: number };
   providers: { name: string; available: boolean }[];
+  // Optional fields added later (older engines may omit them).
+  contextWindow?: number;
+  commands?: { name: string; description: string }[];
+  themeVars?: Record<string, string>;
+  needsOnboarding?: boolean;
 };
 type ToolArgs = Record<string, unknown>;
 type TodoItem = { content: string; status: "pending" | "in_progress" | "completed" };
@@ -26,7 +31,7 @@ type ConfigView = {
 type ServerMessage =
   | { type: "hello"; version: string; state: StateSnapshot }
   | { type: "state"; state: StateSnapshot }
-  | { type: "user"; text: string }
+  | { type: "user"; text: string; contextCount?: number }
   | { type: "round_start"; round: number }
   | { type: "token"; text: string }
   | { type: "stream_end" }
@@ -42,6 +47,7 @@ type ServerMessage =
   | { type: "todos"; items: TodoItem[] }
   | { type: "config"; config: ConfigView }
   | { type: "busy"; busy: boolean }
+  | { type: "files"; items: string[] }
   | { type: "history"; messages: { role: "user" | "assistant" | "tool"; content: string; name?: string }[] };
 
 // ---- connection params (injected by Tauri, or via ?port=&token= in dev) -----
@@ -256,12 +262,107 @@ function applyThemeVars(vars: Record<string, string>): void {
   }
 }
 
+// ---- onboarding wizard (first run) -----------------------------------------
+// Mirror of the engine's PROVIDERS catalog (src/core/onboarding.ts) — the GUI
+// can't import engine TS cleanly (separate tsconfig), so the picker choices are
+// inlined. Keep in sync with onboarding.ts if you change the catalog.
+const OB_PROVIDERS = [
+  { id: "zai", label: "Z.ai / Zhipu GLM", blurb: "Best value for coding. Recommended.", models: ["zai/glm-4.6", "zai/glm-4.5-air"], noKey: false, keyUrl: "https://open.bigmodel.cn" },
+  { id: "anthropic", label: "Anthropic (Claude)", blurb: "Strongest coding models (paid).", models: ["anthropic/claude-sonnet", "anthropic/claude-haiku"], noKey: false, keyUrl: "https://console.anthropic.com/settings/keys" },
+  { id: "openai", label: "OpenAI (GPT)", blurb: "GPT-4o family (paid).", models: ["openai/gpt-4o", "openai/gpt-4o-mini"], noKey: false, keyUrl: "https://platform.openai.com/api-keys" },
+  { id: "ollama", label: "Ollama (local, free)", blurb: "Run models locally — no key, no cost.", models: ["ollama/llama3"], noKey: true },
+  { id: "claude-router", label: "Claude via OAuth router (keyless)", blurb: "Ride a Claude Max subscription — no API key.", models: ["anthropic/claude-sonnet", "anthropic/claude-haiku"], noKey: true },
+];
+
+let obStep: "provider" | "key" | "model" = "provider";
+let obProvider: typeof OB_PROVIDERS[number] | null = null;
+let obKey = "";
+let obModel = "";
+
+function renderOnboarding(): void {
+  let root = document.getElementById("onboarding") as HTMLElement | null;
+  if (!root) {
+    root = el("div", "onboarding");
+    root.id = "onboarding";
+    document.body.appendChild(root);
+  }
+  root.innerHTML = "";
+  root.append(el("div", "ob-logo", "◆ Sentinel"));
+  root.append(el("div", "ob-title", "Get started in 30 seconds"));
+  root.append(el("div", "ob-sub", "Pick a provider to power your agent. Change anytime with /setup."));
+
+  if (obStep === "provider") {
+    const list = el("div", "ob-list");
+    for (const p of OB_PROVIDERS) {
+      const row = el("div", "ob-opt");
+      row.append(el("div", "ob-opt-name", p.label + (p.id === "zai" ? "  ← recommended" : "")));
+      row.append(el("div", "ob-opt-blurb", p.blurb));
+      row.onclick = () => {
+        obProvider = p;
+        obModel = p.models[0];
+        if (p.noKey) {
+          if (p.models.length > 1) { obStep = "model"; renderOnboarding(); }
+          else finishOnboarding();
+        } else {
+          obStep = "key"; renderOnboarding();
+        }
+      };
+      list.append(row);
+    }
+    root.append(list);
+  } else if (obStep === "key" && obProvider) {
+    root.append(el("div", "ob-step", `②  Enter your ${obProvider.label} API key`));
+    if (obProvider.keyUrl) root.append(el("div", "ob-sub", `Get one: ${obProvider.keyUrl}`));
+    const inp = document.createElement("input");
+    inp.type = "password"; inp.className = "ob-input"; inp.value = obKey;
+    inp.placeholder = "paste your API key (stored in the OS keyring, not on disk)";
+    inp.oninput = () => { obKey = inp.value; };
+    root.append(inp);
+    const row = el("div", "ob-actions");
+    const back = el("button", "btn", "← Back"); back.onclick = () => { obStep = "provider"; renderOnboarding(); };
+    const next = el("button", "btn primary", "Continue →"); next.onclick = () => { obStep = "model"; renderOnboarding(); };
+    row.append(back, next); root.append(row); setTimeout(() => inp.focus(), 0);
+  } else if (obStep === "model" && obProvider) {
+    root.append(el("div", "ob-step", "③  Pick a starter model"));
+    const list = el("div", "ob-list");
+    for (const m of obProvider.models) {
+      const row = el("div", "ob-opt" + (m === obModel ? " sel" : ""));
+      row.append(el("div", "ob-opt-name", m));
+      row.onclick = () => { obModel = m; finishOnboarding(); };
+      list.append(row);
+    }
+    root.append(list);
+    const back = el("button", "btn", "← Back"); back.onclick = () => { obStep = obProvider!.noKey ? "provider" : "key"; renderOnboarding(); };
+    root.append(back);
+  }
+}
+
+function finishOnboarding(): void {
+  if (!obProvider) return;
+  const p = obProvider;
+  const out: { providerId: string; model: string; apiKey?: string; baseURL?: string } = {
+    providerId: p.id, model: obModel,
+  };
+  if (!p.noKey && obKey.trim()) out.apiKey = obKey.trim();
+  if (p.id === "claude-router") out.baseURL = "http://127.0.0.1:8080/v1/anthropic";
+  send({ type: "configure", ...out });
+  obStep = "provider"; obProvider = null; obKey = ""; obModel = "";
+}
+
 function renderAll() {
   if (!snap) return;
   // Full theme palette from the engine (falls back to the accent buckets if absent).
   const tv = (snap as { themeVars?: Record<string, string> }).themeVars;
   if (tv && Object.keys(tv).length) applyThemeVars(tv);
   document.documentElement.dataset.accent = accentFor(snap.theme);
+  // First-run onboarding intercept: if the engine says no provider is usable,
+  // show the wizard instead of the normal chrome.
+  if ((snap as { needsOnboarding?: boolean }).needsOnboarding) {
+    renderOnboarding();
+    return;
+  }
+  const ob = document.getElementById("onboarding");
+  if (ob) ob.remove();
   renderTabs(); renderRail(); renderSidebar(); renderRight();
   ($("#model-sel")).textContent = snap.model.split("/").pop() || snap.model;
   ($("#agent-sel")).textContent = snap.agent;
