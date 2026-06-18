@@ -218,3 +218,20 @@ export function handleUndo(host: CommandHost, _args: string[]): void {
   }
   host.addSystem(`Undid ${cp.tool} ${cp.existed ? "edit" : "create"} of ${cp.path}`);
 }
+
+/**
+ * /out — print the FULL output of the most recent tool call. Tool cards collapse
+ * to a few lines; this is the escape hatch to read a truncated result without a
+ * fragile click-to-expand interaction.
+ */
+export function handleOut(host: CommandHost, _args: string[]): void {
+  const last = host.getLastToolOutput?.();
+  if (!last) {
+    host.addSystem("No tool output yet.");
+    return;
+  }
+  const mark = last.ok ? "✓" : "✗";
+  const header = `${mark} ${last.name} — full output:`;
+  const body = last.output || "(empty)";
+  host.addSystem(`${header}\n${body}`);
+}

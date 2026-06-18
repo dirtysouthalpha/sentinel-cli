@@ -58,6 +58,7 @@ import {
   handlePlan,
   handleCheckpoints,
   handleUndo,
+  handleOut,
 } from "./commands/info.js";
 import { handleMarketplace, handleWorkspaceCommand, handleTeamCommand } from "./commands/registry-commands.js";
 import { handleExportCommand, handleBranchCommand } from "./commands/session-commands.js";
@@ -173,6 +174,10 @@ export class TUIApp {
   private searchActive = false;
   private slashItems: { command: string; description: string }[] = [];
   private slashIndex = 0;
+
+  // The most recent tool call's full (untruncated) output, for /out. Tool cards
+  // collapse to 5 lines; this lets the user view the whole thing on demand.
+  private lastToolOutput: { name: string; argsJson: string; ok: boolean; output: string } | null = null;
 
   private transcript = "";
   private stream = ""; // legacy live-tail slot; assistant tail now rendered in flushRender
@@ -541,6 +546,9 @@ export class TUIApp {
   }
 
   private addTool(name: string, argsJson: string, ok: boolean, output: string): void {
+    // Stash the full (untruncated) output so /out can show it — the card itself
+    // collapses long output to 5 lines with no in-app way to see the rest.
+    this.lastToolOutput = { name, argsJson, ok, output: output || "" };
     const c = themeEngine.getBlessedColors();
     const cut = (t: string, n: number): string => (t.length > n ? t.slice(0, n - 1) + "…" : t);
     const mark = ok ? `{${c.lime}-fg}✓{/}` : `{${c.error}-fg}✗{/}`;
@@ -1357,6 +1365,11 @@ export class TUIApp {
       return;
     }
 
+    if (parsed.name === "out" || parsed.name === "output") {
+      handleOut(this.commandHost(), parsed.args);
+      return;
+    }
+
     if (parsed.name === "agent" || parsed.name === "agents") {
       const agents = this.listAgents();
       const cur = state.get("currentAgent");
@@ -1657,6 +1670,7 @@ export class TUIApp {
       setPermissionMode: (mode) => {
         this.permissionMode = mode;
       },
+      getLastToolOutput: () => this.lastToolOutput,
     };
   }
 

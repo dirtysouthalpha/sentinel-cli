@@ -46,4 +46,6 @@ export interface CommandHost {
   /** Permission mode get/set (for /permissions, /plan). Optional. */
   getPermissionMode?(): string;
   setPermissionMode?(mode: "yolo" | "auto" | "gated" | "plan"): void;
+  /** The last tool call's full output (for /out). Optional. */
+  getLastToolOutput?(): { name: string; ok: boolean; output: string } | null;
 }

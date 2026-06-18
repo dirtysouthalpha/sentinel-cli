@@ -11,6 +11,7 @@ import {
   handleProviders,
   handlePermissions,
   handlePlan,
+  handleOut,
 } from "../src/tui/commands/info.js";
 
 /**
@@ -167,5 +168,26 @@ describe("extracted info commands (Phase 3b)", () => {
     handleProviders(host, []);
     // Either a provider list or the "none configured" note — both are valid.
     expect(out[0].length).toBeGreaterThan(0);
+  });
+
+  it("/out prints the full last tool output (the truncated escape hatch)", () => {
+    const out: string[] = [];
+    const host: CommandHost = {
+      projectRoot: "/p",
+      tabManager: {} as never,
+      addSystem: (t) => void out.push(t),
+      addError: () => {},
+      chatWithAI: async () => {},
+      getLastToolOutput: () => ({ name: "bash", ok: true, output: "line1\nline2\nline3\nline4\nline4\nline5\nline6" }),
+    };
+    handleOut(host, []);
+    expect(out[0]).toContain("bash");
+    expect(out[0]).toContain("line6"); // the full output, not the 5-line truncation
+  });
+
+  it("/out reports when there's no tool output yet", () => {
+    const { host, out } = fakeHost();
+    handleOut(host, []);
+    expect(out[0]).toMatch(/No tool output/);
   });
 });
