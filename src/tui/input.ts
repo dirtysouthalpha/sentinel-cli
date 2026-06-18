@@ -8,6 +8,18 @@
  * functions makes the historically-quirky input path unit-testable.
  */
 
+// Re-export the word-motion/kill-line primitives so callers can import every
+// editing decision from one module (`input.ts`).
+export {
+  wordBack,
+  wordForward,
+  killToEnd,
+  killToStart,
+  killWordBack,
+  killWordForward,
+  type LineEdit,
+} from "./input-keys.js";
+
 /** A text buffer with a caret position within it. */
 export interface LineState {
   buffer: string;
@@ -65,6 +77,8 @@ export type CsiAction =
   | "down"
   | "left"
   | "right"
+  | "wordLeft"
+  | "wordRight"
   | "home"
   | "end"
   | "delete"
@@ -72,19 +86,21 @@ export type CsiAction =
 
 /**
  * Decode a CSI/SS3 sequence body (params + final byte) into an action, e.g.
- * "A" -> up, "1;5C" -> right, "3~" -> delete, "1~"/"7~" -> home, "4~"/"8~" -> end.
+ * "A" -> up, "1;5C" -> right (or wordRight when the `;5` Ctrl-modifier param is
+ * present), "3~" -> delete, "1~"/"7~" -> home, "4~"/"8~" -> end.
  */
 export function parseCsi(seq: string): CsiAction {
   const final = seq.slice(-1);
+  const hasCtrlMod = /;5/.test(seq); // Ctrl+arrow sends params like "1;5C"
   switch (final) {
     case "A":
       return "up";
     case "B":
       return "down";
     case "C":
-      return "right";
+      return hasCtrlMod ? "wordRight" : "right";
     case "D":
-      return "left";
+      return hasCtrlMod ? "wordLeft" : "left";
     case "H":
       return "home";
     case "F":

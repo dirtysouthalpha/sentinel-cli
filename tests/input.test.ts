@@ -62,9 +62,16 @@ describe("parseCsi", () => {
     expect(parseCsi("F")).toBe("end");
   });
 
-  it("uses the final byte even with modifier params", () => {
-    expect(parseCsi("1;5C")).toBe("right");
+  it("decodes Ctrl+arrow (;5 modifier) as word-jump", () => {
+    // xterm/iTerm/Windows Terminal emit "1;5C" for Ctrl+Right.
+    expect(parseCsi("1;5C")).toBe("wordRight");
+    expect(parseCsi("1;5D")).toBe("wordLeft");
+    expect(parseCsi("2;5C")).toBe("wordRight"); // Shift+Ctrl still word-jumps
+  });
+
+  it("uses the final byte even with non-Ctrl modifier params", () => {
     expect(parseCsi("1;2D")).toBe("left");
+    expect(parseCsi("1;2C")).toBe("right");
   });
 
   it("maps the ~-terminated Home/End/Delete variants", () => {

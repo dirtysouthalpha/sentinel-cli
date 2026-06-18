@@ -35,6 +35,10 @@ import {
   parseCsi,
   completeCommand,
   stepHistory,
+  wordBack,
+  wordForward,
+  killToEnd,
+  killWordBack,
   type LineState,
 } from "./input.js";
 import { formatTokens, formatCost, humanizeToolCall, summarizeToolResult } from "./format.js";
@@ -884,6 +888,18 @@ export class TUIApp {
         this.setInputLine("", 0); // Ctrl+U → clear line
         this.hideSlash();
         this.renderInput();
+      } else if (code === 23) {
+        // Ctrl+W → delete the word before the caret
+        this.applyLineEdit(killWordBack(this.inputBuffer, this.inputCursor));
+        this.hideSlash();
+        this.renderInput();
+      } else if (code === 11) {
+        // Ctrl+K → kill from caret to end of line
+        this.applyLineEdit(killToEnd(this.inputBuffer, this.inputCursor));
+        this.renderInput();
+      } else if (code === 12) {
+        // Ctrl+L → scroll the transcript to the top (clear-to-top, common TUI meaning)
+        this.scrollChat(true);
       } else if (code >= 32) {
         // printable: insert at caret (handles pasted runs char-by-char)
         this.applyLine(insertText(this.line(), ch));
@@ -916,6 +932,24 @@ export class TUIApp {
         if (this.inputCursor > 0) {
           this.applyLine(moveLeft(this.line()));
           this.renderInput();
+        }
+        break;
+      case "wordRight": // Ctrl+Right → jump to next word start
+        {
+          const next = wordForward(this.inputBuffer, this.inputCursor);
+          if (next !== this.inputCursor) {
+            this.inputCursor = next;
+            this.renderInput();
+          }
+        }
+        break;
+      case "wordLeft": // Ctrl+Left → jump to previous word start
+        {
+          const prev = wordBack(this.inputBuffer, this.inputCursor);
+          if (prev !== this.inputCursor) {
+            this.inputCursor = prev;
+            this.renderInput();
+          }
         }
         break;
       case "home": // jump the scrollback to the top (line-start is Ctrl+A)
@@ -1009,6 +1043,12 @@ export class TUIApp {
   private applyLine(s: LineState): void {
     this.inputBuffer = s.buffer;
     this.inputCursor = s.cursor;
+  }
+
+  /** Apply a LineEdit ({line, cursor}) from the word-motion/kill primitives. */
+  private applyLineEdit(e: { line: string; cursor: number }): void {
+    this.inputBuffer = e.line;
+    this.inputCursor = e.cursor;
   }
 
   private setInputLine(text: string, cursor: number): void {
