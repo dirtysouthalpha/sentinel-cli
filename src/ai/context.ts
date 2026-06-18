@@ -1,5 +1,6 @@
 import { ChatMessage as AIChatMessage, ToolCall } from "../ai/types.js";
 import { createLogger } from "../utils/logger.js";
+import { planCompaction, unitToText, planIsSafe } from "./compact-strategy.js";
 
 const log = createLogger({ prefix: "context" });
 
@@ -104,54 +105,74 @@ export class ContextManager {
     this.systemPrompt = "";
   }
 
+  /**
+   * Compact the context using the shared strategy (compact-strategy.ts): keep
+   * the system prompt + recent turns verbatim; summarize the cohesive middle.
+   *
+   * This synchronous form summarizes by concatenating each archival unit's text
+   * (role-tagged) — a lossy-but-offline fallback that preserves the pair-split
+   * invariants. For a real model-generated summary, use `compactWithSummarizer`.
+   */
   compact(): void {
-    if (this.messages.length <= 6) return;
+    // buildSummary receives the already-flattened unit texts (see applyPlan).
+    this.applyPlan(planCompaction(this.messages, 6), (unitTexts) =>
+      unitTexts.join("\n\n---\n\n")
+    );
+  }
 
-    // Choose the cut so the recent window never *starts* on a tool message
-    // whose owning assistant(tool_calls) turn would be summarized away. Splitting
-    // an assistant->tool pair breaks providers that require a tool message to
-    // follow its tool_calls (OpenAI 400). Walk the boundary back past any
-    // leading tool results so each kept pair stays intact.
-    let cut = this.messages.length - 6;
-    while (cut > 0 && this.messages[cut].role === "tool") {
-      cut--;
+  /**
+   * Compact with a model-driven summarizer. Each cohesive archival unit is
+   * passed to `summarize(unitTexts) -> summary`; the result replaces the units.
+   * Async because the summarizer is a model call. Falls back to compact() if no
+   * summarizer is supplied or the call rejects.
+   */
+  async compactWithSummarizer(
+    summarize: (unitTexts: string[]) => Promise<string>
+  ): Promise<void> {
+    const plan = planCompaction(this.messages, 6);
+    if (plan.summarizeUnits.length === 0) return;
+    try {
+      const unitTexts = plan.summarizeUnits.map((u) => unitToText(u));
+      const summary = await summarize(unitTexts);
+      this.applyPlan(plan, () => summary);
+    } catch (err) {
+      log.warn(`summarizer failed, falling back to concat: ${err instanceof Error ? err.message : String(err)}`);
+      this.compact();
     }
+  }
 
-    const older = this.messages.slice(0, cut);
-    const recent = this.messages.slice(cut);
-    if (older.length === 0) return;
-
-    const summaryParts: string[] = [];
-    let currentRole = "";
-    let currentSummary = "";
-
-    for (const m of older) {
-      if (m.role === currentRole) {
-        currentSummary += " " + m.content.slice(0, 150);
-      } else {
-        if (currentSummary) {
-          summaryParts.push(`${currentRole}: ${currentSummary.trim()}`);
-        }
-        currentRole = m.role;
-        currentSummary = m.content.slice(0, 300);
-      }
+  /**
+   * Apply a compaction plan: keep the planned messages verbatim, replace the
+   * summarized units with a single "earlier conversation" user-note carrying
+   * `buildSummary(unitTexts)`. Asserts the plan is safe (never splits a pair).
+   */
+  private applyPlan(
+    plan: ReturnType<typeof planCompaction>,
+    buildSummary: (unitTexts: string[]) => string
+  ): void {
+    if (this.messages.length <= 6 && plan.summarizeUnits.length === 0) return;
+    if (!planIsSafe(this.messages, plan)) {
+      log.warn("compaction plan would split an assistant→tool pair; skipping");
+      return;
     }
-    if (currentSummary) {
-      summaryParts.push(`${currentRole}: ${currentSummary.trim()}`);
+    const kept = plan.keepIndices.map((i) => this.messages[i]);
+    if (plan.summarizeUnits.length === 0) {
+      // Nothing to summarize (short conversation); keep as-is.
+      return;
     }
-
-    const summaryText = summaryParts.join("\n");
+    const unitTexts = plan.summarizeUnits.map((u) => unitToText(u));
+    const summaryText = buildSummary(unitTexts);
+    const compactedCount = plan.summarizeUnits.reduce((n, u) => n + u.messages.length, 0);
     // Keep the summary as a "user" note, NOT a system message — a system-role
     // entry here would overwrite the real system prompt on Anthropic.
     const summaryMessage: ConversationMessage = {
       role: "user",
-      content: `[Earlier conversation summary — ${older.length} messages compacted]\n${summaryText}`,
+      content: `[Earlier conversation summary — ${compactedCount} messages compacted]\n${summaryText}`,
       timestamp: Date.now(),
       tokenEstimate: estimateTokens(summaryText),
     };
-
-    this.messages = [summaryMessage, ...recent];
-    log.info(`Context compacted: ${older.length + recent.length} -> ${this.messages.length} messages`);
+    this.messages = [summaryMessage, ...kept];
+    log.info(`Context compacted: ${compactedCount + kept.length} -> ${this.messages.length} messages`);
   }
 
   private autoCompact(): void {
