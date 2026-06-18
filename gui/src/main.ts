@@ -55,7 +55,7 @@ let snap: StateSnapshot | null = null;
 let busy = false;
 let ws: WebSocket | null = null;
 type Block =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; contextCount?: number }
   | { kind: "assistant"; text: string; streaming?: boolean }
   | { kind: "tool"; tool: string; args: any; argsRaw: string; ok?: boolean; firstLine?: string; full?: string; running?: boolean; expanded?: boolean }
   | { kind: "system"; text: string }
@@ -471,32 +471,41 @@ function renderChat() {
 function renderBlock(b: Block, index: number): HTMLElement {
   if (b.kind === "user") {
     const node = wrap("user", "You", `<div class="body">${esc(b.text)}</div>`);
-    // Per-turn edit: re-send this prompt, truncating everything from here on.
-    const edit = el("span", "turn-act", "✎ edit");
-    edit.addEventListener("click", () => {
-      const next = prompt("Edit and re-send:", b.text);
-      if (next === null || !next.trim()) return;
-      send({ type: "edit", text: next, truncateIndex: index });
-    });
-    node.append(edit);
+    // Per-turn edit: re-send this prompt, truncating the context back to where
+    // it was before this turn ran. contextCount = context length at send time.
+    if (b.contextCount != null) {
+      const edit = el("span", "turn-act", "✎ edit");
+      edit.addEventListener("click", () => {
+        const next = prompt("Edit and re-send:", b.text);
+        if (next === null || !next.trim()) return;
+        // Drop everything from this user block onward in the GUI view too.
+        blocks.splice(index);
+        send({ type: "edit", text: next, truncateIndex: b.contextCount! });
+        renderChat();
+      });
+      node.append(edit);
+    }
     return node;
   }
   if (b.kind === "assistant") {
     const node = wrap("assistant", "Sentinel", `<div class="body">${renderMarkdownHTML(b.text)}${b.streaming ? '<span class="cursor"></span>' : ""}</div>`);
-    // Regenerate the last assistant turn: drop it + re-run the preceding user turn.
+    // Regenerate: drop this assistant response + re-run the preceding user turn.
     if (!b.streaming && index === blocks.length - 1 && index > 0) {
-      const regen = el("span", "turn-act", "↻ regenerate");
-      regen.addEventListener("click", () => {
-        // Find the user turn before this one and re-send it, truncating from there.
-        let userIdx = -1;
-        for (let k = index - 1; k >= 0; k--) {
-          if (blocks[k].kind === "user") { userIdx = k; break; }
-        }
-        if (userIdx < 0) return;
-        const userText = (blocks[userIdx] as { text: string }).text;
-        send({ type: "edit", text: userText, truncateIndex: userIdx });
-      });
-      node.append(regen);
+      let userIdx = -1;
+      for (let k = index - 1; k >= 0; k--) {
+        if (blocks[k].kind === "user") { userIdx = k; break; }
+      }
+      const userBlock = userIdx >= 0 ? (blocks[userIdx] as { kind: "user"; text: string; contextCount?: number }) : null;
+      if (userBlock && userBlock.contextCount != null) {
+        const regen = el("span", "turn-act", "↻ regenerate");
+        regen.addEventListener("click", () => {
+          // Drop the assistant block so the GUI matches the truncated context.
+          blocks.splice(userIdx);
+          send({ type: "edit", text: userBlock.text, truncateIndex: userBlock.contextCount! });
+          renderChat();
+        });
+        node.append(regen);
+      }
     }
     return node;
   }
@@ -940,7 +949,7 @@ export function dispatch(m: ServerMessage) {
     case "hello": snap = m.state; shell(); renderAll(); renderChat(); break;
     case "state": snap = m.state; renderAll(); break;
     case "busy": busy = m.busy; if (!busy) round = 0; setSendBtn(); if (snap) renderRight(); break;
-    case "user": blocks.push({ kind: "user", text: m.text }); renderChat(); break;
+    case "user": blocks.push({ kind: "user", text: m.text, contextCount: m.contextCount }); renderChat(); break;
     case "round_start": round = m.round; if (snap) renderRight(); break;
     case "round_end": round = m.round; if (snap) renderRight(); break;
     case "token": appendToken(m.text); break;

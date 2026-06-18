@@ -12,8 +12,8 @@ import { createLogger } from "../../utils/logger.js";
 
 const log = createLogger({ prefix: "zai" });
 
-const ZAI_CODING_BASE = "https://open.bigmodel.cn/api/coding/paas/v4";
-const ZAI_STANDARD_BASE = "https://open.bigmodel.cn/api/paas/v4";
+const ZAI_CODING_BASE = "https://api.z.ai/api/coding/paas/v4";
+const ZAI_STANDARD_BASE = "https://api.z.ai/api/paas/v4";
 
 export class ZAIProvider implements AIProvider {
   name = "zai";

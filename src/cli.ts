@@ -192,7 +192,13 @@ program
   .description("Ask a question (headless mode)")
   .option("--model <model>", "AI model to use")
   .action(async (question, _opts, command) => {
-    const config = getConfigManager().load();
+    const projectRoot = process.cwd();
+    const config = getConfigManager(projectRoot).load();
+    // Prime provider keys from the secret store (keyring/encrypted file) before
+    // init, exactly like run/autopilot/serve/gui/TUI do. Without this, keys
+    // stored as `keyring://<provider>` markers are never resolved in headless
+    // `ask` mode and the call fails with "API key not configured".
+    await bootstrapKeys(config, projectRoot);
     providerManager.initializeFromConfig(config.provider as any);
     // --model is also defined on the root command, so commander binds it to the
     // global opts; merge both so the subcommand override is honored either way.

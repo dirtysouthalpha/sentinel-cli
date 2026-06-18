@@ -66,10 +66,10 @@ export interface ToolArgs {
 export type ServerMessage =
   | { type: "hello"; version: string; state: StateSnapshot }
   | { type: "state"; state: StateSnapshot }
-  | { type: "user"; text: string }
+  | { type: "user"; text: string; contextCount?: number }
   | { type: "round_start"; round: number }
   | { type: "token"; text: string }
-  | { type: "stream_end" }
+  | { type: "stream_end"; contextCount?: number }
   | { type: "usage"; promptTokens: number; completionTokens: number; totalTokens: number; estimatedCostUSD: number }
   | { type: "tool_start"; tool: string; name: string; args: ToolArgs; argsRaw: string }
   | { type: "tool_result"; name: string; ok: boolean; firstLine: string; full: string }

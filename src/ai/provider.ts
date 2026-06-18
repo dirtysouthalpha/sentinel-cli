@@ -56,6 +56,14 @@ class ProviderManager {
       // `options` so keys saved via `sentinel setup` are actually picked up.
       const nested = (rawConfig as { options?: Record<string, unknown> }).options;
       const config = (nested ? { ...rawConfig, ...nested } : rawConfig) as ProviderConfig;
+      // `keyring://<provider>` is a secret-store *marker*, not a real key. The
+      // actual key was primed into process.env by bootstrapKeys() before this
+      // runs, so drop the marker here and let the provider's env-var fallback
+      // resolve it. Otherwise the literal "keyring://zai" gets sent as the
+      // bearer token and the API rejects it with 401.
+      if (typeof config.apiKey === "string" && config.apiKey.startsWith("keyring://")) {
+        config.apiKey = "";
+      }
       switch (name) {
         case "anthropic":
           this.registerProvider(new AnthropicProvider(config));

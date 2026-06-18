@@ -386,7 +386,9 @@ class Connection {
     if (this.busy) return;
     this.busy = true;
     this.send({ type: "busy", busy: true });
-    this.send({ type: "user", text });
+    // Snapshot context length BEFORE this turn is added, so the GUI can map a
+    // user block → the context index to truncate to for edit/regenerate.
+    this.send({ type: "user", text, contextCount: this.cm().getMessages().length });
 
     const cm = this.cm();
     const [providerName, ...mp] = state.get("currentModel").split("/");
