@@ -2,6 +2,7 @@ import "./style.css";
 import { diffLines } from "diff";
 import { renderMarkdownHTML, renderStreamingHTML } from "./markdown";
 import { diffBlocks } from "./render-diff";
+import { resolveKey } from "./composer-keys";
 
 // ---- protocol (mirror of src/server/protocol.ts) ----------------------------
 type PermissionMode = "yolo" | "auto" | "gated" | "plan";
@@ -154,6 +155,30 @@ function shell() {
   });
   renderChips();
   input.focus();
+
+  // E1: global keymap (pure resolveKey) — palette / search / focus / cheatsheet.
+  // Don't hijack typing: skip when focus is in the composer and the key isn't a
+  // modifier combo (so '?' mid-sentence stays a question mark).
+  document.addEventListener("keydown", (ev: KeyboardEvent) => {
+    const action = resolveKey(ev);
+    if (!action) return;
+    const inComposer = document.activeElement === input;
+    if (action === "cheatsheet" && inComposer && (input.value || "").length > 0) return;
+    ev.preventDefault();
+    if (action === "palette") openPalette("");
+    else if (action === "focusComposer") input.focus();
+    else if (action === "cheatsheet") showCheatsheet();
+    else if (action === "search") toggleSearch();
+  });
+
+  // A simple in-chat find bar.
+  const findBar = el("div", "findbar");
+  findBar.id = "findbar";
+  findBar.style.display = "none";
+  findBar.innerHTML = `<input id="find-input" placeholder="Find in conversation…" style="flex:1;background:transparent;border:none;color:var(--text);outline:none"/><span id="find-count" style="color:var(--text-faint);font-size:12px"></span>`;
+  (document.querySelector(".chat")?.parentElement || document.body).appendChild(findBar);
+  const findInput = findBar.querySelector("#find-input") as HTMLInputElement;
+  findInput.addEventListener("input", () => runFind(findInput.value));
 
   // Copy buttons in markdown code blocks (event delegation — works on re-render).
   const chat = document.getElementById("chat");
@@ -627,6 +652,65 @@ function acceptAc(idx: number) {
   i.focus(); closeAc();
 }
 function closeAc() { acItems = []; renderAc(); }
+
+// ---- cheatsheet + search (E1) ----------------------------------------------
+function showCheatsheet(): void {
+  const existing = document.getElementById("cheatsheet");
+  if (existing) { existing.remove(); return; }
+  const lines = [
+    ["⌘/Ctrl + K", "command palette"],
+    ["⌘/Ctrl + F", "find in conversation"],
+    ["⌘/Ctrl + L", "focus composer"],
+    ["?", "this cheatsheet"],
+    ["Enter / Shift+Enter", "send / newline"],
+    ["@ / /", "mention a file / slash command"],
+  ];
+  const box = el("div", "cheatsheet");
+  box.id = "cheatsheet";
+  box.innerHTML = `<div class="ch">Keyboard shortcuts</div>` +
+    lines.map(([k, d]) => `<div class="kv"><span class="k">${k}</span><span class="d">${d}</span></div>`).join("");
+  document.body.appendChild(box);
+  box.tabIndex = -1;
+  box.focus();
+  box.addEventListener("keydown", () => box.remove());
+  box.addEventListener("click", (e) => { if (e.target === box) box.remove(); });
+}
+
+function toggleSearch(): void {
+  const bar = document.getElementById("findbar");
+  if (!bar) return;
+  const open = bar.style.display !== "none";
+  bar.style.display = open ? "none" : "flex";
+  if (!open) {
+    const inp = bar.querySelector("#find-input") as HTMLInputElement;
+    inp.value = "";
+    inp.focus();
+    (bar.querySelector("#find-count") as HTMLElement).textContent = "";
+  }
+}
+
+/** Naive in-chat find: scan block text for the query, count matches, scroll. */
+function runFind(query: string): void {
+  const bar = document.getElementById("findbar");
+  if (!bar) return;
+  const count = bar.querySelector("#find-count") as HTMLElement;
+  if (!query.trim()) { count.textContent = ""; return; }
+  const q = query.toLowerCase();
+  let hits = 0;
+  let firstHitIndex = -1;
+  blocks.forEach((b, i) => {
+    const text = (b as { text?: string }).text || "";
+    if (text.toLowerCase().includes(q)) {
+      hits++;
+      if (firstHitIndex < 0) firstHitIndex = i;
+    }
+  });
+  count.textContent = hits > 0 ? `${hits} match${hits === 1 ? "" : "es"}` : "no matches";
+  if (firstHitIndex >= 0) {
+    const nodes = document.querySelectorAll<HTMLElement>("#chat .block");
+    nodes[firstHitIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
 
 // ---- command palette --------------------------------------------------------
 function openPalette(prefix = "") {

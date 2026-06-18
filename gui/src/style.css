@@ -403,3 +403,19 @@ body {
   border: 1px solid transparent; margin-top: 2px;
 }
 .turn-act:hover { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); background: rgba(var(--accent-rgb), 0.06); }
+
+/* E1: global keymap UI — cheatsheet + find bar */
+.cheatsheet {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 60;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 20px; min-width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  outline: none;
+}
+.cheatsheet .ch { font-weight: 700; color: var(--text); margin-bottom: 10px; }
+.cheatsheet .kv { display: flex; justify-content: space-between; gap: 24px; padding: 4px 0; font-size: 13px; }
+.cheatsheet .k { color: var(--accent); font-family: var(--font-mono); }
+.cheatsheet .d { color: var(--text-dim); }
+.findbar {
+  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px; background: var(--bg-2); border-bottom: 1px solid var(--border);
+}
