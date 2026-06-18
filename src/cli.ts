@@ -650,6 +650,7 @@ program
   .command("gui")
   .description("Launch the Sentinel desktop GUI (engine + glassmorphism web UI)")
   .option("--project <path>", "Project root directory")
+  .option("--window", "Open in a borderless app window (Chrome --app) instead of a browser tab")
   .action(async (opts, command) => {
     setLogLevel("warn");
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
@@ -658,7 +659,7 @@ program
     providerManager.initializeFromConfig(config.provider as any);
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
-    await launchGui({ projectRoot, installRoot: getInstallRoot() });
+    await launchGui({ projectRoot, installRoot: getInstallRoot(), windowed: !!opts.window });
   });
 
 async function runMain(options: {
