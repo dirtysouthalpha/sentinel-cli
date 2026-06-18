@@ -56,6 +56,32 @@ function getInstallRoot(): string {
   return resolve(fileURLToPath(new URL("..", import.meta.url)));
 }
 
+/**
+ * A friendly, actionable message when a headless run has no usable provider.
+ * Replaces the old one-liner that left new users guessing. Walks them through
+ * the easiest paths (the guided wizard, an env var, or the keyless router).
+ */
+function printProviderHelp(provider: string): string {
+  const envFor: Record<string, string> = {
+    zai: "ZAI_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+    openai: "OPENAI_API_KEY",
+    gemini: "GEMINI_API_KEY",
+  };
+  const env = envFor[provider];
+  const lines = [
+    `No API key for "${provider}". Get started in 30 seconds:`,
+    "",
+    "  ▸ Guided wizard:   node dist/cli.js setup",
+  ];
+  if (env) lines.push(`  ▸ Env var:         export ${env}=<your-key>`);
+  lines.push(
+    "  ▸ Keyless (Claude): sentinel connect   (rides a Claude Max subscription)",
+    "  ▸ All options:     sentinel setup"
+  );
+  return lines.join("\n");
+}
+
 function loadRegistries(installRoot: string, skillPaths: string[]): void {
   const { skills } = loadAllSkills(installRoot, skillPaths);
   for (const skill of skills) {
@@ -265,7 +291,7 @@ program
       modelName = parts.slice(1).join("/") || undefined;
       const single = providerManager.getProvider(parts[0]);
       if (!single || !single.isAvailable()) {
-        console.error(`Provider "${parts[0]}" not available. Configure it (sentinel setup) or set an API key.`);
+        console.error(printProviderHelp(parts[0]));
         process.exitCode = 1;
         return;
       }
@@ -440,7 +466,7 @@ program
       modelName = parts.slice(1).join("/") || undefined;
       const single = providerManager.getProvider(parts[0]);
       if (!single || !single.isAvailable()) {
-        console.error(`Provider "${parts[0]}" not available. Run "sentinel setup" or "sentinel connect", or set an API key.`);
+        console.error(printProviderHelp(parts[0]));
         process.exitCode = 1;
         return;
       }

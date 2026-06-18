@@ -18,6 +18,7 @@ import { skillRegistry } from "../skills/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { composeChatBody, ChatBodyMemo } from "./render-chat.js";
 import { SearchSession } from "./search.js";
+import { detectNeeds } from "../core/onboarding.js";
 import { expandMentions } from "../core/mentions.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
@@ -645,7 +646,7 @@ export class TUIApp {
 
     const providers =
       available.length === 0
-        ? `{${c.amber}-fg}no provider{/}  {${c.textSecondary}-fg}— type /connect{/}`
+        ? `{${c.amber}-fg}no provider configured yet{/}`
         : `{${c.lime}-fg}●{/}  {${c.textSecondary}-fg}${available.join(" · ")}{/}`;
 
     let s = `\n${banner}\n`;
@@ -653,10 +654,24 @@ export class TUIApp {
     s += `\n{${c.textSecondary}-fg}project{/}    {${c.textPrimary}-fg}${project}{/}\n`;
     s += `{${c.textSecondary}-fg}model{/}      {${c.textPrimary}-fg}${model}{/}  {${c.textSecondary}-fg}· agent {/}{${c.textPrimary}-fg}${agent}{/}\n`;
     s += `{${c.textSecondary}-fg}providers{/}  ${providers}\n`;
-    s += `\n{${c.cyan}-fg}▸{/} {${c.textPrimary}-fg}type a message to start{/}\n`;
+
+    // First-run onboarding: if nothing is usable, walk the user through the
+    // easiest paths before they hit a confusing no-key error. detectNeeds is
+    // env-first, so a fleet node with ZAI_API_KEY set isn't nagged.
+    const needsSetup = detectNeeds(process.env, available);
+    if (needsSetup) {
+      s += `\n{${c.amber}-fg}{bold}▸ Get started in 30 seconds:{/}\n`;
+      s += `{${c.textSecondary}-fg}  1.{/} {${c.textPrimary}-fg}node dist/cli.js setup{/} {${c.textSecondary}-fg}— a guided wizard (key stored in your OS keyring){/}\n`;
+      s += `{${c.textSecondary}-fg}  2.{/} {${c.textPrimary}-fg}export ZAI_API_KEY=…{/} {${c.textSecondary}-fg}(or ANTHROPIC_API_KEY / OPENAI_API_KEY), then restart{/}\n`;
+      s += `{${c.textSecondary}-fg}  3.{/} {${c.textPrimary}-fg}/connect{/} {${c.textSecondary}-fg}— ride a Claude Max subscription keylessly via the OAuth router{/}\n`;
+      s += `{${c.textSecondary}-fg}  4.{/} {${c.textPrimary}-fg}/setup{/} {${c.textSecondary}-fg}— see all options anytime{/}\n`;
+      s += `\n{${c.textSecondary}-fg}Then type a message to start.{/}\n`;
+    } else {
+      s += `\n{${c.cyan}-fg}▸{/} {${c.textPrimary}-fg}type a message to start{/}\n`;
+    }
     s += `{${c.cyan}-fg}▸{/} {${c.amber}-fg}/{/} {${c.textPrimary}-fg}for commands & skills{/}  {${c.textSecondary}-fg}— /connect · /model · /skill · /theme{/}\n`;
     s += `{${c.cyan}-fg}▸{/} {${c.amber}-fg}gsd{/} {${c.textPrimary}-fg}<task>{/}  {${c.textSecondary}-fg}— plan → build → test → ship, autonomously{/}\n`;
-    s += `{${c.cyan}-fg}▸{/} {${c.textSecondary}-fg}tab completes · ↑ history · ctrl+q quit{/}\n`;
+    s += `{${c.cyan}-fg}▸{/} {${c.textSecondary}-fg}tab completes · ↑ history · ctrl+q quit · ? for shortcuts{/}\n`;
     this.push(s);
   }
 
