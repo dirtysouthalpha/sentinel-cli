@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { AIProvider, ChatMessage, ChatResponse, ToolCall, ToolDef, contentToText } from "../ai/types.js";
 import { redact } from "./redact.js";
+import { wrapToolError } from "./error-recovery.js";
 
 /** Heuristic: did the provider reject the request for being too long for the model's context? */
 function isContextOverflow(err: unknown): boolean {
@@ -227,12 +228,17 @@ export class AgentRunner extends EventEmitter {
             // the session manager persists to disk. A `bash`/`file` result that
             // echoes AWS_KEY=AKIA... or a bearer token is masked before it can
             // leave the process or be written to a transcript.
-            const resultText = redact(contentToText(resultMsg.content));
+            const rawText = redact(contentToText(resultMsg.content));
+            const ok = !rawText.startsWith("ERROR");
+            // On error, wrap the result with a self-reliance nudge so the model
+            // researches + retries instead of stopping — the "don't get caught
+            // up" behavior. The existing maxRounds loop carries the retry out.
+            const resultText = ok ? rawText : wrapToolError(rawText, false);
             return {
               tc,
               text: resultText,
-              ok: !resultText.startsWith("ERROR"),
-              firstLine: resultText.split("\n")[0].slice(0, 200),
+              ok,
+              firstLine: rawText.split("\n")[0].slice(0, 200),
               aborted: false,
             };
           })
