@@ -131,6 +131,42 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
       },
     },
   },
+  create_skill: {
+    type: "function",
+    function: {
+      name: "create_skill",
+      description:
+        "Author a reusable skill (procedure) and save it so it's available to you and future turns. " +
+        "Use when you hit a repeatable sub-task no tool covers, or when you've figured out a workaround worth " +
+        "keeping — write it as a skill instead of getting stuck. Saves to .sentinel/skills/<name>.md.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Skill name (kebab-case, e.g. 'deploy-to-vercel')" },
+          description: { type: "string", description: "One-line description of when to use this skill" },
+          body: { type: "string", description: "The skill body — markdown step-by-step instructions / procedure" },
+        },
+        required: ["name", "description", "body"],
+      },
+    },
+  },
+  open_url: {
+    type: "function",
+    function: {
+      name: "open_url",
+      description:
+        "Open a URL in the user's REAL browser (their actual Chrome/Firefox/Safari, not headless). " +
+        "Use for OAuth/login/sign-in flows, or anything needing the user's existing browser session " +
+        "(cookies, password manager, 2FA). http(s) only.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The http(s) URL to open in the user's browser" },
+        },
+        required: ["url"],
+      },
+    },
+  },
 };
 
 export function getToolDefinitions(): AIToolDef[] {
