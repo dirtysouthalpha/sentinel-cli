@@ -20,7 +20,13 @@ export type DiffLineKind = "add" | "del" | "hunk" | "ctx";
 export type MarkdownBlock =
   | { kind: "code"; lang: string; lines: string[]; complete: boolean }
   | { kind: "diff"; lines: string[] }
-  | { kind: "prose"; text: string };
+  | { kind: "prose"; text: string }
+  // New block kinds (additive — see parseMarkdownBlocks):
+  | { kind: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
+  | { kind: "hr" }
+  | { kind: "table"; rows: string[][]; header: string[]; align: ("left" | "center" | "right")[] }
+  | { kind: "tasklist"; items: { checked: boolean; text: string }[] }
+  | { kind: "list"; items: string[] };
 
 /** Classify a line as a unified-diff marker line, or null if it isn't one. */
 export function diffKind(line: string): DiffLineKind | null {
@@ -28,6 +34,37 @@ export function diffKind(line: string): DiffLineKind | null {
   if (line.startsWith("+")) return "add";
   if (line.startsWith("-")) return "del";
   return null;
+}
+
+/** ATX heading match → { level, text }, else null. */
+function matchHeading(trimmed: string): { level: number; text: string } | null {
+  const m = trimmed.match(/^(#{1,6})\s+(.*)$/);
+  if (!m) return null;
+  return { level: m[1].length, text: m[2].replace(/\s*#+\s*$/, "").trim() };
+}
+
+/** Thematic break: 3+ of -, *, or _ with optional spaces, alone on the line. */
+function isThematicBreak(trimmed: string): boolean {
+  return /^( {0,3})(-{3,}|\*{3,}|_{3,})[ \t]*$/.test(trimmed);
+}
+
+/** GFM table separator row: | --- | :--: | -: | etc. Returns alignments or null. */
+function tableSepAlign(trimmed: string): ("left" | "center" | "right")[] | null {
+  const cells = trimmed.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  if (cells.length === 0) return null;
+  const aligns: ("left" | "center" | "right")[] = [];
+  for (const c of cells) {
+    if (!/^[ ]*:?-{2,}:?[ ]*$/.test(c)) return null;
+    const left = c.startsWith(":");
+    const right = c.endsWith(":");
+    aligns.push(left && right ? "center" : right ? "right" : "left");
+  }
+  return aligns;
+}
+
+/** Split a GFM table row into trimmed cells. */
+function tableRow(trimmed: string): string[] {
+  return trimmed.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
 }
 
 /** True if the (already trim-started) line opens/closes a fenced block. */
@@ -90,6 +127,62 @@ export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
     if (inCode) {
       codeLines.push(line);
       i++;
+      continue;
+    }
+
+    // --- ATX headings -------------------------------------------------------
+    const heading = matchHeading(trimmed);
+    if (heading) {
+      flushProse();
+      blocks.push({
+        kind: "heading",
+        level: Math.min(6, heading.level) as 1 | 2 | 3 | 4 | 5 | 6,
+        text: heading.text,
+      });
+      i++;
+      continue;
+    }
+
+    // --- thematic break (hr) ------------------------------------------------
+    if (isThematicBreak(trimmed)) {
+      flushProse();
+      blocks.push({ kind: "hr" });
+      i++;
+      continue;
+    }
+
+    // --- GFM table (header + separator + rows) ------------------------------
+    if (trimmed.startsWith("|") && i + 1 < lines.length) {
+      const align = tableSepAlign(lines[i + 1].trim());
+      if (align) {
+        const header = tableRow(trimmed);
+        let j = i + 2;
+        const rows: string[][] = [];
+        while (j < lines.length && lines[j].trim().startsWith("|")) {
+          rows.push(tableRow(lines[j].trim()));
+          j++;
+        }
+        flushProse();
+        blocks.push({ kind: "table", header, align, rows });
+        i = j;
+        continue;
+      }
+    }
+
+    // --- GFM task list (- [ ] / - [x]) -------------------------------------
+    const taskItem = trimmed.match(/^[-*+]\s+\[([ xX])\]\s+(.*)$/);
+    if (taskItem) {
+      const items: { checked: boolean; text: string }[] = [];
+      let j = i;
+      while (j < lines.length) {
+        const tm = lines[j].trim().match(/^[-*+]\s+\[([ xX])\]\s+(.*)$/);
+        if (!tm) break;
+        items.push({ checked: tm[1].toLowerCase() === "x", text: tm[2] });
+        j++;
+      }
+      flushProse();
+      blocks.push({ kind: "tasklist", items });
+      i = j;
       continue;
     }
 
