@@ -385,3 +385,13 @@ body {
 .hljs-deletion { color: var(--bad); }
 .hljs-meta { color: var(--text-faint); }
 .hljs-params { color: var(--text-dim); }
+
+/* GFM tables + task lists (C5) */
+.md-table-wrap { overflow-x: auto; max-width: 100%; }
+.md-table { border-collapse: collapse; width: auto; font-size: 13px; margin: 4px 0; }
+.md-table th, .md-table td { border: 1px solid var(--border); padding: 4px 10px; white-space: normal; }
+.md-table th { background: var(--bg-2); color: var(--text); font-weight: 600; }
+.md-table tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+.md-tasklist { list-style: none; padding-left: 4px; }
+.md-tasklist li { display: flex; align-items: center; gap: 8px; }
+.md-tasklist input[type=checkbox] { accent-color: var(--accent); }

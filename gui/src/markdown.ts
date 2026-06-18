@@ -80,6 +80,8 @@ function renderInline(raw: string): string {
   // Bold.
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  // Strikethrough (~~x~~).
+  s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
   // Italic (single * or _ not part of bold).
   s = s.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, "$1<em>$2</em>");
   s = s.replace(/(^|[^_])_([^_\s][^_]*?)_/g, "$1<em>$2</em>");
@@ -199,7 +201,37 @@ function renderBlockHTML(block: MarkdownBlock, full: boolean): string {
       return renderDiffBlock(block);
     case "prose":
       return renderProseBlock(block);
+    case "heading":
+      return `<h${block.level}>${renderInline(block.text)}</h${block.level}>`;
+    case "hr":
+      return `<hr/>`;
+    case "table":
+      return renderTableBlock(block);
+    case "tasklist":
+      return (
+        `<ul class="md-tasklist">` +
+        block.items
+          .map(
+            (it) =>
+              `<li><input type="checkbox" disabled${it.checked ? " checked" : ""}> ${renderInline(it.text)}</li>`
+          )
+          .join("") +
+        `</ul>`
+      );
+    case "list":
+      return `<ul>${block.items.map((it) => `<li>${renderInline(it)}</li>`).join("")}</ul>`;
   }
+}
+
+/** Render a GFM table block (header + alignment + rows) to an HTML table. */
+function renderTableBlock(b: Extract<MarkdownBlock, { kind: "table" }>): string {
+  const cell = (c: string, tag: string, align?: string): string =>
+    `<${tag}${align ? ` style="text-align:${align}"` : ""}>${renderInline(c)}</${tag}>`;
+  const head = b.header.map((c, i) => cell(c, "th", b.align[i])).join("");
+  const body = b.rows
+    .map((row) => `<tr>${row.map((c, i) => cell(c, "td", b.align[i])).join("")}</tr>`)
+    .join("");
+  return `<div class="md-table-wrap"><table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 /** Streaming variant: highlight code but no copy bar (final bar added at end). */
