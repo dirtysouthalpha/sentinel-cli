@@ -395,3 +395,11 @@ body {
 .md-tasklist { list-style: none; padding-left: 4px; }
 .md-tasklist li { display: flex; align-items: center; gap: 8px; }
 .md-tasklist input[type=checkbox] { accent-color: var(--accent); }
+
+/* Per-turn edit/regenerate actions (D1) */
+.turn-act {
+  align-self: flex-end; font-size: 11px; color: var(--text-faint);
+  cursor: pointer; padding: 2px 8px; border-radius: 999px; user-select: none;
+  border: 1px solid transparent; margin-top: 2px;
+}
+.turn-act:hover { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); background: rgba(var(--accent-rgb), 0.06); }

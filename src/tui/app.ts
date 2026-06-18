@@ -1370,6 +1370,31 @@ export class TUIApp {
       return;
     }
 
+    // /regenerate — drop the last assistant turn and re-run the preceding user
+    // turn (same engine primitive the GUI's regenerate button uses).
+    if (parsed.name === "regenerate" || parsed.name === "retry") {
+      const cm = this.getContextManager();
+      const msgs = cm.getMessages();
+      // Find the last user message index; truncate after it and re-run.
+      let lastUser = -1;
+      for (let k = msgs.length - 1; k >= 0; k--) {
+        if (msgs[k].role === "user") { lastUser = k; break; }
+      }
+      if (lastUser < 0) {
+        this.addError("Nothing to regenerate (no prior user turn).");
+        return;
+      }
+      const userText = msgs[lastUser].content;
+      cm.truncateToCount(lastUser);
+      this.transcript = "";
+      this.printWelcome();
+      this.bodyMemo.reset();
+      this.refreshStatus();
+      this.scheduleRender();
+      void this.chatWithAI(userText);
+      return;
+    }
+
     if (parsed.name === "agent" || parsed.name === "agents") {
       const agents = this.listAgents();
       const cur = state.get("currentAgent");

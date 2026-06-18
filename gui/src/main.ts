@@ -373,8 +373,9 @@ function renderChat() {
       prevNodes = prevNodes.slice(0, d.replaceFrom);
     }
     // Append only the new blocks.
+    let appendIdx = prevNodes.length; // absolute index of each appended block
     for (const b of d.append as Block[]) {
-      const node = renderBlock(b);
+      const node = renderBlock(b, appendIdx++);
       node.setAttribute("data-new", ""); // scope the rise animation to new nodes
       chat.append(node);
       prevNodes.push(node);
@@ -391,8 +392,9 @@ function renderChat() {
   // If the prefix was a full rebuild (above), append everything fresh.
   if (prevNodes.length === 0) {
     let lastAssistantBody: HTMLElement | null = null;
-    for (const b of blocks) {
-      const node = renderBlock(b);
+    for (let bi = 0; bi < blocks.length; bi++) {
+      const b = blocks[bi];
+      const node = renderBlock(b, bi);
       node.setAttribute("data-new", "");
       if (b === streaming) lastAssistantBody = node.querySelector(".body");
       chat.append(node);
@@ -417,9 +419,38 @@ function renderChat() {
   prevBlocks = blocks.slice();
 }
 
-function renderBlock(b: Block): HTMLElement {
-  if (b.kind === "user") return wrap("user", "You", `<div class="body">${esc(b.text)}</div>`);
-  if (b.kind === "assistant") return wrap("assistant", "Sentinel", `<div class="body">${renderMarkdownHTML(b.text)}${b.streaming ? '<span class="cursor"></span>' : ""}</div>`);
+function renderBlock(b: Block, index: number): HTMLElement {
+  if (b.kind === "user") {
+    const node = wrap("user", "You", `<div class="body">${esc(b.text)}</div>`);
+    // Per-turn edit: re-send this prompt, truncating everything from here on.
+    const edit = el("span", "turn-act", "✎ edit");
+    edit.addEventListener("click", () => {
+      const next = prompt("Edit and re-send:", b.text);
+      if (next === null || !next.trim()) return;
+      send({ type: "edit", text: next, truncateIndex: index });
+    });
+    node.append(edit);
+    return node;
+  }
+  if (b.kind === "assistant") {
+    const node = wrap("assistant", "Sentinel", `<div class="body">${renderMarkdownHTML(b.text)}${b.streaming ? '<span class="cursor"></span>' : ""}</div>`);
+    // Regenerate the last assistant turn: drop it + re-run the preceding user turn.
+    if (!b.streaming && index === blocks.length - 1 && index > 0) {
+      const regen = el("span", "turn-act", "↻ regenerate");
+      regen.addEventListener("click", () => {
+        // Find the user turn before this one and re-send it, truncating from there.
+        let userIdx = -1;
+        for (let k = index - 1; k >= 0; k--) {
+          if (blocks[k].kind === "user") { userIdx = k; break; }
+        }
+        if (userIdx < 0) return;
+        const userText = (blocks[userIdx] as { text: string }).text;
+        send({ type: "edit", text: userText, truncateIndex: userIdx });
+      });
+      node.append(regen);
+    }
+    return node;
+  }
   if (b.kind === "system") return wrap("", "", `<div class="body" style="color:var(--text-faint);font-size:13px">${esc(b.text)}</div>`);
   if (b.kind === "error") return wrap("", "", `<div class="body" style="color:var(--bad)">✗ ${esc(b.text)}</div>`);
   return renderTool(b);
