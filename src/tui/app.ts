@@ -914,6 +914,9 @@ export class TUIApp {
       } else if (code === 6) {
         // Ctrl+F → open the in-conversation search overlay
         this.openSearch();
+      } else if (ch === "?" && this.inputBuffer.length === 0 && !this.slashActive) {
+        // ? (with an empty composer) → keyboard cheatsheet overlay
+        this.showCheatsheet();
       } else if (code >= 32) {
         // printable: insert at caret (handles pasted runs char-by-char)
         this.applyLine(insertText(this.line(), ch));
@@ -1742,6 +1745,71 @@ export class TUIApp {
    */
   setModalActive(active: boolean): void {
     this.modalActive = active;
+  }
+
+  /** Show a centered keyboard-cheatsheet overlay; any key dismisses it. */
+  private showCheatsheet(): void {
+    const c = themeEngine.getBlessedColors();
+    const lines = [
+      "{bold}Sentinel — keyboard shortcuts{/}",
+      "",
+      "{bold}Editing{/}",
+      "  Ctrl+A / Ctrl+E     line start / end",
+      "  Ctrl+W              delete word before caret",
+      "  Ctrl+K              delete caret → end of line",
+      "  Ctrl+U              clear line",
+      "  Ctrl+← / Ctrl+→     jump word back / forward",
+      "  Tab                 complete /command",
+      "",
+      "{bold}Navigation{/}",
+      "  Ctrl+F              search transcript",
+      "  Ctrl+L              scroll to top",
+      "  Home / End          top / bottom of transcript",
+      "  ?                   this cheatsheet",
+      "",
+      "{bold}Tabs / models{/}",
+      "  Ctrl+N / Ctrl+W     new / close tab",
+      "  Ctrl+1..9           switch tab",
+      "  Ctrl+R              rename tab",
+      "  Ctrl+O / Shift+Tab  cycle model / agent",
+      "  Ctrl+T              cycle theme",
+      "  Ctrl+Q              quit",
+      "",
+      "{bold}Run{/}",
+      "  Ctrl+C              cancel the current run",
+      "  /                   slash-command menu",
+    ];
+    const w = 56;
+    const h = lines.length + 4;
+    const left = Math.floor(((this.screen.width as number) - w) / 2);
+    const top = Math.floor(((this.screen.height as number) - h) / 2);
+    const overlay = blessed.box({
+      parent: this.screen,
+      top: 0, left: 0, width: "100%", height: "100%",
+      style: { bg: "black", fg: "white" }, opacity: 0.7,
+    });
+    const box = blessed.box({
+      parent: this.screen, top, left, width: w, height: h,
+      border: { type: "line" },
+      style: { bg: c.bgSecondary, fg: c.textPrimary, border: { fg: c.accent || c.cyan } },
+      tags: true,
+    });
+    blessed.text({
+      parent: box, top: 1, left: 1, width: w - 2,
+      content: lines.join("\n"), tags: true,
+      style: { fg: c.textPrimary },
+    });
+    this.setModalActive(true);
+    this.screen.render();
+    const close = (): void => {
+      this.screen.program.removeListener("keypress", close);
+      overlay.destroy();
+      box.destroy();
+      this.setModalActive(false);
+      this.screen.render();
+    };
+    this.screen.program.on("keypress", close);
+    overlay.on("destroy", () => this.screen.program.removeListener("keypress", close));
   }
 
   /** Open the Ctrl+F transcript search overlay. */
