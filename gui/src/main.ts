@@ -179,8 +179,39 @@ function shell() {
 function autosize(t: HTMLTextAreaElement) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
 
 // ---- rendering --------------------------------------------------------------
+/** Inject the engine theme palette as CSS vars on :root, mapping the engine's
+ *  colorsToCSS names to the GUI's own var names so 16 themes render distinctly
+ *  (not collapsed to 5 accent buckets) and light/paper actually look light. */
+function applyThemeVars(vars: Record<string, string>): void {
+  const root = document.documentElement.style;
+  const v = (k: string): string => vars[k] || "";
+  // Direct engine names where the GUI already uses them.
+  root.setProperty("--accent", v("--accent-primary"));
+  root.setProperty("--bg", v("--bg-primary"));
+  root.setProperty("--bg-2", v("--bg-secondary"));
+  root.setProperty("--text", v("--text-primary"));
+  root.setProperty("--text-dim", v("--text-secondary"));
+  root.setProperty("--text-faint", v("--text-tertiary"));
+  root.setProperty("--border", v("--border-color"));
+  root.setProperty("--good", v("--success"));
+  root.setProperty("--bad", v("--error"));
+  root.setProperty("--warn", v("--warning"));
+  // Derive --accent-rgb (used for rgba glows) from the accent hex.
+  const hex = v("--accent-primary").replace("#", "");
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    root.setProperty("--accent-rgb", `${r}, ${g}, ${b}`);
+    root.setProperty("--glow", `rgba(${r}, ${g}, ${b}, 0.5)`);
+  }
+}
+
 function renderAll() {
   if (!snap) return;
+  // Full theme palette from the engine (falls back to the accent buckets if absent).
+  const tv = (snap as { themeVars?: Record<string, string> }).themeVars;
+  if (tv && Object.keys(tv).length) applyThemeVars(tv);
   document.documentElement.dataset.accent = accentFor(snap.theme);
   renderTabs(); renderRail(); renderSidebar(); renderRight();
   ($("#model-sel")).textContent = snap.model.split("/").pop() || snap.model;

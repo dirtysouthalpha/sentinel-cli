@@ -19,6 +19,9 @@ export interface StateSnapshot {
   contextWindow: number;
   /** The engine's actual slash-command catalog, so the GUI autocomplete doesn't drift. */
   commands: { name: string; description: string }[];
+  /** The active theme as a CSS-variable map (colorsToCSS), so the GUI can apply
+   *  the full palette instead of collapsing 16 themes to 5 accent buckets. */
+  themeVars: Record<string, string>;
 }
 
 // ---- client -> server -------------------------------------------------------

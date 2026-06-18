@@ -74,6 +74,9 @@ describe("serve protocol", () => {
       expect(typeof hello.state.contextWindow).toBe("number");
       expect(hello.state.contextWindow).toBeGreaterThan(0);
       expect(Array.isArray(hello.state.commands)).toBe(true);
+      // C4: the active theme ships as a CSS-var map so the GUI applies the full palette.
+      expect(typeof hello.state.themeVars).toBe("object");
+      expect(hello.state.themeVars).not.toBeNull();
     }
     c.ws.close();
   });
