@@ -125,8 +125,21 @@ body {
 .welcome .big b { color: var(--accent); }
 .welcome p { font-size: 13.5px; line-height: 1.7; }
 
-.block { display: flex; flex-direction: column; gap: 6px; animation: rise 0.25s ease; min-width: 0; max-width: 100%; }
+/* Only genuinely-new blocks animate (data-new, set by incremental renderChat and
+   stripped next frame) — kept blocks don't re-fire the rise animation on every
+   tool/system event, killing the rebuild flicker. */
+.block { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
+.block[data-new] { animation: rise 0.25s ease; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* C2: scroll-to-bottom button, shown only when the user has scrolled up. */
+.scroll-bottom {
+  position: absolute; right: 28px; bottom: 16px; z-index: 5;
+  background: var(--accent); color: #fff; font-size: 12px; font-weight: 600;
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35); user-select: none;
+}
+.scroll-bottom:hover { filter: brightness(1.1); }
 .block .who { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-faint); font-weight: 600; }
 .block .who .dot { width: 7px; height: 7px; border-radius: 50%; }
 .block.user .who .dot { background: var(--accent); }

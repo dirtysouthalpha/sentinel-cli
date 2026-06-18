@@ -1,6 +1,7 @@
 import "./style.css";
 import { diffLines } from "diff";
 import { renderMarkdownHTML, renderStreamingHTML } from "./markdown";
+import { diffBlocks } from "./render-diff";
 
 // ---- protocol (mirror of src/server/protocol.ts) ----------------------------
 type PermissionMode = "yolo" | "auto" | "gated" | "plan";
@@ -59,6 +60,9 @@ type Block =
   | { kind: "system"; text: string }
   | { kind: "error"; text: string };
 let blocks: Block[] = [];
+// Auto-follow the chat bottom only when the user is already there, so scrolling
+// up during a stream isn't yanked back down. (C2 scroll gate.)
+let stick = true;
 let pendingPerm: { tool: string; action?: string; path?: string; reason: string } | null = null;
 let pendingToolArgs = "";
 let todos: TodoItem[] = [];
@@ -151,6 +155,24 @@ function shell() {
         setTimeout(() => { btn.textContent = prev; btn.classList.remove("done"); }, 1200);
       }).catch(() => {});
     });
+    // C2: track whether the user is at the bottom; only auto-scroll when so,
+    // so scrolling up during a stream isn't yanked back down.
+    chat.addEventListener("scroll", () => {
+      const atBottom = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 4;
+      stick = atBottom;
+      const btn = document.getElementById("scroll-bottom");
+      if (btn) btn.style.display = atBottom ? "none" : "block";
+    });
+    // Scroll-to-bottom button (shown only when not at the bottom).
+    const sb = el("div", "scroll-bottom", "↓ latest");
+    sb.id = "scroll-bottom";
+    sb.style.display = "none";
+    sb.addEventListener("click", () => {
+      stick = true;
+      chat.scrollTop = chat.scrollHeight;
+      sb.style.display = "none";
+    });
+    (chat.parentElement || chat).appendChild(sb);
   }
 }
 
@@ -294,22 +316,71 @@ function renderChips() {
 }
 
 // ---- chat blocks ------------------------------------------------------------
+// Incremental render: track the previously-rendered block list + their DOM
+// nodes so renderChat can PATCH (append new, drop replaced tail) instead of
+// rebuilding the whole chat on every tool/system event. Kills the rise-animation
+// re-fire flicker the old `innerHTML = ""` caused.
+let prevBlocks: Block[] = [];
+let prevNodes: HTMLElement[] = [];
+
 function renderChat() {
-  const chat = $("#chat"); chat.innerHTML = "";
+  const chat = $("#chat");
+
+  // Full rebuild only when there's nothing yet, or a non-patchable reset
+  // (history replay cleared blocks). Otherwise patch via diffBlocks.
+  if (prevBlocks.length === 0 || blocks.length === 0) {
+    chat.innerHTML = "";
+    prevNodes = [];
+  } else {
+    const d = diffBlocks(prevBlocks, blocks);
+    if (d.replaceFrom < prevNodes.length) {
+      // Drop DOM nodes from the divergence point (edit/regenerate replaced a tail).
+      for (const node of prevNodes.slice(d.replaceFrom)) node.remove();
+      prevNodes = prevNodes.slice(0, d.replaceFrom);
+    }
+    // Append only the new blocks.
+    for (const b of d.append as Block[]) {
+      const node = renderBlock(b);
+      node.setAttribute("data-new", ""); // scope the rise animation to new nodes
+      chat.append(node);
+      prevNodes.push(node);
+    }
+  }
+
+  // First-run welcome path.
   if (blocks.length === 0 && !pendingPerm) {
     chat.append(el("div", "welcome", `<div class="big">Welcome to <b>Sentinel</b></div><p>Describe a bug or feature, or start a slash command. The agent reads files, runs commands, and edits code — gated by your permission mode.</p>`));
+    prevBlocks = blocks.slice();
     return;
   }
-  let lastAssistantBody: HTMLElement | null = null;
-  for (const b of blocks) {
-    const node = renderBlock(b);
-    if (b === streaming) lastAssistantBody = node.querySelector(".body");
-    chat.append(node);
+
+  // If the prefix was a full rebuild (above), append everything fresh.
+  if (prevNodes.length === 0) {
+    let lastAssistantBody: HTMLElement | null = null;
+    for (const b of blocks) {
+      const node = renderBlock(b);
+      node.setAttribute("data-new", "");
+      if (b === streaming) lastAssistantBody = node.querySelector(".body");
+      chat.append(node);
+      prevNodes.push(node);
+    }
+    streamEl = streaming ? lastAssistantBody : null;
+  } else {
+    // Re-capture the live streaming node (it may be among the kept nodes).
+    let lastAssistantBody: HTMLElement | null = null;
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i] === streaming) lastAssistantBody = prevNodes[i]?.querySelector(".body") ?? null;
+    }
+    streamEl = streaming ? lastAssistantBody : null;
   }
-  // Re-capture the live streaming node so subsequent tokens patch it in place.
-  streamEl = streaming ? lastAssistantBody : null;
+
   if (pendingPerm) chat.append(renderPerm());
-  chat.scrollTop = chat.scrollHeight;
+  if (stick) chat.scrollTop = chat.scrollHeight;
+  // Strip the new-node marker next frame so a later re-add re-animates.
+  requestAnimationFrame(() => {
+    for (const node of prevNodes) node.removeAttribute("data-new");
+  });
+  prevBlocks = blocks.slice();
 }
 
 function renderBlock(b: Block): HTMLElement {
@@ -741,7 +812,7 @@ function appendToken(t: string) {
   if (streamEl && streamEl.isConnected) {
     streamEl.innerHTML = renderStreamingHTML(streaming.text) + '<span class="cursor"></span>';
     const chat = document.getElementById("chat");
-    if (chat) chat.scrollTop = chat.scrollHeight;
+    if (chat && stick) chat.scrollTop = chat.scrollHeight;
   } else {
     renderChat();
   }
