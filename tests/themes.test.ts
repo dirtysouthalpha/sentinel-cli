@@ -2,9 +2,26 @@ import { describe, it, expect } from "vitest";
 import { themeEngine } from "../src/tui/themes/engine.js";
 
 describe("ThemeEngine", () => {
-  it("should have 15 themes", () => {
+  it("should have 20 themes", () => {
     const themes = themeEngine.getAllThemes();
-    expect(themes).toHaveLength(15);
+    expect(themes).toHaveLength(20);
+  });
+
+  it("includes the new cyberpunk/tron themes", () => {
+    const names = themeEngine.getAllThemes().map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "vaporwave", "synthwave", "outrun", "glitch", "hologram",
+    ]));
+  });
+
+  it("each new theme has the full color palette (no missing roles)", () => {
+    const required = ["accentPrimary", "cyan", "lime", "amber", "error", "magenta", "purple", "textPrimary"];
+    for (const name of ["vaporwave", "synthwave", "outrun", "glitch", "hologram"]) {
+      const t = themeEngine.getAllThemes().find((x) => x.name === name)!;
+      for (const key of required) {
+        expect(t.colors[key as keyof typeof t.colors], `${name}.${key}`).toBeTruthy();
+      }
+    }
   });
 
   it("should default to cyberpunk theme", () => {

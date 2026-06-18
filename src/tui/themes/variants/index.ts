@@ -435,6 +435,165 @@ export const opencode: ThemeDef = {
   },
 };
 
+// ─── new high-vibe themes: cyberpunk × tron, tuned for color separation ──────
+// Each palette is built so the renderer's color ROLES read at a glance:
+//   cyan    = code + inline code + the prompt ❯
+//   lime    = diff additions + success + ready dot
+//   error   = diff deletions + errors + the no-provider warning
+//   amber   = slash-command hints + working indicator + scroll hint
+//   accent  = headings + active borders + the user bubble
+//   magenta = the secondary accent (tool-call rails, counters)
+
+/** Vaporwave — pink/cyan on deep indigo, A E S T H E T I C. */
+export const vaporwave: ThemeDef = {
+  name: "vaporwave",
+  display: "Vaporwave",
+  description: "Pink-cyan dream on deep indigo (▓▒░ aesthetic)",
+  colors: {
+    accentPrimary: "#FF71CE",
+    accentHover: "#FF49B8",
+    accentSecondary: "#01CDFE",
+    bgPrimary: "#1A0033",
+    bgSecondary: "#2D0050",
+    bgTertiary: "#3D0066",
+    textPrimary: "#F0F0FF",
+    textSecondary: "#B8A0D8",
+    textTertiary: "#7A5C99",
+    border: "#4D2080",
+    borderActive: "#FF71CE",
+    success: "#05FFA1",
+    warning: "#FFB800",
+    error: "#FF3864",
+    info: "#01CDFE",
+    cyan: "#01CDFE",
+    lime: "#05FFA1",
+    amber: "#FFB800",
+    magenta: "#FF71CE",
+    purple: "#B967FF",
+  },
+  effects: { glow: true, pulse: true, glowIntensity: 0.5 },
+};
+
+/** Synthwave — magenta sun + electric blue grid, the Drive vibe. */
+export const synthwave: ThemeDef = {
+  name: "synthwave",
+  display: "Synthwave",
+  description: "Magenta sun over an electric-blue grid",
+  colors: {
+    accentPrimary: "#FF4081",
+    accentHover: "#E63A75",
+    accentSecondary: "#00E5FF",
+    bgPrimary: "#0D0221",
+    bgSecondary: "#1A0933",
+    bgTertiary: "#260F44",
+    textPrimary: "#FEE7FF",
+    textSecondary: "#C4A0E0",
+    textTertiary: "#8A6BB0",
+    border: "#3D1A66",
+    borderActive: "#FF4081",
+    success: "#00FF9F",
+    warning: "#FFD000",
+    error: "#FF2052",
+    info: "#00E5FF",
+    cyan: "#00E5FF",
+    lime: "#00FF9F",
+    amber: "#FFD000",
+    magenta: "#FF4081",
+    purple: "#9D00FF",
+  },
+  effects: { grid: true, glow: true, scanlines: true, glowIntensity: 0.65, scanlineOpacity: 0.04 },
+};
+
+/** Outrun — sunset gradient on black, hot orange + teal, pure 1986. */
+export const outrun: ThemeDef = {
+  name: "outrun",
+  display: "Outrun",
+  description: "Sunset strip: hot orange + teal on black",
+  colors: {
+    accentPrimary: "#FF6B35",
+    accentHover: "#E55A2B",
+    accentSecondary: "#00F0FF",
+    bgPrimary: "#0A0014",
+    bgSecondary: "#14001F",
+    bgTertiary: "#1F002D",
+    textPrimary: "#FFF5E6",
+    textSecondary: "#D8A880",
+    textTertiary: "#996655",
+    border: "#4D1A00",
+    borderActive: "#FF6B35",
+    success: "#00FF88",
+    warning: "#FFD700",
+    error: "#FF2E63",
+    info: "#00F0FF",
+    cyan: "#00F0FF",
+    lime: "#00FF88",
+    amber: "#FFAA00",
+    magenta: "#FF2E63",
+    purple: "#C400FF",
+  },
+  effects: { grid: true, glow: true, glowIntensity: 0.6 },
+};
+
+/** Glitch — acid green + hot pink, high-contrast, terminal-punk. */
+export const glitch: ThemeDef = {
+  name: "glitch",
+  display: "Glitch",
+  description: "Acid green + hot pink, high-contrast terminal punk",
+  colors: {
+    accentPrimary: "#00FF41",
+    accentHover: "#00CC33",
+    accentSecondary: "#FF0099",
+    bgPrimary: "#000000",
+    bgSecondary: "#0A0A0A",
+    bgTertiary: "#141414",
+    textPrimary: "#E0FFE0",
+    textSecondary: "#88CC88",
+    textTertiary: "#446644",
+    border: "#1A331A",
+    borderActive: "#00FF41",
+    success: "#00FF41",
+    warning: "#FFEE00",
+    error: "#FF0099",
+    info: "#00DDFF",
+    cyan: "#00DDFF",
+    lime: "#00FF41",
+    amber: "#FFEE00",
+    magenta: "#FF0099",
+    purple: "#AA00FF",
+  },
+  effects: { scanlines: true, glow: true, glowIntensity: 0.4, scanlineOpacity: 0.05 },
+};
+
+/** Hologram — iridescent cyan-violet, clean and futuristic. */
+export const hologram: ThemeDef = {
+  name: "hologram",
+  display: "Hologram",
+  description: "Iridescent cyan-violet, clean and futuristic",
+  colors: {
+    accentPrimary: "#00FFF5",
+    accentHover: "#00D9D0",
+    accentSecondary: "#BF00FF",
+    bgPrimary: "#050514",
+    bgSecondary: "#0A0A1F",
+    bgTertiary: "#101030",
+    textPrimary: "#E6FFFF",
+    textSecondary: "#90C0D8",
+    textTertiary: "#507088",
+    border: "#1A3045",
+    borderActive: "#00FFF5",
+    success: "#00FFAA",
+    warning: "#FFE000",
+    error: "#FF3070",
+    info: "#00FFF5",
+    cyan: "#00FFF5",
+    lime: "#00FFAA",
+    amber: "#FFE000",
+    magenta: "#FF30D0",
+    purple: "#BF00FF",
+  },
+  effects: { glow: true, grid: true, pulse: true, glowIntensity: 0.55 },
+};
+
 export const ALL_THEMES: ThemeDef[] = [
   cyberpunk,
   light,
@@ -451,4 +610,10 @@ export const ALL_THEMES: ThemeDef[] = [
   forest,
   mono,
   opencode,
+  // New high-vibe themes — cyberpunk-meets-tron with strong color separation.
+  vaporwave,
+  synthwave,
+  outrun,
+  glitch,
+  hologram,
 ];
