@@ -182,6 +182,35 @@ Slash commands inside the TUI (many also work as headless subcommands):
 
 Sentinel is **markdown-extensible**: drop a `.md` into `.sentinel/commands/`, `.sentinel/agents/`, or `.sentinel/skills/` and it's picked up automatically.
 
+### ⌨️ Keyboard shortcuts
+
+**TUI** (type `?` for the in-app cheatsheet):
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+A` / `Ctrl+E` | line start / end |
+| `Ctrl+W` / `Ctrl+K` / `Ctrl+U` | delete word / kill to EOL / clear line |
+| `Ctrl+←` / `Ctrl+→` | jump word back / forward |
+| `Ctrl+F` | search the transcript (Enter = next match) |
+| `Ctrl+L` | scroll to top · `Home`/`End` top/bottom |
+| `Ctrl+N` / `Ctrl+W` (tab) | new / close tab · `Ctrl+1..9` switch |
+| `Ctrl+O` / `Shift+Tab` | cycle model / agent · `Ctrl+T` theme |
+| `/regenerate` (`/retry`) | drop the last turn and re-run the previous prompt |
+| `/out` | print the full (untruncated) last tool output |
+| `Ctrl+C` | cancel the run |
+
+**GUI**:
+
+| Key | Action |
+|-----|--------|
+| `Cmd/Ctrl+K` | command palette |
+| `Cmd/Ctrl+F` | find in conversation |
+| `Cmd/Ctrl+L` | focus the composer |
+| `?` | keyboard cheatsheet |
+| `Enter` / `Shift+Enter` | send / newline |
+| `@` / `/` | mention a file / slash command |
+| `✎ edit` / `↻ regenerate` | per-turn buttons on user / last-assistant blocks |
+
 ---
 
 ## 🛡️ Permissions &amp; undo

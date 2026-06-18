@@ -110,6 +110,21 @@ Data flows: **cli.ts** (bootstrap) → **TUIApp** (the orchestrator + agentic lo
   - **Skills** also load from project `.sentinel/`, `.kilo/`, `.opencode/` dirs and configured
     global paths.
 
+- **Pure-helper-first rule for new TUI/GUI behavior.** The TUI (`TUIApp`) and GUI (`gui/src/main.ts`)
+  are large, surface-coupled modules with little test coverage. New behavior goes into a **pure,
+  dependency-free helper module first** (unit-tested, no TTY/DOM), then a thin binding in the
+  surface. Existing seams to follow:
+  - `src/tui/input-keys.ts` — word-motion/kill-line editing primitives.
+  - `src/tui/search.ts` — transcript search state machine (Ctrl+F).
+  - `src/tui/render-chat.ts` — chat-body composition + change-detection memo.
+  - `src/tui/commands/info.ts` — extracted slash-command handlers over a `CommandHost`
+    (`src/tui/commands/types.ts`); test with a fake host, no blessed.
+  - `gui/src/render-diff.ts` — block-list diff for incremental `renderChat`.
+  - `gui/src/composer-keys.ts` — global keymap (`resolveKey`).
+  - `src/core/project-files.ts` — `@`-mention glob.
+  - `src/core/markdown.ts` — the shared block parser (code/diff/prose/heading/hr/table/
+    tasklist/list); both surfaces consume it, so add block kinds here, render in both places.
+
 - `src/tui/themes/` — `engine.ts` (`themeEngine` singleton, `getBlessedColors()`) + 14 theme
   variants. Model identifiers are always `provider/model` (e.g. `zai/glm-4.6`); the part before
   the first `/` selects the provider.
