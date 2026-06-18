@@ -17,6 +17,7 @@ import { resolveSelection, mergeModels } from "./switcher.js";
 import { skillRegistry } from "../skills/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { composeChatBody, ChatBodyMemo } from "./render-chat.js";
+import { SearchSession } from "./search.js";
 import { expandMentions } from "../core/mentions.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
@@ -165,6 +166,11 @@ export class TUIApp {
   // Interactive slash-command menu (opencode-style filter-as-you-type).
   private slashBox!: blessed.Widgets.BoxElement;
   private slashActive = false;
+
+  // Ctrl+F in-conversation search overlay. While active, keystrokes feed the
+  // search box (gated like modalActive) and the status bar shows "N/M".
+  private search = new SearchSession();
+  private searchActive = false;
   private slashItems: { command: string; description: string }[] = [];
   private slashIndex = 0;
 
@@ -766,6 +772,11 @@ export class TUIApp {
     // listener; drop everything so keystrokes don't also edit the hidden main
     // buffer and Enter doesn't fire a second, billed AI turn.
     if (this.modalActive) return;
+    // Ctrl+F search overlay owns input while open.
+    if (this.searchActive) {
+      this.handleSearchInput(chunk);
+      return;
+    }
     // Reassemble escape sequences that were split across reads: prepend any ESC
     // byte held over from the previous chunk. SSH/ConPTY fragment sequences
     // routinely, so without this the next chunk's "[A" would land as literal text.
@@ -900,6 +911,9 @@ export class TUIApp {
       } else if (code === 12) {
         // Ctrl+L → scroll the transcript to the top (clear-to-top, common TUI meaning)
         this.scrollChat(true);
+      } else if (code === 6) {
+        // Ctrl+F → open the in-conversation search overlay
+        this.openSearch();
       } else if (code >= 32) {
         // printable: insert at caret (handles pasted runs char-by-char)
         this.applyLine(insertText(this.line(), ch));
@@ -1728,6 +1742,79 @@ export class TUIApp {
    */
   setModalActive(active: boolean): void {
     this.modalActive = active;
+  }
+
+  /** Open the Ctrl+F transcript search overlay. */
+  private openSearch(): void {
+    this.searchActive = true;
+    this.search.reset();
+    this.renderSearchBar();
+  }
+
+  /** Close the search overlay and repaint the status bar. */
+  private closeSearch(): void {
+    this.searchActive = false;
+    this.search.reset();
+    this.slashBox.hide();
+    this.screen.render();
+    this.refreshStatus();
+  }
+
+  /** Drive the search overlay from a raw stdin chunk. */
+  private handleSearchInput(chunk: string): void {
+    for (let i = 0; i < chunk.length; i++) {
+      const ch = chunk[i];
+      const code = ch.charCodeAt(0);
+      if (code === 27) {
+        // Esc closes; an ESC-led sequence (arrows) is ignored for simplicity.
+        this.closeSearch();
+        return;
+      }
+      if (code === 13 || code === 10) {
+        // Enter → next match (and scroll to it).
+        const m = this.search.next();
+        if (m !== null) this.scrollToOffset(m);
+        this.renderSearchBar();
+        return;
+      }
+      if (code === 8 || code === 127) {
+        this.search.query = this.search.query.slice(0, -1);
+      } else if (code >= 32) {
+        this.search.query += ch;
+      }
+      // Re-run on the visible transcript.
+      this.search.findAll(this.transcript);
+      this.renderSearchBar();
+      const cur = this.search.current();
+      if (cur !== null) this.scrollToOffset(cur);
+    }
+  }
+
+  /** Render the search bar into the slash overlay box + match counter. */
+  private renderSearchBar(): void {
+    const c = themeEngine.getBlessedColors();
+    const count = this.search.count();
+    const idx = this.search.indexOneBased();
+    const counter = count > 0 ? `{${c.textTertiary}-fg} ${idx}/${count}{/}` : `{${c.textTertiary}-fg} (no matches){/}`;
+    this.slashBox.setContent(
+      `{${c.cyan}-fg}{bold}Search{/} {${c.textSecondary}-fg}${this.esc(this.search.query)}{/}${counter}`
+    );
+    this.slashBox.show();
+    this.screen.render();
+  }
+
+  /** Scroll the chat so the line containing `offset` is visible. */
+  private scrollToOffset(offset: number): void {
+    // Map a character offset in the transcript to a line number, then scroll.
+    const upto = this.transcript.slice(0, offset);
+    const line = upto.split("\n").length - 1;
+    try {
+      this.chat.setScroll(line);
+      this.stickToBottom = false;
+      this.refreshStatus();
+    } catch {
+      // setScroll can throw before layout — ignore.
+    }
   }
 
   /** Render the prompt for the head of the permission queue (if any). */
