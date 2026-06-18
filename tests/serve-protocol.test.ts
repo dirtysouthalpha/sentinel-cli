@@ -69,6 +69,11 @@ describe("serve protocol", () => {
       expect(Array.isArray(hello.state.agents)).toBe(true);
       expect(Array.isArray(hello.state.themes)).toBe(true);
       expect(hello.state.permissionMode).toBe("yolo");
+      // C3/D3: the snapshot carries the context-window cap + the engine command
+      // catalog, so the GUI gauge and autocomplete don't drift from the engine.
+      expect(typeof hello.state.contextWindow).toBe("number");
+      expect(hello.state.contextWindow).toBeGreaterThan(0);
+      expect(Array.isArray(hello.state.commands)).toBe(true);
     }
     c.ws.close();
   });

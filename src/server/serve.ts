@@ -596,6 +596,12 @@ class Connection {
       mcpTools: this.mcp.list().map((t) => ({ server: t.server, tool: t.tool, full: `mcp__${t.server}__${t.tool}` })),
       cost: { ...this.cost },
       providers: providerManager.getAllProviderNames().map((n) => ({ name: n, available: available.includes(n) })),
+      // The context-window cap the engine actually enforces (TUI uses 84000).
+      // Surfaced so the GUI's token gauge divides by the right denominator.
+      contextWindow: 84000,
+      // The engine's real slash-command catalog (registry .md templates), so the
+      // GUI autocomplete stops drifting from what the engine accepts.
+      commands: commandRegistry.getAll().map((c) => ({ name: c.name, description: c.description })),
     };
   }
 }

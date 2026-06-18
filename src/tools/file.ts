@@ -21,6 +21,49 @@ function diff(oldText: string, newText: string): string {
   return output;
 }
 
+/**
+ * A compact LCS-based line diff for a `file:write` result, so the GUI shows what
+ * actually changed instead of the whole file as added. Keeps only changed lines
+ * (drops context) and caps the output so a huge rewrite doesn't flood the tool
+ * card. Exported for testing. Uses a longest-common-subsequence walk so a pure
+ * insertion/deletion doesn't produce spurious +/- pairs from index shift.
+ */
+export function renderWriteDiff(prior: string, next: string, maxLines = 40): string {
+  const a = prior.split("\n");
+  const b = next.split("\n");
+  // LCS DP table.
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out: string[] = [];
+  let i = 0, j = 0;
+  const push = (line: string): boolean => {
+    out.push(line);
+    return out.length >= maxLines;
+  };
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (dp[i + 1][j] >= dp[i][j + 1]) {
+      if (push(`- ${a[i]}`)) break;
+      i++;
+    } else {
+      if (push(`+ ${b[j]}`)) break;
+      j++;
+    }
+  }
+  while (i < a.length) { if (push(`- ${a[i++]}`)) break; }
+  while (j < b.length && out.length < maxLines) { if (push(`+ ${b[j++]}`)) break; }
+  // If we stopped early due to the cap, append a trailer.
+  const remaining = (a.length - i) + (b.length - j);
+  if (out.length >= maxLines && remaining > 0) {
+    out[out.length - 1] = `… (${remaining} more line${remaining === 1 ? "" : "s"})`;
+  }
+  return out.length ? out.join("\n") : "(no line changes)";
+}
+
 function ensureWithinProject(filePath: string, projectRoot: string): string {
   const root = resolve(projectRoot);
   const resolved = resolve(root, filePath);
@@ -84,8 +127,17 @@ export function createFileTool(projectRoot: string): ToolDef {
             const content = args.content as string;
             const dir = dirname(path);
             if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+            // Capture the prior content (if any) so the GUI can show a real diff
+            // instead of the whole file as "added". Emit a compact +/- line diff
+            // the renderer already colorizes.
+            const existed = existsSync(path);
+            const prior = existed ? readFileSync(path, encoding) : "";
             writeFileSync(path, content, encoding);
-            return { success: true, output: `Written ${content.length} bytes to ${path}` };
+            const diffNote = existed ? renderWriteDiff(prior, content) : "(new file)";
+            return {
+              success: true,
+              output: `Written ${content.length} bytes to ${path}\n${diffNote}`,
+            };
           }
           case "exists": {
             return { success: true, output: existsSync(path) ? "true" : "false", data: existsSync(path) };

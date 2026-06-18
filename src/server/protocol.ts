@@ -15,6 +15,10 @@ export interface StateSnapshot {
   mcpTools: { server: string; tool: string; full: string }[];
   cost: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCostUSD: number; requests: number };
   providers: { name: string; available: boolean }[];
+  /** Engine context-window cap (tokens), so the GUI gauge uses the right denominator. */
+  contextWindow: number;
+  /** The engine's actual slash-command catalog, so the GUI autocomplete doesn't drift. */
+  commands: { name: string; description: string }[];
 }
 
 // ---- client -> server -------------------------------------------------------

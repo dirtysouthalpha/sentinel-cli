@@ -56,7 +56,7 @@ let ws: WebSocket | null = null;
 type Block =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming?: boolean }
-  | { kind: "tool"; tool: string; args: any; argsRaw: string; ok?: boolean; firstLine?: string; full?: string; running?: boolean }
+  | { kind: "tool"; tool: string; args: any; argsRaw: string; ok?: boolean; firstLine?: string; full?: string; running?: boolean; expanded?: boolean }
   | { kind: "system"; text: string }
   | { kind: "error"; text: string };
 let blocks: Block[] = [];
@@ -256,7 +256,10 @@ function renderRight() {
   const cu = el("div", "card");
   cu.append(el("div", "ch", "◷ Context · Cost"));
   const tokens = snap!.cost.totalTokens;
-  const pct = Math.min(100, Math.round((tokens / 120000) * 100));
+  // Use the engine-reported context window (StateSnapshot.contextWindow) instead
+  // of a hardcoded 120000 that didn't match the engine's 84000 cap.
+  const window = (snap as { contextWindow?: number }).contextWindow ?? 84000;
+  const pct = Math.min(100, Math.round((tokens / window) * 100));
   const k1 = el("div", "kv"); k1.append(el("span", "", "tokens")); k1.append(el("span", "v", tokens.toLocaleString())); cu.append(k1);
   const k2 = el("div", "kv"); k2.append(el("span", "", "cost")); k2.append(el("span", "v", "$" + snap!.cost.estimatedCostUSD.toFixed(4))); cu.append(k2);
   const g = el("div", "gauge"); const i = el("i"); i.style.width = pct + "%"; g.append(i); cu.append(g);
@@ -406,10 +409,30 @@ function renderTool(b: Extract<Block, { kind: "tool" }>): HTMLElement {
   head.append(el("span", "args", esc(b.argsRaw || "")));
   if (b.running) head.append(el("span", "spin"));
   else head.append(el("span", "status " + (b.ok ? "ok" : "err"), b.ok ? "ok" : "err"));
+  // Expand/collapse toggle for the output body.
+  const hasBody = !!b.full && !b.running;
+  if (hasBody) {
+    const toggle = el("span", "expand", b.expanded ? "▾" : "▸");
+    toggle.style.cursor = "pointer";
+    toggle.addEventListener("click", () => {
+      b.expanded = !b.expanded;
+      // Re-render just this block in place to avoid a full chat rebuild.
+      const fresh = renderTool(b);
+      fresh.setAttribute("data-new", "");
+      card.replaceWith(fresh);
+      requestAnimationFrame(() => fresh.removeAttribute("data-new"));
+    });
+    head.append(toggle);
+  }
   card.append(head);
   const d = computeDiff(b);
   if (d) card.append(d);
-  else if (b.full && !b.running) card.append(el("div", "out", esc(b.full.slice(0, 4000))));
+  else if (hasBody) {
+    // Collapsed caps at 4000 chars; expanded shows everything.
+    const text = b.expanded ? (b.full || "") : (b.full || "").slice(0, 4000);
+    const suffix = !b.expanded && (b.full || "").length > 4000 ? "\n… (click ▸ to expand)" : "";
+    card.append(el("div", "out", esc(text) + (suffix ? `<span class="more">${suffix}</span>` : "")));
+  }
   return card;
 }
 
@@ -472,7 +495,12 @@ function autocomplete(i: HTMLTextAreaElement) {
   acItems = [];
   if (token.startsWith("/")) {
     const q = token.slice(1).toLowerCase();
-    const cmds = [...CHIPS.map((c) => c.slice(1)), "ship", "docgen", "migrate", "analyze", "compact", "clear", "undo", "checkpoints", "commit", "pr", "branch", "diff"];
+    // Source the command list from the engine's catalog (StateSnapshot.commands)
+    // so autocomplete can't drift from what the engine actually accepts. Fall
+    // back to a static list before the first state snapshot arrives.
+    const fromEngine = (snap as { commands?: { name: string }[] } | null)?.commands?.map((c) => c.name) ?? [];
+    const fallback = [...CHIPS.map((c) => c.slice(1)), "ship", "docgen", "migrate", "analyze", "compact", "clear", "undo", "checkpoints", "commit", "pr", "branch", "diff"];
+    const cmds = fromEngine.length ? fromEngine : fallback;
     acItems = [...new Set(cmds)].filter((c) => c.startsWith(q)).slice(0, 8).map((c) => ({ label: "/" + c, insert: "/" + c + " " }));
   } else if (token.startsWith("@")) {
     acItems = []; // file completion handled by engine context; keep simple
