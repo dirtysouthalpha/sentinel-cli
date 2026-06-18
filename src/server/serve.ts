@@ -23,6 +23,7 @@ import { recallRelevant, DEFAULT_RECALL_TOOL } from "../core/brain-recall.js";
 import { sessionManager } from "../core/session-manager.js";
 import { themeEngine } from "../tui/themes/engine.js";
 import { colorsToCSS } from "../tui/themes/types.js";
+import { globProject } from "../core/project-files.js";
 import { commandRegistry } from "../commands/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { resolveTemplate } from "../commands/loader.js";
@@ -306,6 +307,12 @@ class Connection {
         await this.reloadMcp();
         this.pushConfig();
         this.pushState();
+        break;
+      }
+      case "listFiles": {
+        // D2: glob the project for @-mention autocomplete. Cap results + skip
+        // noise dirs (node_modules, .git) so the popup stays useful.
+        this.send({ type: "files", items: globProject(this.projectRoot, msg.query) });
         break;
       }
     }

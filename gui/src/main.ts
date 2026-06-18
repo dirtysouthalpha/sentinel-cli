@@ -136,6 +136,22 @@ function shell() {
   const input = $("#input") as HTMLTextAreaElement;
   input.addEventListener("input", () => { autosize(input); autocomplete(input); });
   input.addEventListener("keydown", onInputKey);
+  // D2: image paste → surface that the attachment was captured and hint the
+  // user to reference it by path (a full attach+upload round-trip is a follow-up;
+  // this avoids silently dropping pasted images).
+  input.addEventListener("paste", (ev: ClipboardEvent) => {
+    const items = ev.clipboardData?.items;
+    if (!items) return;
+    let hasImage = false;
+    for (const it of items) {
+      if (it.type.startsWith("image/")) { hasImage = true; break; }
+    }
+    if (hasImage) {
+      ev.preventDefault();
+      insertAtCaret(input, " [pasted image — save it to the project and @mention the path] ");
+      autosize(input);
+    }
+  });
   renderChips();
   input.focus();
 
@@ -177,6 +193,14 @@ function shell() {
 }
 
 function autosize(t: HTMLTextAreaElement) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
+/** Insert text at the textarea caret, advancing the caret past it. */
+function insertAtCaret(t: HTMLTextAreaElement, text: string): void {
+  const s = t.selectionStart ?? t.value.length;
+  const e = t.selectionEnd ?? t.value.length;
+  t.value = t.value.slice(0, s) + text + t.value.slice(e);
+  const pos = s + text.length;
+  t.selectionStart = t.selectionEnd = pos;
+}
 
 // ---- rendering --------------------------------------------------------------
 /** Inject the engine theme palette as CSS vars on :root, mapping the engine's
@@ -565,7 +589,10 @@ function autocomplete(i: HTMLTextAreaElement) {
     const cmds = fromEngine.length ? fromEngine : fallback;
     acItems = [...new Set(cmds)].filter((c) => c.startsWith(q)).slice(0, 8).map((c) => ({ label: "/" + c, insert: "/" + c + " " }));
   } else if (token.startsWith("@")) {
-    acItems = []; // file completion handled by engine context; keep simple
+    // Query the engine for project files matching the text after @. The reply
+    // (files message) populates acItems asynchronously.
+    acItems = [];
+    send({ type: "listFiles", query: token.slice(1) });
   } else if (token.startsWith("mcp") && snap) {
     acItems = snap.mcpTools.filter((t) => t.full.includes(token)).slice(0, 8).map((t) => ({ label: t.full, insert: t.full + " " }));
   }
@@ -874,6 +901,19 @@ export function dispatch(m: ServerMessage) {
         } as Block;
       });
       renderChat();
+      break;
+    }
+    case "files": {
+      // D2: @-mention file autocomplete — populate the popup from the engine glob.
+      // Only accept if the composer is still in an @-mention (avoids a stale reply
+      // overwriting a menu the user has since left).
+      const inp = $("#input") as HTMLTextAreaElement | null;
+      const tok = inp ? (inp.value.slice(0, inp.selectionStart ?? inp.value.length).split(/\s/).pop() || "") : "";
+      if (tok.startsWith("@")) {
+        acItems = m.items.slice(0, 8).map((p) => ({ label: "@" + p, insert: "@" + p + " " }));
+        acSel = 0;
+        renderAc();
+      }
       break;
     }
     default: {

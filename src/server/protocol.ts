@@ -48,7 +48,9 @@ export type ClientMessage =
   | { type: "removeModel"; model: string }
   | { type: "addMcp"; name: string; command?: string[]; url?: string; enabled?: boolean }
   | { type: "removeMcp"; name: string }
-  | { type: "toggleMcp"; name: string; enabled: boolean };
+  | { type: "toggleMcp"; name: string; enabled: boolean }
+  // D2: @-mention file autocomplete — client queries, server globs the project.
+  | { type: "listFiles"; query: string };
 
 export interface ConfigView {
   providers: { name: string; hasKey: boolean; baseURL?: string; defaultModel?: string; builtin: boolean; available: boolean }[];
@@ -83,7 +85,9 @@ export type ServerMessage =
   // Full conversation replay: sent after getState (and on reconnect) so the GUI
   // can rebuild its message blocks. Without it, a transient WS drop blanks the
   // chat even though ContextManager still holds every turn.
-  | { type: "history"; messages: HistoryMessage[] };
+  | { type: "history"; messages: HistoryMessage[] }
+  // D2: reply to listFiles — project paths matching the @-mention query.
+  | { type: "files"; items: string[] };
 
 /** One replayed conversation turn for the `history` message. */
 export interface HistoryMessage {
