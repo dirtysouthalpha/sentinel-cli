@@ -49,7 +49,7 @@ function hasImage(messages: ChatMessage[]): boolean {
   return messages.some(
     (msg) =>
       Array.isArray(msg.content) &&
-      msg.content.some((p): p is { type: "image_url" } => p.type === "image_url")
+      msg.content.some((p) => p.type === "image_url")
   );
 }
 
