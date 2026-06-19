@@ -30,7 +30,8 @@ import { providerKeyName } from "../core/secrets/resolver.js";
 import { commandRegistry } from "../commands/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { resolveTemplate } from "../commands/loader.js";
-import { ClientMessage, ServerMessage, StateSnapshot, ConfigView } from "./protocol.js";
+import { attachmentFromDataUrl } from "../core/attachments.js";
+import { ClientMessage, ClientAttachment, ServerMessage, StateSnapshot, ConfigView } from "./protocol.js";
 import {
   setProviderConfig,
   removeProviderConfig,
@@ -200,7 +201,7 @@ class Connection {
 
     switch (msg.type) {
       case "send":
-        await this.handleSend(msg.text);
+        await this.handleSend(msg.text, msg.attachments);
         break;
       case "edit":
         await this.handleEdit(msg.text, msg.truncateIndex);
@@ -436,7 +437,7 @@ class Connection {
     await this.handleSend(text);
   }
 
-  private async handleSend(text: string): Promise<void> {
+  private async handleSend(text: string, attachments?: ClientAttachment[]): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.send({ type: "busy", busy: true });
@@ -545,7 +546,18 @@ class Connection {
           // best-effort
         }
       }
-      const result = await runner.run(outbound, this.ac.signal);
+      // Convert wire attachments → engine Attachments for multimodal send.
+      const visionAttachments = (attachments ?? [])
+        .map((a) => {
+          try {
+            return attachmentFromDataUrl(a.dataUrl, { name: a.name });
+          } catch (err) {
+            this.send({ type: "system", text: `Skipped attachment: ${err instanceof Error ? err.message : String(err)}` });
+            return null;
+          }
+        })
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+      const result = await runner.run(outbound, this.ac.signal, visionAttachments);
       this.send({ type: "done", stopReason: result.stopReason, rounds: result.rounds });
       this.touchSession((id) => sessionManager.markDirty(id));
     } catch (err) {

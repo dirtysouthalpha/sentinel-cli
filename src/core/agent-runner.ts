@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { AIProvider, ChatMessage, ChatResponse, ToolCall, ToolDef, contentToText } from "../ai/types.js";
 import { redact } from "./redact.js";
 import { wrapToolError } from "./error-recovery.js";
+import type { Attachment } from "./attachments.js";
 
 /** Heuristic: did the provider reject the request for being too long for the model's context? */
 function isContextOverflow(err: unknown): boolean {
@@ -33,6 +34,9 @@ export interface ContextManagerLike {
    *  fn, yielding a semantic summary instead of a lossy concat. Preferred over
    *  ensureUnder for overflow recovery when a summarize fn is available. */
   compactWithSummarizer?(summarize: (unitTexts: string[]) => Promise<string>): Promise<void>;
+  /** Add a multimodal user message (text + image attachments). Optional; when
+   *  absent, the runner falls back to plain-text addMessage (no vision). */
+  addVisionMessage?(text: string, attachments: Attachment[]): void;
 }
 
 export interface AgentRunnerDeps {
@@ -126,7 +130,7 @@ export class AgentRunner extends EventEmitter {
     return super.emit(event, ...args);
   }
 
-  async run(userMessage: string, signal?: AbortSignal): Promise<AgentRunResult> {
+  async run(userMessage: string, signal?: AbortSignal, attachments?: Attachment[]): Promise<AgentRunResult> {
     const { model, maxRounds, temperature, maxTokens } = this.config;
 
     const usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
@@ -134,7 +138,14 @@ export class AgentRunner extends EventEmitter {
     let finalContent = "";
     let stopReason: AgentRunResult["stopReason"] = "no_tool_calls";
 
-    this.context.addMessage("user", userMessage);
+    // Multimodal: when image attachments are present AND the context supports
+    // vision, build a ContentPart[] message; otherwise plain text. Falls back
+    // gracefully when the context lacks addVisionMessage (fakes, old callers).
+    if (attachments && attachments.length > 0 && this.context.addVisionMessage) {
+      this.context.addVisionMessage(userMessage, attachments);
+    } else {
+      this.context.addMessage("user", userMessage);
+    }
 
     try {
       for (let round = 1; round <= maxRounds; round++) {

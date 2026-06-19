@@ -1,6 +1,7 @@
 import { ChatMessage as AIChatMessage, ToolCall } from "../ai/types.js";
 import { createLogger } from "../utils/logger.js";
 import { planCompaction, unitToText, planIsSafe } from "./compact-strategy.js";
+import { Attachment, toImageContentPart } from "../core/attachments.js";
 
 const log = createLogger({ prefix: "context" });
 
@@ -58,6 +59,22 @@ export class ContextManager {
     }
   }
 
+  /**
+   * Add a multimodal user message (text + image attachments). Stores the text
+   * as content and the attachments in metadata; toAIMessages() reconstructs
+   * the ContentPart[] the provider needs. Keeping content as a string means
+   * the whole ConversationMessage pipeline (compaction, sessions, export,
+   * display) stays string-based — only the provider sees the image parts.
+   */
+  addVisionMessage(text: string, attachments: Attachment[]): void {
+    this.addMessage("user", text, { attachments });
+    // Bump the token estimate for the image cost (each ~768 tokens rough).
+    const last = this.messages[this.messages.length - 1];
+    if (last && last.metadata?.attachments) {
+      last.tokenEstimate = (last.tokenEstimate ?? 0) + attachments.length * 768;
+    }
+  }
+
   getMessages(): ConversationMessage[] {
     return [...this.messages];
   }
@@ -88,8 +105,13 @@ export class ContextManager {
       // "system" (e.g. a legacy compaction summary) is demoted to "user" so it
       // can't overwrite the system prompt on Anthropic (last-system-wins).
       const role = msg.role === "system" ? "user" : msg.role;
-      const out: AIChatMessage = { role, content: msg.content };
       const md = msg.metadata;
+      // Multimodal: when a user message carries image attachments (stored in
+      // metadata), reconstruct the ContentPart[] the provider expects.
+      const attachments = md?.attachments as Attachment[] | undefined;
+      const out: AIChatMessage = attachments && attachments.length > 0 && role === "user"
+        ? { role, content: [{ type: "text", text: msg.content }, ...attachments.map(toImageContentPart)] }
+        : { role, content: msg.content };
       if (md) {
         if (md.toolCalls) out.toolCalls = md.toolCalls as ToolCall[];
         if (md.toolCallId) out.toolCallId = md.toolCallId as string;

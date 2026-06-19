@@ -3,6 +3,14 @@
 
 export type PermissionMode = "yolo" | "auto" | "gated" | "plan";
 
+/** An image attachment carried over the wire from a GUI paste/drop. */
+export interface ClientAttachment {
+  /** `data:<mime>;base64,<...>` (the standard browser paste format). */
+  dataUrl: string;
+  /** Optional filename hint for display. */
+  name?: string;
+}
+
 export interface StateSnapshot {
   model: string;
   agent: string;
@@ -29,7 +37,7 @@ export interface StateSnapshot {
 
 // ---- client -> server -------------------------------------------------------
 export type ClientMessage =
-  | { type: "send"; text: string }
+  | { type: "send"; text: string; attachments?: ClientAttachment[] }
   | { type: "edit"; text: string; truncateIndex: number }
   | { type: "cancel" }
   | { type: "permission"; allow: boolean }

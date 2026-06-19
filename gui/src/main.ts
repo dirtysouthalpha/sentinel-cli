@@ -83,6 +83,9 @@ let connStatus: ConnStatus = "connecting";
 const DEV = (import.meta as any).env?.DEV ?? false;
 
 const $ = (sel: string, root: ParentNode = document) => root.querySelector(sel) as HTMLElement;
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
 const el = (tag: string, cls?: string, html?: string) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -117,6 +120,7 @@ function shell() {
         <div class="chat" id="chat"></div>
         <div class="composer-wrap">
           <div class="chips" id="chips"></div>
+          <div class="attachment-tray" id="attachment-tray"></div>
           <div class="composer">
             <span class="prompt">❯</span>
             <textarea id="input" rows="1" placeholder="Ask Sentinel to fix, build, or explain…   /  @  ⌘K"></textarea>
@@ -143,20 +147,26 @@ function shell() {
   const input = $("#input") as HTMLTextAreaElement;
   input.addEventListener("input", () => { autosize(input); autocomplete(input); });
   input.addEventListener("keydown", onInputKey);
-  // D2: image paste → surface that the attachment was captured and hint the
-  // user to reference it by path (a full attach+upload round-trip is a follow-up;
-  // this avoids silently dropping pasted images).
+  // D2: image paste → capture as a data-URL attachment, show a thumbnail chip,
+  // and send as a multimodal message. No more "save it and @mention" hint.
   input.addEventListener("paste", (ev: ClipboardEvent) => {
     const items = ev.clipboardData?.items;
     if (!items) return;
-    let hasImage = false;
     for (const it of items) {
-      if (it.type.startsWith("image/")) { hasImage = true; break; }
-    }
-    if (hasImage) {
-      ev.preventDefault();
-      insertAtCaret(input, " [pasted image — save it to the project and @mention the path] ");
-      autosize(input);
+      if (it.type.startsWith("image/")) {
+        const file = it.getAsFile();
+        if (!file) continue;
+        ev.preventDefault();
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          pendingAttachments.push({ dataUrl, name: file.name || `pasted-image-${pendingAttachments.length + 1}` });
+          renderAttachmentChips();
+          autosize(input);
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
     }
   });
   renderChips();
@@ -690,6 +700,30 @@ function renderPerm(): HTMLElement {
 }
 
 // ---- composer + send --------------------------------------------------------
+// Pending image attachments (from paste). Each is a data-URL + name; sent with
+// the next non-empty message, then cleared.
+interface PendingAttachment { dataUrl: string; name: string; }
+let pendingAttachments: PendingAttachment[] = [];
+
+function renderAttachmentChips() {
+  const tray = $("#attachment-tray");
+  if (!tray) return;
+  if (pendingAttachments.length === 0) { tray.innerHTML = ""; return; }
+  tray.innerHTML = pendingAttachments.map((a, i) =>
+    `<span class="att-chip" data-i="${i}">
+      <img src="${a.dataUrl}" alt="${escapeHtml(a.name)}" />
+      <span class="att-name">${escapeHtml(a.name)}</span>
+      <button class="att-remove" data-i="${i}" title="remove">×</button>
+    </span>`
+  ).join("");
+  tray.querySelectorAll<HTMLButtonElement>(".att-remove").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      pendingAttachments.splice(Number(btn.dataset.i), 1);
+      renderAttachmentChips();
+    });
+  });
+}
+
 function onInputKey(e: KeyboardEvent) {
   if (acOpen()) { if (handleAcKey(e)) return; }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }
@@ -700,10 +734,16 @@ function onSend() {
   const text = i.value.trim();
   if (!text) return;
   if (busy) { send({ type: "cancel" }); return; }
+  // Grab + clear pending attachments so they go with THIS message only.
+  const attachments = pendingAttachments.slice();
+  pendingAttachments = [];
+  renderAttachmentChips();
   i.value = ""; autosize(i); closeAc();
   if (text.startsWith("/")) {
     const [name, ...args] = text.slice(1).split(/\s+/);
     send({ type: "command", name, args });
+  } else if (attachments.length > 0) {
+    send({ type: "send", text, attachments });
   } else send({ type: "send", text });
 }
 

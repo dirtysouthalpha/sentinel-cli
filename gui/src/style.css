@@ -446,3 +446,20 @@ body {
 }
 .onboarding .ob-input:focus { border-color: rgba(var(--accent-rgb), 0.6); }
 .onboarding .ob-actions { display: flex; gap: 10px; margin-top: 8px; max-width: 460px; width: 100%; justify-content: flex-end; }
+
+/* ---- attachment tray (pasted image previews) ---- */
+.attachment-tray { display: flex; gap: 8px; padding: 6px 12px 0; flex-wrap: wrap; }
+.attachment-tray:empty { display: none; }
+.att-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-elev, rgba(255,255,255,0.04));
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: 8px; padding: 4px 6px 4px 4px;
+}
+.att-chip img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; }
+.att-chip .att-name { font-size: 12px; color: var(--text); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-chip .att-remove {
+  background: none; border: none; color: var(--text-dim, rgba(255,255,255,0.5));
+  cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; border-radius: 4px;
+}
+.att-chip .att-remove:hover { color: var(--text); background: rgba(255,255,255,0.08); }

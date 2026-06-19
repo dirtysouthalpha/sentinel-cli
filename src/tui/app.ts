@@ -21,6 +21,7 @@ import { composeChatBody, ChatBodyMemo } from "./render-chat.js";
 import { SearchSession } from "./search.js";
 import { detectNeeds } from "../core/onboarding.js";
 import { expandMentions } from "../core/mentions.js";
+import { extractImageMentions, loadAttachment, type Attachment } from "../core/attachments.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
 import { runAutopilotSession, summarizeAutopilot } from "../core/autopilot-session.js";
@@ -2047,7 +2048,24 @@ export class TUIApp {
       });
 
       // V2: expand @file / @url mentions into the message before the agent runs.
-      let outbound = await expandMentions(userMessage, this.projectRoot);
+      // D2: pull image @-mentions out BEFORE expandMentions (which would read
+      // binary images as utf8). Load each as an attachment; missing files are
+      // noted inline. Non-image mentions stay for expandMentions.
+      const { mentions: imgMentions, stripped } = extractImageMentions(userMessage);
+      const imageAttachments: Attachment[] = [];
+      const imageErrors: string[] = [];
+      for (const m of imgMentions) {
+        try {
+          imageAttachments.push(loadAttachment(resolve(this.projectRoot, m)));
+        } catch (err) {
+          imageErrors.push(`@${m}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      let outbound = await expandMentions(stripped, this.projectRoot);
+      if (imageErrors.length > 0) {
+        outbound += `\n[${imageErrors.join("; ")}]`;
+      }
       // V3: auto-recall relevant memories from the Sentinel Prime brain (when its
       // MCP server is connected). Read-only, so it bypasses the permission guard.
       if (this.mcp.has(DEFAULT_RECALL_TOOL)) {
@@ -2057,7 +2075,7 @@ export class TUIApp {
           // recall is best-effort; never block the turn on it
         }
       }
-      const runResult = await runner.run(outbound, this.ac.signal);
+      const runResult = await runner.run(outbound, this.ac.signal, imageAttachments);
 
       // Aborting mid-stream means streamEnd never fired, leaving the assistant
       // block open — close it and confirm the cancel.
