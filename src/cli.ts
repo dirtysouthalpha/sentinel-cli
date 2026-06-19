@@ -13,7 +13,7 @@ import { toolManager } from "./tools/index.js";
 import { runSetup } from "./commands/setup.js";
 import { loadAllSkills } from "./skills/loader.js";
 import { skillRegistry } from "./skills/registry.js";
-import { loadAllCommands } from "./commands/loader.js";
+import { loadAllCommands, resolveTemplate } from "./commands/loader.js";
 import { commandRegistry } from "./commands/registry.js";
 import { loadAllAgents } from "./agents/loader.js";
 import { agentRegistry } from "./agents/registry.js";
@@ -263,6 +263,18 @@ program
   .option("--sandbox", "Run bash commands in a bubblewrap sandbox (Linux+bwrap): FS confined to project, network blocked. Recommended for unattended runs")
   .option("--sandbox-net", "Allow network inside the sandbox (for installs/fetches); pairs with --sandbox")
   .action(async (task, opts, command) => {
+    // Delegate to the shared headless runner (also backs `sentinel loop`).
+    await runHeadless(task, opts, command);
+  });
+
+/**
+ * Shared headless runner. Backs `sentinel run <task>` (raw prompt) and
+ * `sentinel loop <goal>` (prompt wrapped in the automation-loop template).
+ * One implementation: permissions, MCP, compaction, subagents, hooks, and exit
+ * codes stay identical across both entry points. Extracted verbatim from the
+ * former inline `run` action body.
+ */
+async function runHeadless(task: string, opts: any, command: any): Promise<void> {
     // --model/--project are also defined on the root command, so commander binds
     // them to the global opts; merge so subcommand flags are honored either way.
     const merged = command.optsWithGlobals();
@@ -425,6 +437,36 @@ program
       result.stopReason === "no_tool_calls" ? 0 :
       result.stopReason === "aborted" ? 130 :
       result.stopReason === "max_rounds" ? 3 : 1;
+}
+
+program
+  .command("loop <goal>")
+  .description("Run the autonomous PLAN -> ACT -> AUDIT -> REPEAT loop headlessly until project_state.md reads 100%. Auto-approves tool use (unattended).")
+  .option("--model <model>", "AI model to use (provider/model)")
+  .option("--agent <agent>", "Agent to use (default: gsd)")
+  .option("--max-steps <n>", "Maximum tool rounds per pass")
+  .option("--json", "Emit newline-delimited JSON events instead of text")
+  .option("--project <path>", "Project root directory")
+  .option("--permission-mode <mode>", "Permission mode: gated | auto | yolo (default: auto for loop)")
+  .option("--gated", "Force gated permissions (ask before each mutation) instead of the loop default of auto-approve")
+  .option("--sandbox", "Run bash commands in a bubblewrap sandbox (Linux+bwrap): FS confined to project, network blocked. Recommended for unattended loops")
+  .option("--sandbox-net", "Allow network inside the sandbox (for installs/fetches); pairs with --sandbox")
+  .action(async (goal, opts, command) => {
+    // Resolve the automationloop builtin template, substitute $ARGUMENTS, and
+    // delegate to the shared headless runner. Loops are unattended by nature, so
+    // auto-approve unless --gated is explicit.
+    const projectRoot = (command.optsWithGlobals().project || opts.project || process.cwd()) as string;
+    const commands = loadAllCommands(projectRoot);
+    const tmpl = commands.find((c) => c.name === "automationloop");
+    const prompt = tmpl
+      ? resolveTemplate(tmpl.template, [goal])
+      : `AUTONOMOUS CODING LOOP\n\nGOAL: ${goal}\n\nRun a continuous PLAN -> ACT -> AUDIT -> REPEAT loop, maintaining project_state.md as your brain, until the goal is 100% complete.`;
+    const loopOpts = {
+      ...opts,
+      yes: opts.gated ? false : true,
+      permissionMode: (opts.permissionMode as string) || (opts.gated ? "gated" : "auto"),
+    };
+    await runHeadless(prompt, loopOpts, command);
   });
 
 program
