@@ -37,6 +37,7 @@ export function createTabBar(options: TabBarOptions): blessed.Widgets.BoxElement
   let tabPositions: { id: string; start: number; end: number }[] = [];
 
   function render(): void {
+    const fx = themeEngine.getEffects();
     if (tabs.length === 0) {
       tabBar.setContent(` {${c.textTertiary}-fg}No tabs — Ctrl+N to create{/}`);
       screen.render();
@@ -56,7 +57,9 @@ export function createTabBar(options: TabBarOptions): blessed.Widgets.BoxElement
       const label = `${pin}${safeTitle}${mod}`;
 
       if (tab.active) {
-        parts.push(`{${c.cyan}-bg}{${c.bgPrimary}-fg}{bold} ${label} {/}`);
+        // Active tab: glowing pill + a ▔ underline rail when glow on.
+        const underline = fx.glow ? ` {${c.accent}-fg}\u2574{/${c.accent}-fg}` : "";
+        parts.push(`{${c.cyan}-bg}{${c.bgPrimary}-fg}{bold} ${label} {/}${underline}`);
       } else {
         parts.push(`{${c.textSecondary}-fg} ${label} {/}`);
       }
@@ -66,9 +69,9 @@ export function createTabBar(options: TabBarOptions): blessed.Widgets.BoxElement
       pos += labelLen + 1; // +1 for the 1-column separator rendered below
     }
 
-    // A real 1-column separator so recorded tab positions match the rendered
-    // columns (the old empty `{fg}{/}` tag rendered zero width, drifting clicks).
-    tabBar.setContent(parts.join(`{${c.border}-fg}│{/}`));
+    // Accent separators when glow on, dim border otherwise.
+    const sepColor = fx.glow ? c.accent : c.border;
+    tabBar.setContent(parts.join(`{${sepColor}-fg}│{/${sepColor}-fg}`));
     screen.render();
   }
 

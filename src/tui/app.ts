@@ -14,6 +14,7 @@ import { searchCatalog, COMMAND_CATALOG } from "../core/command-catalog.js";
 import { renderMarkdown } from "./render-markdown.js";
 import { capTranscript } from "./transcript.js";
 import { renderCard } from "./cards.js";
+import { accentBorderFor, glowText, neonDivider, pulseDot, pulsePrompt } from "./borders.js";
 import { resolveSelection, mergeModels } from "./switcher.js";
 import { skillRegistry } from "../skills/registry.js";
 import { agentRegistry } from "../agents/registry.js";
@@ -210,6 +211,11 @@ export class TUIApp {
   private spinnerInterval?: ReturnType<typeof setInterval>;
   private spinnerFrame = 0;
   private workStartedAt = 0;
+  // Ambient animation tick — always running, drives the breathing status dot
+  // and the pulsing idle prompt. Coalesces through scheduleRender() so it's
+  // effectively free when the terminal isn't visible.
+  private ambientInterval?: ReturnType<typeof setInterval>;
+  private pulseFrame = 0;
 
   private cost: CostTracker = {
     promptTokens: 0,
@@ -344,6 +350,18 @@ export class TUIApp {
     // unexpected exit — destroy() is idempotent via the `destroyed` guard.
     process.on("exit", () => this.destroy());
 
+    // Ambient heartbeat: every 480ms advance the pulse frame and re-render the
+    // chrome that lives (breathing status dot + pulsing idle prompt). Cheap —
+    // one setContent + one coalesced render per tick. Only the prompt re-renders
+    // when idle; the spinner owns the prompt while processing.
+    this.ambientInterval = setInterval(() => {
+      this.pulseFrame = (this.pulseFrame + 1) % 8;
+      this.refreshStatus();
+      if (!this.isProcessing && this.inputBuffer.length === 0) {
+        this.renderInput();
+      }
+    }, 480);
+
     this.screen.render();
     log.info("TUI started");
   }
@@ -445,8 +463,13 @@ export class TUIApp {
         `{${c.cyan}-fg}${frame}{/} {${c.textTertiary}-fg}working ${secs}s · press Ctrl+C to cancel{/}`
       );
     } else if (this.inputBuffer.length === 0) {
+      // Pulsing prompt — the idle heartbeat. Bright accent at the peak of the
+      // ambient cycle, dim at the trough. Only when effects.pulse is on; calm
+      // steady cyan otherwise.
+      const effects = themeEngine.getEffects();
+      const prompt = effects.pulse ? pulsePrompt(this.pulseFrame, c) : `{${c.cyan}-fg}❯{/${c.cyan}-fg}`;
       this.input.setContent(
-        `{${c.cyan}-fg}❯{/} {${c.textTertiary}-fg}Message Sentinel, or / for commands{/}`
+        `${prompt} {${c.textTertiary}-fg}Message Sentinel, or / for commands{/}`
       );
     } else {
       // Render the caret as an inverse cell at its real position within the line.
@@ -470,19 +493,27 @@ export class TUIApp {
   /** Render a role message as a bordered, per-role-colored card. */
   private card(label: string, body: string, colorKey: string): string {
     const c = themeEngine.getBlessedColors() as unknown as Record<string, string>;
+    const fx = themeEngine.getEffects();
     const color = c[colorKey] || c.textPrimary;
+    // Neon accent border for cyberpunk themes (glow on); the role color is kept
+    // for the label so "you" stays cyan and "sentinel" stays lime.
+    const borderColor = fx.glow ? color : c.border;
     return renderCard({
       label,
       body,
       width: this.cardWidth(),
       labelColor: color,
-      borderColor: color,
+      borderColor,
     });
   }
 
   /** The assistant card, body markdown-rendered (code/diff/inline-code styled). */
   private assistantCard(raw: string): string {
-    const body = renderMarkdown(raw, themeEngine.getBlessedColors() as unknown as Record<string, string>);
+    const body = renderMarkdown(
+      raw,
+      themeEngine.getBlessedColors() as unknown as Record<string, string>,
+      themeEngine.getEffects()
+    );
     return this.card("sentinel", body, "lime");
   }
 
@@ -545,6 +576,10 @@ export class TUIApp {
     this.stream = "";
     this.streamRaw = "";
     this.streaming = false;
+    // A scanline-style divider after each completed turn — the CRT texture only
+    // appears on cyberpunk themes (effects.scanlines); plain themes get nothing
+    // extra here so the transcript stays clean.
+    if (themeEngine.getEffects().scanlines) this.divider();
     this.render();
   }
 
@@ -626,16 +661,29 @@ export class TUIApp {
 
   private divider(): void {
     const c = themeEngine.getBlessedColors();
-    this.push(`{${c.border}-fg}${"─".repeat(60)}{/}\n`);
+    const fx = themeEngine.getEffects();
+    const cols = (this.screen?.width as number) || 80;
+    // Scanline texture: a dotted/dashed rule reads as CRT scanlines when the
+    // theme wants them; a solid dim rule otherwise.
+    if (fx.scanlines) {
+      const ch = "╌";
+      const seg = ch.repeat(Math.floor((cols - 6) / 2));
+      this.push(`{${c.accent}-fg}${seg}{/${c.accent}-fg}\n`);
+    } else {
+      this.push(`{${c.border}-fg}${"─".repeat(Math.min(cols - 6, 60))}{/${c.border}-fg}\n`);
+    }
   }
 
   private printWelcome(): void {
     const c = themeEngine.getBlessedColors();
+    const fx = themeEngine.getEffects();
     const available = providerManager.getAvailableProviderNames();
     const agent = state.get("currentAgent") || "gsd";
     const model = (state.get("currentModel") || "").split("/").pop() || "";
     const project =
       this.projectRoot.replace(/\\/g, "/").split("/").filter(Boolean).pop() || "project";
+    const cols = (this.screen?.width as number) || 80;
+    const cardW = Math.min(cols - 6, 80);
 
     const banner = [
       "  ___  ___ _ __ | |_(_)_ __   ___| |",
@@ -643,37 +691,44 @@ export class TUIApp {
       " \\__ \\  __/ | | | |_| | | | |  __/ |",
       " |___/\\___|_| |_|\\__|_|_| |_|\\___|_|",
     ]
-      .map((l) => `{${c.cyan}-fg}${l}{/}`)
+      .map((l) => `{${c.cyan}-fg}${l}{/${c.cyan}-fg}`)
       .join("\n");
 
     const providers =
       available.length === 0
         ? `{${c.amber}-fg}no provider configured yet{/}`
-        : `{${c.lime}-fg}●{/}  {${c.textSecondary}-fg}${available.join(" · ")}{/}`;
+        : `{${c.lime}-fg}●{/${c.lime}-fg}  {${c.textSecondary}-fg}${available.join(" · ")}{/}`;
 
-    let s = `\n${banner}\n`;
-    s += `\n{${c.cyan}-fg}v${VERSION}{/}  {${c.textSecondary}-fg}· the terminal coding agent — any model, OAuth or key{/}\n`;
-    s += `\n{${c.textSecondary}-fg}project{/}    {${c.textPrimary}-fg}${project}{/}\n`;
-    s += `{${c.textSecondary}-fg}model{/}      {${c.textPrimary}-fg}${model}{/}  {${c.textSecondary}-fg}· agent {/}{${c.textPrimary}-fg}${agent}{/}\n`;
-    s += `{${c.textSecondary}-fg}providers{/}  ${providers}\n`;
+    // Neon frame top + bottom — the showpiece. Diamond center marks when glow.
+    const frame = (mark: boolean) => neonDivider(cardW, c, fx, { mark });
+
+    const rail = fx.glow ? `{${c.accent}-fg}▐{/${c.accent}-fg} ` : "  ";
+
+    let s = `\n${frame(true)}\n`;
+    s += `\n${banner}\n`;
+    s += `\n${glowText(`v${VERSION}`, c, fx, c.cyan)}  {${c.textSecondary}-fg}· the terminal coding agent — any model, OAuth or key{/}\n`;
+    s += `\n${rail}{${c.textSecondary}-fg}project{/}    {${c.textPrimary}-fg}${project}{/}\n`;
+    s += `${rail}{${c.textSecondary}-fg}model{/}      {${c.textPrimary}-fg}${model}{/}  {${c.textSecondary}-fg}· agent {/}{${c.textPrimary}-fg}${agent}{/}\n`;
+    s += `${rail}{${c.textSecondary}-fg}providers{/}  ${providers}\n`;
 
     // First-run onboarding: if nothing is usable, walk the user through the
     // easiest paths before they hit a confusing no-key error. detectNeeds is
     // env-first, so a fleet node with ZAI_API_KEY set isn't nagged.
     const needsSetup = detectNeeds(process.env, available);
     if (needsSetup) {
-      s += `\n{${c.amber}-fg}{bold}▸ Get started in 30 seconds:{/}\n`;
+      s += `\n${glowText("▸ Get started in 30 seconds:", c, fx, c.amber)}\n`;
       s += `{${c.textSecondary}-fg}  1.{/} {${c.textPrimary}-fg}node dist/cli.js setup{/} {${c.textSecondary}-fg}— a guided wizard (key stored in your OS keyring){/}\n`;
       s += `{${c.textSecondary}-fg}  2.{/} {${c.textPrimary}-fg}export ZAI_API_KEY=…{/} {${c.textSecondary}-fg}(or ANTHROPIC_API_KEY / OPENAI_API_KEY), then restart{/}\n`;
       s += `{${c.textSecondary}-fg}  3.{/} {${c.textPrimary}-fg}/connect{/} {${c.textSecondary}-fg}— ride a Claude Max subscription keylessly via the OAuth router{/}\n`;
       s += `{${c.textSecondary}-fg}  4.{/} {${c.textPrimary}-fg}/setup{/} {${c.textSecondary}-fg}— see all options anytime{/}\n`;
       s += `\n{${c.textSecondary}-fg}Then type a message to start.{/}\n`;
     } else {
-      s += `\n{${c.cyan}-fg}▸{/} {${c.textPrimary}-fg}type a message to start{/}\n`;
+      s += `\n${glowText("▸", c, fx, c.cyan)} {${c.textPrimary}-fg}type a message to start{/}\n`;
     }
-    s += `{${c.cyan}-fg}▸{/} {${c.amber}-fg}/{/} {${c.textPrimary}-fg}for commands & skills{/}  {${c.textSecondary}-fg}— /connect · /model · /skill · /theme{/}\n`;
-    s += `{${c.cyan}-fg}▸{/} {${c.amber}-fg}gsd{/} {${c.textPrimary}-fg}<task>{/}  {${c.textSecondary}-fg}— plan → build → test → ship, autonomously{/}\n`;
-    s += `{${c.cyan}-fg}▸{/} {${c.textSecondary}-fg}tab completes · ↑ history · ctrl+q quit · ? for shortcuts{/}\n`;
+    s += `${glowText("▸", c, fx, c.cyan)} {${c.amber}-fg}/{/} {${c.textPrimary}-fg}for commands & skills{/}  {${c.textSecondary}-fg}— /connect · /model · /skill · /theme{/}\n`;
+    s += `${glowText("▸", c, fx, c.cyan)} {${c.amber}-fg}gsd{/} {${c.textPrimary}-fg}<task>{/}  {${c.textSecondary}-fg}— plan → build → test → ship, autonomously{/}\n`;
+    s += `${glowText("▸", c, fx, c.cyan)} {${c.textSecondary}-fg}tab completes · ↑ history · ctrl+q quit · ? for shortcuts{/}\n`;
+    s += `\n${frame(false)}\n`;
     this.push(s);
   }
 
@@ -686,9 +741,15 @@ export class TUIApp {
     const cm = this.getContextManager();
 
     const modelName = model.split("/").pop() || model;
+    const effects = themeEngine.getEffects();
+    // Breathing dot: pulses accent↔dim across the ambient tick when ready,
+    // steady amber while working.
     const stateSeg = processing
-      ? `{${c.amber}-fg}●{/} {${c.amber}-fg}working{/}`
-      : `{${c.lime}-fg}●{/} {${c.textSecondary}-fg}ready{/}`;
+      ? `{${c.amber}-fg}{bold}●{/bold}{/${c.amber}-fg}{/${c.amber}-fg}`
+      : pulseDot(this.pulseFrame, c);
+    const stateLabel = processing
+      ? `{${c.amber}-fg}working{/}`
+      : `{${c.textSecondary}-fg}ready{/}`;
     const mode = `{${c.textSecondary}-fg}${agent}{/} {${c.textTertiary}-fg}·{/} {${c.textSecondary}-fg}${modelName}{/}`;
 
     const tok = this.cost.requests > 0
@@ -706,18 +767,23 @@ export class TUIApp {
     // When the user has scrolled up, flag that live output is still arriving below.
     const scrollHint = this.stickToBottom ? "" : `{${c.amber}-fg}↓ more below{/}`;
 
-    const sep = `  {${c.textSecondary}-fg}│{/}  `;
-    const segs = [stateSeg, mode, ctx, cost, tabs, scrollHint].filter(Boolean);
+    // Accent separators when glow on, dim when off — routes through the same
+    // decision point as everything else.
+    const sepColor = accentBorderFor(c, effects);
+    const sep = `  {${sepColor}-fg}│{/}  `;
+    const segs = [`${stateSeg} ${stateLabel}`, mode, ctx, cost, tabs, scrollHint].filter(Boolean);
     this.status.setContent(" " + segs.join(sep) + " ");
     this.scheduleRender();
   }
 
   private applyTheme(): void {
     const c = themeEngine.getBlessedColors();
+    const effects = themeEngine.getEffects();
     this.chat.style.bg = c.bgPrimary;
     this.chat.style.fg = c.textPrimary;
     this.input.style.bg = c.bgPrimary;
-    (this.input.style as Record<string, unknown>).border = { fg: c.border };
+    // Input border: neon accent for cyberpunk themes, dim border otherwise.
+    (this.input.style as Record<string, unknown>).border = { fg: accentBorderFor(c, effects) };
     this.status.style.bg = c.bgSecondary;
     this.refreshStatus();
     this.renderInput();
@@ -2404,6 +2470,10 @@ export class TUIApp {
     if (this.spinnerInterval) {
       clearInterval(this.spinnerInterval);
       this.spinnerInterval = undefined;
+    }
+    if (this.ambientInterval) {
+      clearInterval(this.ambientInterval);
+      this.ambientInterval = undefined;
     }
     sessionManager.shutdown();
     void this.mcp.disconnect();

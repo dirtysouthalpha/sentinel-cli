@@ -4,6 +4,51 @@ All notable changes to Sentinel CLI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] — 2026-06-18
+
+The "make it POP" visual release. The TUI was flat and static; now it's a
+living cyberpunk HUD. Every cyberpunk theme's `effects` object (scanlines /
+glow / pulse — previously 100% dead code) is now wired in and renders.
+
+### TUI — neon borders, glow, animation
+- **Neon border system** (`src/tui/borders.ts`, pure + tested). `accentBorderFor`,
+  `glowText`, `neonDivider`, `pulseDot`, `pulsePrompt` — the decision points
+  that pick neon accent vs dim border per the theme's effects flags.
+- **Ambient animation tick.** A permanent 480ms heartbeat drives a breathing
+  status dot (accent↔dim cycle) and a pulsing `❯` prompt. The UI feels alive
+  at rest, not just while processing. Coalesces through `scheduleRender()`.
+- **Message cards** now use neon-accent borders on cyberpunk themes (the role
+  color is kept for the label: "you" stays cyan, "sentinel" stays lime).
+- **Welcome banner** is now the showpiece: neon `neonDivider` frame top +
+  bottom with `◆` center marks, glowing version line, accent `▐` left-rail on
+  the key-value block.
+- **Chrome decoration.** Header bar: glowing session dot + accent breadcrumb
+  marks + trailing `╸`. Tab bar: active-tab accent underline + accent
+  separators. Status bar: accent separators, leading breathing dot. Input
+  border: neon accent on cyberpunk themes.
+- **Scanline texture.** `effects.scanlines` gates a `╌` scanline divider after
+  each turn and dashed rules between sections — the CRT feel, only on themes
+  that ask for it.
+- **Markdown glow.** Headings, code-block frames, and HRs glow accent on
+  cyberpunk themes; dim tertiary otherwise.
+
+### GUI — animated background
+- **Constellation particle field.** Wired the dead `<canvas id="bg-canvas">`
+  (declared in HTML, CSS-positioned, but never drawn to). 60 slow-moving
+  accent-tinted particles connected by faint proximity lines — recolors with
+  the active theme (reads `--accent-rgb`), pauses when the tab is hidden.
+- **Pure palette helpers** (`gui/src/background-palette.ts`, tested):
+  `hexToRGB`, `readAccentRGB`.
+
+### Non-cyberpunk themes unchanged
+Every effect is gated on the per-theme `effects` flags. `light`, `paper`,
+`mono`, etc. have no `effects` → `accentBorderFor` returns the dim border →
+they look exactly as before. No regression for users who want a clean look.
+
+704 tests, lint clean, engine + GUI build green.
+
+---
+
 ## [2.0.0] — 2026-06-18
 
 The "codebase intelligence" release. Closes the four gaps that separated

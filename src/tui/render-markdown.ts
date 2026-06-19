@@ -14,6 +14,7 @@
  * output are ones this module emits.
  */
 import { parseMarkdownBlocks } from "../core/markdown.js";
+import type { ThemeEffects } from "./themes/types.js";
 
 /**
  * Escape Blessed special chars so content cannot inject tags. Single-pass so a
@@ -32,15 +33,21 @@ function esc(s: string): string {
  *               cyan, lime, error, textSecondary, textTertiary, textPrimary.
  * @returns      Blessed-tagged, fully-escaped string safe to push to the chat box.
  */
-export function renderMarkdown(text: string, colors: Record<string, string>): string {
+export function renderMarkdown(
+  text: string,
+  colors: Record<string, string>,
+  effects: ThemeEffects = {}
+): string {
   if (text === "") return "";
   const col = (k: string): string => colors[k] ?? colors.textPrimary ?? "white";
+  // Neon accent for the code frame + headings + HR when the theme glows.
+  const frameColor = effects.glow ? (col("accent") || col("cyan")) : col("textTertiary");
 
   const header = (lang: string): string => {
     const label = lang ? esc(lang) : "code";
-    return `{${col("textTertiary")}-fg}╭─ ${label}{/}`;
+    return `{${frameColor}-fg}╭─ ${label}{/${frameColor}-fg}`;
   };
-  const footer = (): string => `{${col("textTertiary")}-fg}╰─{/}`;
+  const footer = (): string => `{${frameColor}-fg}╰─{/${frameColor}-fg}`;
 
   // Style a single line that lives inside a fenced code block.
   const renderCodeLine = (line: string): string => {
@@ -89,9 +96,13 @@ export function renderMarkdown(text: string, colors: Record<string, string>): st
       for (const line of block.lines) out.push(renderDiffLine(line));
     } else if (block.kind === "heading") {
       const hashes = "#".repeat(block.level);
-      out.push(`{bold}{${col("accent") || col("cyan")}-fg}${hashes} ${esc(block.text)}{/}`);
+      const hcol = col("accent") || col("cyan");
+      const open = effects.glow ? `{bold}{${hcol}-fg}` : `{bold}{${hcol}-fg}`;
+      out.push(`${open}${hashes} ${esc(block.text)}{/}`);
     } else if (block.kind === "hr") {
-      out.push(`{${col("textTertiary")}-fg}${"─".repeat(40)}{/}`);
+      // Neon HR when glow, dim tertiary otherwise.
+      const hrCol = effects.glow ? (col("accent") || col("cyan")) : col("textTertiary");
+      out.push(`{${hrCol}-fg}${"─".repeat(40)}{/${hrCol}-fg}`);
     } else if (block.kind === "table") {
       // Simple aligned grid: header bold, a separator of dashes, then rows.
       const widths = block.header.map((h, c) =>

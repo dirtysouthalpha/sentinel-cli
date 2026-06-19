@@ -39,15 +39,22 @@ export function createHeaderBar(options: HeaderBarOptions): blessed.Widgets.BoxE
   }
 
   function render(): void {
+    const fx = themeEngine.getEffects();
     const title = state.get("sessionTitle") || "Session 1";
     const breadcrumb = getBreadcrumb();
     const model = state.get("currentModel").split("/").pop() || "";
     const agent = state.get("currentAgent");
 
+    // Glow the session dot when the theme wants it; accent the breadcrumb marks.
+    const dot = fx.glow
+      ? `{bold}{${c.cyan}-fg}\u25CF{/${c.cyan}-fg}{/bold}`
+      : `{${c.cyan}-fg}\u25CF{/${c.cyan}-fg}`;
+    const sep = fx.glow ? c.accent : c.textTertiary;
+
     headerBar.setContent(
-      ` {${c.cyan}-fg}\u25CF{/} {bold}${title}{/}   ` +
+      ` ${dot} {bold}${title}{/}   ` +
       `${breadcrumb}   ` +
-      `{${c.textTertiary}-fg}${agent} \u00B7 ${model}{/} `
+      `{${sep}-fg}${agent} \u00B7 ${model}{/${sep}-fg} {${sep}-fg}\u2578{/${sep}-fg} `
     );
     screen.render();
   }

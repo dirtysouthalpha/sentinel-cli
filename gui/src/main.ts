@@ -1186,4 +1186,10 @@ function endStream() {
 }
 function setSendBtn() { const b = $("#send"); if (!b) return; b.textContent = busy ? "Stop ■" : "Send ➤"; b.classList.toggle("stop", busy); }
 
+// Wire the animated constellation background onto the dead <canvas id="bg-canvas">.
+// Recolors with the active theme (reads --accent-rgb). Pauses when tab hidden.
+import { initBackground } from "./background.js";
+const bgCanvas = document.getElementById("bg-canvas") as HTMLCanvasElement | null;
+if (bgCanvas) initBackground(bgCanvas);
+
 connect();
