@@ -1,4 +1,7 @@
 import { state } from "../core/state.js";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "compression" });
@@ -9,6 +12,27 @@ interface CompressionMessage {
 }
 
 const compressionCache = new Map<string, string>();
+
+/**
+ * Is Headroom actually available? It's an optional cloud compression service —
+ * if the user hasn't authenticated it (no ~/.headroom token dir) or hasn't
+ * enabled it, we skip straight to the local fallback instead of spamming WARN
+ * with 405s on every tool call. Headroom is an accelerator, not a hard dep.
+ *
+ * Result is cached for the process lifetime — the token dir won't appear mid-run.
+ */
+let headroomAvailable: boolean | null = null;
+function isHeadroomAvailable(): boolean {
+  if (headroomAvailable !== null) return headroomAvailable;
+  // Headroom stores its auth token under ~/.headroom/. If that dir doesn't
+  // exist, the client has no credentials and every compress() call will 405.
+  const tokenDir = process.env.HEADROOM_CONFIG_DIR || join(homedir(), ".headroom");
+  headroomAvailable = existsSync(tokenDir);
+  if (!headroomAvailable) {
+    log.debug("Headroom not authenticated (no ~/.headroom dir) — using local fallback compression");
+  }
+  return headroomAvailable;
+}
 
 function getCacheKey(content: string): string {
   let hash = 0;
@@ -25,12 +49,19 @@ function estimateTokens(text: string): number {
 }
 
 async function doCompress(messages: CompressionMessage[]): Promise<CompressionMessage[]> {
+  // Skip the Headroom cloud call entirely when it isn't authenticated — avoids
+  // a 405 on every tool call and the WARN spam that comes with it.
+  if (!isHeadroomAvailable()) {
+    return fallbackCompress(messages);
+  }
   try {
     const { compress } = await import("headroom-ai");
     const result = await compress(messages as any);
     return result.messages as CompressionMessage[];
   } catch (err) {
-    log.warn(`Headroom compression failed, using fallback: ${err}`);
+    // A real failure (network, quota) — fall back, but log once at debug so it
+    // doesn't spam. The fallback is lossy but always works.
+    log.debug(`Headroom compression failed, using fallback: ${err}`);
     return fallbackCompress(messages);
   }
 }

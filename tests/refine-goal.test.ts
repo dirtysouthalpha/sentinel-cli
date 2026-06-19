@@ -104,4 +104,24 @@ describe("refineGoal — casual input → structured loop goal", () => {
       expect(r.refined).toContain("Done when");
     }
   });
+
+  // Regression: a long multi-clause goal must not be truncated to just the verb.
+  // (Bugs: commander variadic capture + stripLeadingKeyword edge cases.)
+  it("preserves the full goal body when the input is a long sentence", () => {
+    const long = "improve the TUI and GUI, optimize the code and tighten it up. Audit for security.";
+    const r = refineGoal(long);
+    expect(r.intent).toBe("improve");
+    // The whole body survives — not just "improve" or "the".
+    expect(r.refined).toContain("TUI");
+    expect(r.refined).toContain("GUI");
+    expect(r.refined).toContain("security");
+    expect(r.refined).toContain("Done when");
+  });
+
+  it("handles a single-word goal gracefully (no body to strip)", () => {
+    const r = refineGoal("improve");
+    expect(r.intent).toBe("improve");
+    // Even a bare verb produces something usable with a done-condition.
+    expect(r.refined).toContain("Done when");
+  });
 });

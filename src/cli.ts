@@ -444,7 +444,7 @@ async function runHeadless(task: string, opts: any, command: any): Promise<void>
 }
 
 program
-  .command("loop [goal]")
+  .command("loop [goals...]")
   .description(
     "The easy button: refine your goal (casual input OK), then run an autonomous " +
     "PLAN -> ACT -> AUDIT -> REPEAT daemon until project_state.md reads 100%. " +
@@ -462,11 +462,15 @@ program
   .option("--sandbox", "Run bash in a bubblewrap sandbox (default ON when bwrap is available)")
   .option("--no-sandbox", "Disable the sandbox even when bwrap is available")
   .option("--sandbox-net", "Allow network inside the sandbox (installs/fetches)")
-  .action(async (goal, opts, command) => {
+  .action(async (goals, opts, command) => {
     const merged = command.optsWithGlobals();
     const projectRoot = (merged.project || opts.project || process.cwd()) as string;
     const statePath = join(projectRoot, "project_state.md");
     const resuming = existsSync(statePath);
+
+    // Variadic: join all words into one goal sentence (so "sentinel loop fix
+    // the flaky test" captures the whole sentence, not just "fix").
+    const goal = Array.isArray(goals) ? goals.join(" ") : (goals as string);
 
     // Resolve the goal: explicit arg → resume-if-bare → interactive prompt.
     let rawGoal = goal as string | undefined;
