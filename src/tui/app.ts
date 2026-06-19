@@ -7,6 +7,7 @@ import { ContextManager } from "../ai/context.js";
 import { commandRegistry } from "../commands/registry.js";
 import { parseCommand, resolveTemplate } from "../commands/loader.js";
 import { AgentRunner } from "../core/agent-runner.js";
+import { makeCompactionSummarizer } from "../core/compaction-summarizer.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
 import { searchCatalog, COMMAND_CATALOG } from "../core/command-catalog.js";
@@ -2012,6 +2013,7 @@ export class TUIApp {
           toolDefs: [...childToolDefs, subagentTool.def, todoTool.def],
           executeTool: topExecute,
           extractToolCalls,
+          summarizeForCompaction: makeCompactionSummarizer(provider, runnerModel),
         },
         { model: runnerModel, maxRounds: agentRegistry.roundsFor(agentName), maxContextTokens: 84000 }
       );

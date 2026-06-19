@@ -22,6 +22,7 @@ import { sessionManager } from "./core/session-manager.js";
 import { contextManager } from "./ai/context.js";
 import { getToolDefinitions, executeToolCall } from "./tools/tool-executor.js";
 import { AgentRunner } from "./core/agent-runner.js";
+import { makeCompactionSummarizer } from "./core/compaction-summarizer.js";
 import { extractToolCalls } from "./core/tool-call-extractor.js";
 import { buildSystemPrompt } from "./core/system-prompt.js";
 import { expandMentions } from "./core/mentions.js";
@@ -360,6 +361,7 @@ program
         toolDefs: [...toolDefs, subagentTool.def, todoTool.def],
         executeTool: topExecute,
         extractToolCalls,
+        summarizeForCompaction: makeCompactionSummarizer(provider, modelName),
       },
       { model: modelName, maxRounds }
     );

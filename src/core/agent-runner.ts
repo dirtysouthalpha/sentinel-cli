@@ -29,6 +29,10 @@ export interface ContextManagerLike {
   /** Force the context under a token budget (compact + trim). Optional so simple
    *  array-backed fakes can omit it; when present it enables overflow recovery. */
   ensureUnder?(maxTokens: number): number;
+  /** Model-driven compaction: each archival unit is summarized via the injected
+   *  fn, yielding a semantic summary instead of a lossy concat. Preferred over
+   *  ensureUnder for overflow recovery when a summarize fn is available. */
+  compactWithSummarizer?(summarize: (unitTexts: string[]) => Promise<string>): Promise<void>;
 }
 
 export interface AgentRunnerDeps {
@@ -37,6 +41,11 @@ export interface AgentRunnerDeps {
   toolDefs: ToolDef[];
   executeTool: (tc: ToolCall) => Promise<ChatMessage>;
   extractToolCalls: (content: string) => ToolCall[] | null;
+  /** Optional model-driven summarizer for compaction. When present AND the
+   *  context supports compactWithSummarizer, overflow recovery produces a real
+   *  summary instead of a lossy concat. Injected by the caller (app.ts/cli.ts)
+   *  as a single provider.chat round. */
+  summarizeForCompaction?: (unitTexts: string[]) => Promise<string>;
 }
 
 export interface AgentRunnerConfig {
@@ -90,6 +99,7 @@ export class AgentRunner extends EventEmitter {
   private readonly toolDefs: ToolDef[];
   private readonly executeTool: (tc: ToolCall) => Promise<ChatMessage>;
   private readonly extract: (content: string) => ToolCall[] | null;
+  private readonly summarizeForCompaction?: (unitTexts: string[]) => Promise<string>;
   private readonly config: AgentRunnerConfig;
 
   constructor(deps: AgentRunnerDeps, config: AgentRunnerConfig) {
@@ -98,6 +108,7 @@ export class AgentRunner extends EventEmitter {
     this.context = deps.context;
     this.toolDefs = deps.toolDefs;
     this.executeTool = deps.executeTool;
+    this.summarizeForCompaction = deps.summarizeForCompaction;
     this.extract = deps.extractToolCalls;
     this.config = config;
   }
@@ -158,12 +169,30 @@ export class AgentRunner extends EventEmitter {
             );
             break;
           } catch (err) {
-            if (!signal?.aborted && this.context.ensureUnder && compactTries < 3 && isContextOverflow(err)) {
-              compactTries++;
-              const target = Math.max(20000, Math.floor((softCap ?? 120000) * Math.pow(0.6, compactTries)));
-              this.context.ensureUnder(target);
-              this.emit("compacted", this.context.getTotalTokens());
-              continue;
+            if (!signal?.aborted && compactTries < 3 && isContextOverflow(err)) {
+              // Prefer the model-driven summarizer (semantic summary) when both
+              // the context and an injected summarize fn are available; fall back
+              // to the lossy ensureUnder otherwise. This is the v2.0 wiring that
+              // connects compactWithSummarizer to the live loop.
+              const canSummarize =
+                this.summarizeForCompaction && this.context.compactWithSummarizer;
+              if (canSummarize) {
+                compactTries++;
+                try {
+                  await this.context.compactWithSummarizer!(this.summarizeForCompaction!);
+                  this.emit("compacted", this.context.getTotalTokens());
+                  continue;
+                } catch {
+                  // summarizer threw — fall through to ensureUnder below
+                }
+              }
+              if (this.context.ensureUnder) {
+                compactTries++;
+                const target = Math.max(20000, Math.floor((softCap ?? 120000) * Math.pow(0.6, compactTries)));
+                this.context.ensureUnder(target);
+                this.emit("compacted", this.context.getTotalTokens());
+                continue;
+              }
             }
             throw err;
           }
