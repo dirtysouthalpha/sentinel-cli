@@ -12,7 +12,8 @@
 <p align="center">
   <a href="#-quick-start"><img src="https://img.shields.io/badge/node-%3E%3D20-3b82f6?style=for-the-badge&logo=node.js&logoColor=white" alt="node >= 20"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-34d399?style=for-the-badge" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/tests-347%20passing-22c55e?style=for-the-badge" alt="347 tests passing">
+  <img src="https://img.shields.io/badge/version-2.0.0-f59e0b?style=for-the-badge" alt="v2.0.0">
+  <img src="https://img.shields.io/badge/tests-682%20passing-22c55e?style=for-the-badge" alt="682 tests passing">
   <img src="https://img.shields.io/badge/TypeScript-ESM-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript ESM">
   <img src="https://img.shields.io/badge/MCP-client%20%2B%20server-a78bfa?style=for-the-badge" alt="MCP client + server">
   <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-64748b?style=for-the-badge" alt="cross-platform">
@@ -21,6 +22,20 @@
 <p align="center">
   <img src="assets/screenshot-chat.png" width="880" alt="Sentinel CLI desktop GUI">
 </p>
+
+> 🚀 **New in 2.0 — Codebase Intelligence.** Four capabilities that close the
+> gap to Cursor / Claude Code / Aider:
+> - **LSP structural awareness** — the agent resolves symbols via language
+>   servers (go-to-def, find-refs, diagnostics) instead of grep-only navigation.
+> - **Model-driven compaction** — long sessions get real semantic summaries,
+>   not lossy truncation.
+> - **Parallel multi-agent teams** — fan N tasks out across isolated git
+>   worktrees; results merge back, conflicts are reported not force-resolved.
+> - **First-class vision** — paste an image into the GUI composer, or
+>   `@mention` an image path in the TUI; the model sees it.
+>
+> Plus **Ponytail** (lazy-senior-dev discipline) on by default at "ultra".
+> Full details in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
