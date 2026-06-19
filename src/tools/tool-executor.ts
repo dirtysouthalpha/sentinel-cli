@@ -167,6 +167,26 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
       },
     },
   },
+  lsp: {
+    type: "function",
+    function: {
+      name: "lsp",
+      description:
+        "Query a language server for structural code intelligence: go-to-definition, find-all-references, or " +
+        "diagnostics (type errors/warnings) for a file. Use instead of grep when you need real symbol " +
+        "resolution. Returns a 'not configured' message if no LSP server is set up for the file's language.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", description: "definition|references|diagnostics", enum: ["definition", "references", "diagnostics"] },
+          file: { type: "string", description: "File path (absolute or relative to project root)" },
+          line: { type: "number", description: "1-based line number (for definition/references)" },
+          col: { type: "number", description: "1-based column number (for definition/references)" },
+        },
+        required: ["action", "file"],
+      },
+    },
+  },
 };
 
 export function getToolDefinitions(): AIToolDef[] {

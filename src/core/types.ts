@@ -24,6 +24,8 @@ export interface SentinelConfig {
   autopilot?: AutopilotConfig;
   /** Lazy-senior-dev discipline. Default: enabled at "ultra". */
   ponytail?: PonytailConfig;
+  /** Language server config, keyed by language id. e.g. { typescript: { command, args } }. */
+  lsp?: Record<string, { command: string; args?: string[] }>;
 }
 
 export interface AutopilotConfig {
