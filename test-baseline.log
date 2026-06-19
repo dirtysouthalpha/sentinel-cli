@@ -1,0 +1,317 @@
+
+> @dirtysouthalpha/sentinel-cli@2.1.0 test
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90m/home/dad/Downloads/sentinel-cli-v1.1.0/dirtysouthalpha-sentinel-cli-7409a41[39m
+
+ [32m✓[39m tests/project-context.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/agent-team.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [31m❯[39m tests/sandbox-live.test.ts [2m([22m[2m5 tests[22m[2m | [22m[31m4 failed[39m[2m)[22m[32m 24[2mms[22m[39m
+[31m     [31m×[31m allows writing inside the project root[39m[32m 11[2mms[22m[39m
+[31m     [31m×[31m blocks network access (connection to a public host fails)[39m[32m 4[2mms[22m[39m
+[31m     [31m×[31m cannot read a host file outside the bind mounts (e.g. a sentinel under /tmp root)[39m[32m 4[2mms[22m[39m
+[31m     [31m×[31m allowNetwork posture lets resolution through (control case)[39m[32m 3[2mms[22m[39m
+     [32m✓[39m throws a clear error when sandboxAvailable() is false[32m 0[2mms[22m[39m
+ [32m✓[39m tests/file-edit.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+[90mstderr[2m | tests/browser.test.ts[2m > [22m[2mbrowser tool hardening (S5)[2m > [22m[2mrejects a file:// navigation before touching the browser (SSRF guard)
+[22m[39m[WARN] [tools:browser] browser action failed: Blocked URL scheme "file:" (only http/https allowed)
+
+ [32m✓[39m tests/eval.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+[90mstderr[2m | tests/browser.test.ts[2m > [22m[2mbrowser tool hardening (S5)[2m > [22m[2mrejects the cloud metadata IP on navigate
+[22m[39m[WARN] [tools:browser] browser action failed: Blocked request to private/reserved address: 169.254.169.254
+
+ [32m✓[39m tests/lsp-client.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [31m❯[39m tests/bash-sandbox.test.ts [2m([22m[2m5 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 28[2mms[22m[39m
+     [32m✓[39m runs a normal command unsandboxed (default)[32m 6[2mms[22m[39m
+[31m       [31m×[31m writes inside the project root through the sandbox[39m[32m 9[2mms[22m[39m
+       [32m✓[39m cannot read a host file outside the bind mounts[32m 4[2mms[22m[39m
+[31m       [31m×[31m blocks network (no exfil to a metadata/public endpoint)[39m[32m 6[2mms[22m[39m
+       [32m✓[39m rejects a cwd outside the project root (escape guard)[32m 1[2mms[22m[39m
+[90mstderr[2m | tests/browser.test.ts[2m > [22m[2mbrowser tool hardening (S5)[2m > [22m[2mrejects the metadata IP on scrape too
+[22m[39m[WARN] [tools:browser] browser action failed: Blocked request to private/reserved address: 169.254.169.254
+
+[90mstderr[2m | tests/browser.test.ts[2m > [22m[2mbrowser tool hardening (S5)[2m > [22m[2mcontains screenshot paths to the project root
+[22m[39m[WARN] [tools:browser] browser action failed: Screenshot path escapes project root: ../../../tmp/evil.png
+
+ [32m✓[39m tests/pipeline-engine.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m tests/tui-borders.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+[90mstderr[2m | tests/browser.test.ts[2m > [22m[2mbrowser tool hardening (S5)[2m > [22m[2mnavigating sets the current page so a follow-up click targets it (wrong-page fix)
+[22m[39m[WARN] [tools:browser] browser action failed: getaddrinfo EAI_AGAIN example.com
+
+ [31m❯[39m tests/browser.test.ts [2m([22m[2m7 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 192[2mms[22m[39m
+     [32m✓[39m rejects a file:// navigation before touching the browser (SSRF guard)[32m 113[2mms[22m[39m
+     [32m✓[39m rejects the cloud metadata IP on navigate[32m 18[2mms[22m[39m
+     [32m✓[39m rejects the metadata IP on scrape too[32m 18[2mms[22m[39m
+     [32m✓[39m contains screenshot paths to the project root[32m 13[2mms[22m[39m
+     [32m✓[39m allows a screenshot inside the project root[32m 5[2mms[22m[39m
+     [32m✓[39m returns a clear error when an action runs with no open page[32m 5[2mms[22m[39m
+[31m     [31m×[31m navigating sets the current page so a follow-up click targets it (wrong-page fix)[39m[32m 19[2mms[22m[39m
+ [32m✓[39m tests/autopilot-session.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+ [32m✓[39m tests/secrets-real-keyring.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 235[2mms[22m[39m
+ [32m✓[39m tests/tool-call-extractor.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/sync.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+[90mstderr[2m | tests/themes.test.ts[2m > [22m[2mThemeEngine[2m > [22m[2mshould switch themes
+[22m[39m[INFO] [theme] Theme switched to Matrix
+[INFO] [theme] Theme switched to Tron x Gotham
+
+[90mstderr[2m | tests/themes.test.ts[2m > [22m[2mThemeEngine[2m > [22m[2mshould return false for unknown theme
+[22m[39m[WARN] [theme] Theme "nonexistent" not found
+
+[90mstderr[2m | tests/themes.test.ts[2m > [22m[2mThemeEngine[2m > [22m[2mshould cycle themes
+[22m[39m[INFO] [theme] Theme switched to Tron x Gotham
+[INFO] [theme] Theme switched to Light
+[INFO] [theme] Theme switched to Tron x Gotham
+
+ [32m✓[39m tests/themes.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/agent-runner.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 178[2mms[22m[39m
+ [32m✓[39m tests/marketplace.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/pricing.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/secrets-file-backend.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 327[2mms[22m[39m
+ [32m✓[39m tests/usage-tracker.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m tests/lsp-context.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/url-safety.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/subagent-schema.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/open-url.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+[90mstderr[2m | tests/secrets-resolver.test.ts[2m > [22m[2mmigrateProviderKeysToStore[2m > [22m[2mmoves plaintext keys into the store (nested options shape)
+[22m[39m[INFO] [secrets] migrated zai key to fake
+
+[90mstderr[2m | tests/secrets-resolver.test.ts[2m > [22m[2mmigrateProviderKeysToStore[2m > [22m[2mmoves plaintext keys into the store (nested options shape)
+[22m[39m[INFO] [secrets] migrated openai key to fake
+
+[90mstderr[2m | tests/secrets-resolver.test.ts[2m > [22m[2mmigrateProviderKeysToStore[2m > [22m[2malso handles the flat { apiKey } shape
+[22m[39m[INFO] [secrets] migrated groq key to fake
+
+[90mstderr[2m | tests/secrets-resolver.test.ts[2m > [22m[2mmigrateProviderKeysToStore[2m > [22m[2mdoes NOT migrate keys that are present in env (env owns them)
+[22m[39m[INFO] [secrets] migrated openai key to fake
+
+ [32m✓[39m tests/repo-index.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m tests/secrets-resolver.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/background.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/input-keys.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/autopilot.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/cards.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/router.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/workflows-store.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/mentions.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/project-files.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/attachments-dataurl.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+[90mstderr[2m | tests/secrets-bootstrap.test.ts[2m > [22m[2mbootstrap: migrateLegacyKeys + applyScrubMarker[2m > [22m[2mmoves plaintext into the store and returns names to scrub
+[22m[39m[INFO] [secrets:bootstrap] migrated zai key to fake
+
+[90mstderr[2m | tests/secrets-bootstrap.test.ts[2m > [22m[2mbootstrap: migrateLegacyKeys + applyScrubMarker[2m > [22m[2mmoves plaintext into the store and returns names to scrub
+[22m[39m[INFO] [secrets:bootstrap] migrated openai key to fake
+
+[90mstderr[2m | tests/secrets-bootstrap.test.ts[2m > [22m[2mbootstrap: migrateLegacyKeys + applyScrubMarker[2m > [22m[2mskips env-owned keys
+[22m[39m[INFO] [secrets:bootstrap] migrated openai key to fake
+
+[90mstderr[2m | tests/secrets-bootstrap.test.ts[2m > [22m[2mbootstrap: migrateLegacyKeys + applyScrubMarker[2m > [22m[2mis idempotent: re-running with the keyring:// marker is a no-op
+[22m[39m[INFO] [secrets:bootstrap] migrated zai key to fake
+
+ [32m✓[39m tests/secrets-bootstrap.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+[90mstderr[2m | tests/team.test.ts[2m > [22m[2mTeamStore[2m > [22m[2mtolerates a corrupt file → empty manifest (never throws)
+[22m[39m[WARN] [team] Failed to read team from /tmp/sentinel-team-qCRzBD/team.json: SyntaxError: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+
+ [32m✓[39m tests/team.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/compact-strategy.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/checkpoints.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+[90mstderr[2m | tests/workspace.test.ts[2m > [22m[2mWorkspaceStore[2m > [22m[2mtolerates a corrupt file → empty workspace (never throws)
+[22m[39m[WARN] [workspace] Failed to read workspace from /tmp/sentinel-ws-h3ZX0k/workspace.json: SyntaxError: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+
+ [32m✓[39m tests/workspace.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m tests/gsd.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/commands-info.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m tests/error-recovery.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/fuzzy.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/command-catalog.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/sandbox.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/render-markdown.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/ponytail.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/update-check.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/onboarding.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/gui-background-palette.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/gui-render-diff.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/registries.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/refine-goal.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/agent-runner-compaction.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/input.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/hooks.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/loop-banner.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/command-search.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/orchestration.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/permissions.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/tui-search.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/diagnostics.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/todos.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/worktree.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/commands.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/file-write-diff.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/create-skill.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/markdown-tables.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/subagent.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/attachments.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/switcher.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/atomic-write.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m tests/redact.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/router-roles.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/agent-rounds.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/formatting.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/vision.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/git.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/state.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/format.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/render-chat.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/lsp-tool.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/brain-recall.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/about.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/validation.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/loader.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m tests/session-export.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/gui-composer-keys.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/router-connect.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m tests/transcript.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+[90mstderr[2m | tests/serve-protocol.test.ts[2m > [22m[2mserve protocol
+[22m[39m[INFO] [session-manager] Loaded 0 sessions
+[INFO] [session-manager] Session created: 20911ec1-39f9-49c6-84c4-3b14f23093db (Session 1)
+[INFO] [session-manager] Active session: 20911ec1-39f9-49c6-84c4-3b14f23093db (Session 1)
+
+ [32m✓[39m tests/serve-protocol.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/mcp.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m tests/serve-origin.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 7 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/bash-sandbox.test.ts[2m > [22mbash tool sandbox integration[2m > [22mwith sandbox enabled (bwrap present)[2m > [22mwrites inside the project root through the sandbox
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m tests/bash-sandbox.test.ts:[2m35:27[22m[39m
+    [90m 33|[39m       [35mconst[39m bash [33m=[39m [34mcreateBashTool[39m(projectRoot[33m,[39m { sandbox[33m:[39m [35mtrue[39m })[33m;[39m
+    [90m 34|[39m       [35mconst[39m res [33m=[39m [35mawait[39m bash[33m.[39m[34mexecute[39m({ command[33m:[39m [32m"echo sb > out.txt"[39m })[33m;[39m
+    [90m 35|[39m       [34mexpect[39m(res[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m   |[39m                           [31m^[39m
+    [90m 36|[39m       expect(readFileSync(join(projectRoot, "out.txt"), "utf-8").trim(…
+    [90m 37|[39m     })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/bash-sandbox.test.ts[2m > [22mbash tool sandbox integration[2m > [22mwith sandbox enabled (bwrap present)[2m > [22mblocks network (no exfil to a metadata/public endpoint)
+[31m[1mAssertionError[22m: expected '' to contain 'exit=2'[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- exit=2[39m
+
+[36m [2m❯[22m tests/bash-sandbox.test.ts:[2m52:26[22m[39m
+    [90m 50|[39m       const res = await bash.execute({ command: "getent hosts example.…
+    [90m 51|[39m       // exit=2 means name/service failure — the expected blocked-netw…
+    [90m 52|[39m       [34mexpect[39m(res[33m.[39moutput)[33m.[39m[34mtoContain[39m([32m"exit=2"[39m)[33m;[39m
+    [90m   |[39m                          [31m^[39m
+    [90m 53|[39m     }[33m,[39m [34m20000[39m)[33m;[39m
+    [90m 54|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/browser.test.ts[2m > [22mbrowser tool hardening (S5)[2m > [22mnavigating sets the current page so a follow-up click targets it (wrong-page fix)
+[31m[1mAssertionError[22m: expected "vi.fn()" to be called with arguments: [ '#go' ][90m
+
+Number of calls: [1m0[22m
+[31m[39m
+[36m [2m❯[22m tests/browser.test.ts:[2m125:27[22m[39m
+    [90m123|[39m     [35mawait[39m tool[33m.[39m[34mexecute[39m({ action[33m:[39m [32m"click"[39m[33m,[39m selector[33m:[39m [32m"#go"[39m })[33m;[39m
+    [90m124|[39m     // The click landed on the page navigate created, not a freshly-fe…
+    [90m125|[39m     [34mexpect[39m(navPage[33m.[39mclick)[33m.[39m[34mtoHaveBeenCalledWith[39m([32m"#go"[39m)[33m;[39m
+    [90m   |[39m                           [31m^[39m
+    [90m126|[39m   })[33m;[39m
+    [90m127|[39m })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/sandbox-live.test.ts[2m > [22mbubblewrap sandbox (live)[2m > [22mallows writing inside the project root
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m tests/sandbox-live.test.ts:[2m24:20[22m[39m
+    [90m 22|[39m       projectRoot[33m,[39m
+    [90m 23|[39m     })[33m;[39m
+    [90m 24|[39m     [34mexpect[39m(res[33m.[39mok)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m   |[39m                    [31m^[39m
+    [90m 25|[39m     expect(readFileSync(join(projectRoot, "out.txt"), "utf-8").trim())…
+    [90m 26|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/sandbox-live.test.ts[2m > [22mbubblewrap sandbox (live)[2m > [22mblocks network access (connection to a public host fails)
+[31m[1mAssertionError[22m: expected '' to contain 'exit=2'[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- exit=2[39m
+
+[36m [2m❯[22m tests/sandbox-live.test.ts:[2m40:24[22m[39m
+    [90m 38|[39m     // exit=2 (name resolution/service failure) is the expected blocke…
+    [90m 39|[39m     [90m// result; a networked sandbox would print exit=0.[39m
+    [90m 40|[39m     [34mexpect[39m(res[33m.[39mstdout)[33m.[39m[34mtoContain[39m([32m"exit=2"[39m)[33m;[39m
+    [90m   |[39m                        [31m^[39m
+    [90m 41|[39m   })[33m;[39m
+    [90m 42|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/sandbox-live.test.ts[2m > [22mbubblewrap sandbox (live)[2m > [22mcannot read a host file outside the bind mounts (e.g. a sentinel under /tmp root)
+[31m[1mAssertionError[22m: expected 'bwrap: no permissions to create a new…' to match /no such file|does not exist|cannot op…/[39m
+
+[32m- Expected:[39m
+/no such file|does not exist|cannot open/
+
+[31m+ Received:[39m
+"bwrap: no permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. see <https://deb.li/bubblewrap> or <file:///usr/share/doc/bubblewrap/readme.debian.gz>.
+"
+
+[36m [2m❯[22m tests/sandbox-live.test.ts:[2m53:38[22m[39m
+    [90m 51|[39m     const res = await runSandboxed(["cat", canary], { projectRoot }, 1…
+    [90m 52|[39m     [34mexpect[39m(res[33m.[39mok)[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m 53|[39m     expect(res.stderr.toLowerCase()).toMatch(/no such file|does not ex…
+    [90m   |[39m                                      [31m^[39m
+    [90m 54|[39m     // The secret content must never appear in the sandboxed command's…
+    [90m 55|[39m     [34mexpect[39m(res[33m.[39mstdout)[33m.[39mnot[33m.[39m[34mtoContain[39m([32m"TOPSECRET"[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/sandbox-live.test.ts[2m > [22mbubblewrap sandbox (live)[2m > [22mallowNetwork posture lets resolution through (control case)
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m tests/sandbox-live.test.ts:[2m68:20[22m[39m
+    [90m 66|[39m     // localhost should resolve even from a minimal container; the poi…
+    [90m 67|[39m     [90m// path differs from the blocked one above.[39m
+    [90m 68|[39m     [34mexpect[39m(res[33m.[39mok)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m   |[39m                    [31m^[39m
+    [90m 69|[39m   })[33m;[39m
+    [90m 70|[39m })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m91 passed[39m[22m[90m (94)[39m
+[2m      Tests [22m [1m[31m7 failed[39m[22m[2m | [22m[1m[32m729 passed[39m[22m[90m (736)[39m
+[2m   Start at [22m 23:17:07
+[2m   Duration [22m 1.79s[2m (transform 7.18s, setup 0ms, import 10.08s, tests 1.73s, environment 7ms)[22m
+
