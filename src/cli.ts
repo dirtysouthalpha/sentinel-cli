@@ -48,7 +48,9 @@ import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
 
-const VERSION = "1.2.0";
+// Read version from package.json so it never drifts from the published value.
+import pkg from "../package.json" with { type: "json" };
+const VERSION = pkg.version;
 
 function getInstallRoot(): string {
   // fileURLToPath handles percent-encoding (spaces) and drive-letter casing on
