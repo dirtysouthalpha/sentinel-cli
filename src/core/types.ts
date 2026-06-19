@@ -1,5 +1,6 @@
 import type { RouterConfig } from "../ai/router.js";
 import type { HooksConfig } from "./hooks.js";
+import { DEFAULT_PONYTAIL, type PonytailConfig } from "./ponytail.js";
 
 export interface SentinelConfig {
   model: string;
@@ -21,6 +22,8 @@ export interface SentinelConfig {
   ui?: UIConfig;
   hooks?: HooksConfig;
   autopilot?: AutopilotConfig;
+  /** Lazy-senior-dev discipline. Default: enabled at "ultra". */
+  ponytail?: PonytailConfig;
 }
 
 export interface AutopilotConfig {
@@ -117,4 +120,7 @@ export const DEFAULT_CONFIG: SentinelConfig = {
   autoupdate: "notify",
   snapshot: true,
   autopilot: { maxIterations: 10, maxStalls: 2 },
+  // Lazy-senior-dev discipline: on at "ultra" out of the box. Override in
+  // config with `"ponytail": { "enabled": false }` or `{ "level": "lite" }`.
+  ponytail: { ...DEFAULT_PONYTAIL },
 };

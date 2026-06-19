@@ -1,5 +1,8 @@
 import { agentRegistry } from "../agents/registry.js";
 import { loadProjectContext } from "./project-context.js";
+import { skillRegistry } from "../skills/registry.js";
+import { getConfigManager } from "./config.js";
+import { normalizePonytailConfig, resolvePonytailSection } from "./ponytail.js";
 
 /**
  * Build the system prompt for a given agent + project root.
@@ -7,6 +10,9 @@ import { loadProjectContext } from "./project-context.js";
  * Replicates TUIApp.getSystemPrompt() exactly: the base YOLO prompt with the
  * agent's systemPrompt appended (when present). Shared by the TUI and the
  * headless command so both produce identical prompts.
+ *
+ * Ponytail (lazy-senior-dev discipline) is appended last, when enabled — by
+ * default it's on at "ultra", so the YAGNI ladder governs every response.
  */
 export function buildSystemPrompt(agentName: string, projectRoot: string): string {
   const agent = agentRegistry.get(agentName);
@@ -44,5 +50,15 @@ Rules: Do it. Don't ask. Be concise. Show results. When you unblock yourself, no
   // (CLAUDE.md/AGENTS.md head + package.json basics). Empty string when none.
   const projectContext = loadProjectContext(projectRoot);
 
-  return [basePrompt, agentPrompt, projectContext].filter(Boolean).join("\n\n");
+  // Ponytail discipline — default on at "ultra". Normalizes defensively so a
+  // malformed config never breaks the prompt. Skill body comes from the
+  // registry (loaded at startup); if it's missing we inject nothing and the
+  // rest of the prompt is unaffected.
+  const ponytailCfg = normalizePonytailConfig(getConfigManager(projectRoot).getAll().ponytail);
+  const ponytailBody = skillRegistry.get("ponytail")?.content;
+  const ponytailSection = resolvePonytailSection(ponytailCfg, ponytailBody);
+
+  return [basePrompt, agentPrompt, projectContext, ponytailSection]
+    .filter(Boolean)
+    .join("\n\n");
 }
