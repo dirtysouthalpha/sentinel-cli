@@ -1,0 +1,10 @@
+Sentinel CLI
+Copyright (c) 2026 Sentinel CLI
+
+This product includes bundled skill content adapted from the Ponytail project
+(https://github.com/DietrichGebert/ponytail), licensed under the MIT License:
+
+  Copyright (c) DietrichGebert
+
+The adapted skills ship under src/skills/builtin/ponytail*.md and are
+preserved under the same MIT License terms. See LICENSE for full text.
