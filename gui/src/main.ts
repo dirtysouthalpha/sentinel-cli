@@ -626,7 +626,7 @@ function renderBlock(b: Block, index: number): HTMLElement {
 }
 function wrap(cls: string, who: string, inner: string): HTMLElement {
   const e = el("div", "block " + cls);
-  if (who) e.append(el("div", "who", `<span class="dot"></span>${who}`));
+  if (who) e.append(el("div", "who", `<span class="dot"></span>${esc(who)}`));
   const body = document.createElement("div");
   body.innerHTML = inner;
   while (body.firstChild) e.append(body.firstChild);
@@ -636,7 +636,7 @@ function wrap(cls: string, who: string, inner: string): HTMLElement {
 function renderTool(b: Extract<Block, { kind: "tool" }>): HTMLElement {
   const card = el("div", "tool");
   const head = el("div", "head");
-  head.append(el("span", "name", "» " + b.tool));
+  head.append(el("span", "name", "» " + esc(b.tool)));
   head.append(el("span", "args", esc(b.argsRaw || "")));
   if (b.running) head.append(el("span", "spin"));
   else head.append(el("span", "status " + (b.ok ? "ok" : "err"), b.ok ? "ok" : "err"));

@@ -4,7 +4,7 @@
  * headless CLI share one implementation, and so the command-resolution logic is
  * unit-testable without spawning anything.
  */
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
@@ -68,9 +68,13 @@ export async function runVerifyCommands(
 /** Stage everything and commit, best-effort. Returns true if a commit was made
  *  (false if nothing to commit, not a repo, or a hook rejected it). */
 export function gitCommitAll(projectRoot: string, message: string): Promise<boolean> {
-  const safe = message.replace(/["\r\n]/g, " ").slice(0, 200);
+  // execFile passes the message as a literal argv element — no shell — so
+  // backticks/$(...) in the message are committed verbatim instead of executed.
   return new Promise((resolve) => {
-    exec(`git add -A && git commit -m "${safe}"`, { cwd: projectRoot, timeout: 60000, maxBuffer: 20 * 1024 * 1024 }, (err) => resolve(!err));
+    execFile("git", ["add", "-A"], { cwd: projectRoot, timeout: 60000, maxBuffer: 20 * 1024 * 1024 }, (err) => {
+      if (err) return resolve(false);
+      execFile("git", ["commit", "-m", message], { cwd: projectRoot, timeout: 60000, maxBuffer: 20 * 1024 * 1024 }, (err2) => resolve(!err2));
+    });
   });
 }
 
