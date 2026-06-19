@@ -187,6 +187,32 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
       },
     },
   },
+  pr: {
+    type: "function",
+    function: {
+      name: "pr",
+      description:
+        "Manage GitHub pull requests via the gh CLI. Actions: create (title+body → PR URL), " +
+        "list (open PRs), view (PR details), merge (squash/merge/rebase + delete branch), " +
+        "conflicts (parse <<<<<<< markers in a file into structured ours/theirs hunks). " +
+        "Requires gh authenticated. Returns 'not authenticated' guidance if gh isn't set up.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", description: "create|list|view|merge|conflicts", enum: ["create", "list", "view", "merge", "conflicts"] },
+          title: { type: "string", description: "PR title (for create)" },
+          body: { type: "string", description: "PR body/description (for create)" },
+          draft: { type: "boolean", description: "Create as draft (for create)" },
+          number: { type: "number", description: "PR number (for view/merge)" },
+          labels: { type: "string", description: "Comma-separated labels (for create)" },
+          assignees: { type: "string", description: "Comma-separated usernames (for create)" },
+          file: { type: "string", description: "File path to scan for conflicts (for conflicts)" },
+          strategy: { type: "string", description: "squash|merge|rebase (for merge)", enum: ["squash", "merge", "rebase"] },
+        },
+        required: ["action"],
+      },
+    },
+  },
 };
 
 export function getToolDefinitions(): AIToolDef[] {

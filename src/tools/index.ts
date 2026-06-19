@@ -9,6 +9,7 @@ import { createBrowserTool } from "./browser.js";
 import { createCreateSkillTool } from "./create-skill.js";
 import { createOpenUrlTool } from "./open-url.js";
 import { createLspTool } from "./lsp.js";
+import { createPrTool } from "./pr.js";
 import { events } from "../core/events.js";
 import { createLogger } from "../utils/logger.js";
 
@@ -39,6 +40,7 @@ class ToolManager {
     this.register(createCreateSkillTool(projectRoot));
     this.register(createOpenUrlTool());
     this.register(createLspTool());
+    this.register(createPrTool());
     log.info(`Initialized ${this.tools.size} tools${bashOpts.sandbox ? " (bash sandboxed)" : ""}`);
   }
 
