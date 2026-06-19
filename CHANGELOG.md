@@ -4,6 +4,46 @@ All notable changes to Sentinel CLI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] — 2026-06-19
+
+The "extremely easy automation loop" release. The loop went from a single
+capped pass that errored on bare invocation to a true, friendly, set-and-forget
+daemon. Type casually; it structures your goal and runs until 100%.
+
+### Automation loop — now the easy button
+- **True daemon.** `sentinel loop` now delegates to the same iterate-until-done
+  engine as `autopilot` (checkpoints, budgets, stall detection, SIGINT-clean
+  resume). No more single-pass-then-exit-3.
+- **Casual input → structured goal.** New `refineGoal()` — a pure heuristic (no
+  model call, zero latency, works on every provider). Detects intent (fix / add
+  / refactor / improve / clean / document / secure / test) and expands casual
+  input into a goal with a verb, scope, and done-condition. "login validation"
+  becomes "Implement input validation on the login form. ...Done when all inputs
+  are validated and covered by tests." 21 tests.
+- **Bare `sentinel loop` works.** Goal is now optional. Bare invocation prompts
+  interactively ("what do you want built?") on first run, or resumes from
+  `project_state.md` if one exists.
+- **`sentinel loopstatus`** — new headless subcommand. Reads `project_state.md`
+  and prints a scannable dashboard (goal, phase, progress bar, in-progress task,
+  next 3 queued, blockers, done count). Works in a second terminal mid-run.
+- **Safe defaults + clear banner.** Sandbox ON by default (bash confined to
+  project). Budget caps: 60 min / $5 / 10 iters / 2 stalls. Startup banner names
+  the refined goal, state path, watch/stop/resume commands, and the budget.
+  `formatLoopBanner()` pure helper, 9 tests.
+- **`/automationloop` in TUI + GUI** now runs `refineGoal` on the goal before
+  substituting into the template (same casual-input structuring).
+
+### Command clarity
+- Reworded `run` / `loop` / `autopilot` `--help` so they're obviously distinct:
+  `loop` = the easy button (autonomous daemon, safe defaults), `autopilot` =
+  advanced same-engine power-user path (full verify/budget/stall knobs),
+  `run` = one-shot single pass.
+
+### Stats
+- **734 tests** (+30: 21 refineGoal + 9 banner). Lint clean. Engine + GUI build green.
+
+---
+
 ## [2.0.1] — 2026-06-18
 
 The "make it POP" visual release. The TUI was flat and static; now it's a
