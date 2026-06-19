@@ -3,6 +3,7 @@
 import { resolve } from "path";
 import { join } from "path";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { TUIApp } from "./tui/app.js";
@@ -279,6 +280,9 @@ program
  * former inline `run` action body.
  */
 async function runHeadless(task: string, opts: any, command: any): Promise<void> {
+    // Headless output should be clean — silence the INFO provider/tool/loader spam.
+    // Errors and warnings stay visible. Pass --debug on the root command to override.
+    if (!process.env.SENTINEL_DEBUG) setLogLevel("warn");
     // --model/--project are also defined on the root command, so commander binds
     // them to the global opts; merge so subcommand flags are honored either way.
     const merged = command.optsWithGlobals();
@@ -462,11 +466,27 @@ program
   .option("--sandbox", "Run bash in a bubblewrap sandbox (default ON when bwrap is available)")
   .option("--no-sandbox", "Disable the sandbox even when bwrap is available")
   .option("--sandbox-net", "Allow network inside the sandbox (installs/fetches)")
+  .option("--force", "Allow running in $HOME or outside a git repo (use with caution)")
   .action(async (goals, opts, command) => {
+    // Headless loop output should be clean — silence the INFO spam.
+    if (!process.env.SENTINEL_DEBUG) setLogLevel("warn");
     const merged = command.optsWithGlobals();
     const projectRoot = (merged.project || opts.project || process.cwd()) as string;
     const statePath = join(projectRoot, "project_state.md");
     const resuming = existsSync(statePath);
+
+    // Safety guard: refuse to run in $HOME with no git repo unless --force.
+    // An autonomous loop rewriting your home directory is almost never intended.
+    const inHomeNoGit = projectRoot === homedir() && !existsSync(join(projectRoot, ".git"));
+    if (inHomeNoGit && !opts.force) {
+      console.error(
+        `⚠  Refusing to run an autonomous loop in your home directory (${projectRoot}).\n` +
+        `   This would let the agent read and edit everything you own.\n` +
+        `   cd into the project you want to work on, or pass --force to override.`
+      );
+      process.exitCode = 1;
+      return;
+    }
 
     // Variadic: join all words into one goal sentence (so "sentinel loop fix
     // the flaky test" captures the whole sentence, not just "fix").
