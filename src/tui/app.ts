@@ -24,6 +24,7 @@ import { SearchSession } from "./search.js";
 import { detectNeeds } from "../core/onboarding.js";
 import { expandMentions } from "../core/mentions.js";
 import { extractImageMentions, loadAttachment, type Attachment } from "../core/attachments.js";
+import { formatApprovalPrompt } from "../core/approval-diff.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
 import { runGsd, buildPhasePrompt } from "../core/gsd.js";
 import { runAutopilotSession, summarizeAutopilot } from "../core/autopilot-session.js";
@@ -150,7 +151,7 @@ export class TUIApp {
   // FIFO queue of permission prompts. A single resolver field would strand the
   // first request when two gated tool calls ask concurrently (parallel pipeline
   // steps) — the second overwrote the first, which then never resolved.
-  private permissionQueue: Array<{ label: string; reason: string; resolve: (allow: boolean) => void }> = [];
+  private permissionQueue: Array<{ label: string; reason: string; resolve: (allow: boolean) => void; diffPreview?: string }> = [];
   private permissionActive = false;
   // True while a modal (e.g. tab-rename) is capturing keypresses via its own
   // screen.program listener. While set, the raw-stdin handler ignores input so
@@ -1860,11 +1861,21 @@ export class TUIApp {
     this.addSystem("Usage: /tabs [list|new|close|switch|rename|pin]");
   }
 
-  /** Interactive permission prompt: resolves when the user presses y/N. */
+  /** Interactive permission prompt: resolves when the user presses y/N.
+   *  For file mutations, shows the actual diff so the user approves code, not a filename. */
   private askPermission(req: PermissionRequest, reason: string): Promise<boolean> {
     const label = `${req.tool}${req.action ? `(${req.action})` : ""}`;
+    // v2.5: build a diff preview for file edits/writes so the user sees what changes.
+    let diffPreview = "";
+    if ((req.tool === "file" || req.tool === "edit") && req.path && req.proposedContent) {
+      try {
+        let prior = "";
+        try { prior = readFileSync(resolve(this.projectRoot, req.path), "utf-8"); } catch { /* new file */ }
+        diffPreview = "\n" + formatApprovalPrompt(prior, req.proposedContent, req.path);
+      } catch { /* diff is best-effort; never block the ask on it */ }
+    }
     return new Promise((resolve) => {
-      this.permissionQueue.push({ label, reason, resolve });
+      this.permissionQueue.push({ label, reason, resolve, diffPreview });
       if (!this.permissionActive) this.showNextPermission();
     });
   }
@@ -2027,9 +2038,12 @@ export class TUIApp {
     this.permissionActive = true;
     const c = themeEngine.getBlessedColors();
     const more = this.permissionQueue.length > 1 ? ` {${c.textTertiary}-fg}(+${this.permissionQueue.length - 1} queued){/}` : "";
+    const diff = next.diffPreview
+      ? `\n{${c.textTertiary}-fg}${this.esc(next.diffPreview)}{/}\n`
+      : "\n";
     this.push(
       `\n{${c.amber}-fg}{bold}⚠ Permission{/} allow {bold}${this.esc(next.label)}{/}? ` +
-        `{${c.textSecondary}-fg}[y/N] (${this.esc(next.reason)}){/}${more}\n`
+        `{${c.textSecondary}-fg}[y/N] (${this.esc(next.reason)}){/}${more}${diff}`
     );
     this.renderInput();
   }

@@ -28,6 +28,9 @@ export interface PermissionRequest {
   action?: string; // e.g. file action: read|write|edit|delete|mkdir|...
   path?: string; // target path for edit/read categories
   command?: string; // bash command text
+  /** v2.5: proposed new content for file writes/edits — lets the permission
+   *  gate render a real diff instead of approving a blind filename. */
+  proposedContent?: string;
 }
 
 export interface PermissionResult {
@@ -173,7 +176,9 @@ export function toPermissionRequest(tool: string, args: Record<string, unknown>)
   return {
     tool,
     action: typeof args.action === "string" ? args.action : undefined,
-    path: typeof args.path === "string" ? args.path : undefined,
+    path: typeof args.path === "string" ? args.path : (typeof args.file === "string" ? args.file : undefined),
     command: typeof args.command === "string" ? args.command : undefined,
+    // v2.5: carry proposed content for file writes so the gate can show a diff.
+    proposedContent: typeof args.content === "string" ? args.content : undefined,
   };
 }
