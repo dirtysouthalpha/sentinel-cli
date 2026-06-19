@@ -1744,9 +1744,10 @@ export class TUIApp {
     if (cmd) {
       // For the automation loop, refine casual goal input into a well-structured
       // loop goal (pure heuristic, model-independent) before substituting into
-      // the template — so "/automationloop login validation" gets a done-condition.
+      // the template — so "/loop login validation" gets a done-condition.
+      // Fires for both /automationloop and its /loop alias.
       let args = parsed.args;
-      if (cmd.name === "automationloop" && args.length > 0) {
+      if ((cmd.name === "automationloop" || cmd.name === "loop") && args.length > 0) {
         const { refined } = refineGoal(args.join(" "));
         args = [refined];
       }

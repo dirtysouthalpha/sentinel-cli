@@ -575,8 +575,9 @@ class Connection {
     const cmd = commandRegistry.get(name);
     if (cmd) {
       // Refine casual goal input for the automation loop (pure, model-independent).
+      // Fires for both /automationloop and its /loop alias.
       let sendArgs = args;
-      if (cmd.name === "automationloop" && args.length > 0) {
+      if ((cmd.name === "automationloop" || cmd.name === "loop") && args.length > 0) {
         const { refined } = refineGoal(args.join(" "));
         sendArgs = [refined];
       }
