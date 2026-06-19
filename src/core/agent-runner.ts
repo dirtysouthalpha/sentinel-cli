@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { AIProvider, ChatMessage, ChatResponse, ToolCall, ToolDef, contentToText } from "../ai/types.js";
 import { redact } from "./redact.js";
 import { wrapToolError } from "./error-recovery.js";
+import { formatBudgetWarning, budgetThresholds } from "./budget-gate.js";
 import type { Attachment } from "./attachments.js";
 
 /** Heuristic: did the provider reject the request for being too long for the model's context? */
@@ -60,12 +61,14 @@ export interface AgentRunnerConfig {
   largeContextWarnAt?: number;
   /** Soft cap: proactively compact the context under this before each model call. */
   maxContextTokens?: number;
+  /** v2.7: USD spend ceiling. Emits budget warnings at 50/80%, aborts at 100%. */
+  budgetUSD?: number;
 }
 
 export interface AgentRunResult {
   rounds: number;
   finalContent: string;
-  stopReason: "no_tool_calls" | "max_rounds" | "aborted" | "error";
+  stopReason: "no_tool_calls" | "max_rounds" | "aborted" | "error" | "budget_exceeded";
   usage: {
     promptTokens: number;
     completionTokens: number;
@@ -89,6 +92,7 @@ export interface AgentRunnerEvents {
   contextLarge: (count: number) => void;
   compacted: (totalTokens: number) => void;
   runError: (err: unknown) => void;
+  budget: (info: { spent: number; budget: number; status: string; warning: string }) => void;
   done: (result: AgentRunResult) => void;
 }
 
@@ -218,6 +222,22 @@ export class AgentRunner extends EventEmitter {
           usage.completionTokens += response.usage.completionTokens;
           usage.totalTokens += response.usage.totalTokens;
           this.emit("usage", response.usage);
+        }
+
+        // v2.7: proactive budget gate. Warn at 50/80%, abort the run at 100%.
+        if (this.config.budgetUSD && this.config.budgetUSD > 0) {
+          const { estimateCostUSD } = await import("./pricing.js");
+          const spent = usage.totalTokens > 0
+            ? estimateCostUSD(this.config.model ?? "", usage.promptTokens, usage.completionTokens)
+            : 0;
+          const warning = formatBudgetWarning(spent, this.config.budgetUSD);
+          if (warning) {
+            this.emit("budget", { spent, budget: this.config.budgetUSD, status: budgetThresholds(spent, this.config.budgetUSD), warning });
+          }
+          if (budgetThresholds(spent, this.config.budgetUSD) === "exceeded") {
+            this.emit("runError", new Error(`Budget exceeded: $${spent.toFixed(2)} spent (limit $${this.config.budgetUSD.toFixed(2)})`));
+            return { stopReason: "budget_exceeded", rounds: round, finalContent: "", usage };
+          }
         }
 
         const toolCalls =
