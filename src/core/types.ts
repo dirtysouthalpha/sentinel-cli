@@ -122,6 +122,24 @@ export const DEFAULT_CONFIG: SentinelConfig = {
   autoupdate: "notify",
   snapshot: true,
   autopilot: { maxIterations: 10, maxStalls: 2 },
+  // v2.2: multi-model routing. Default rules send cheap turns (chat, short
+  // follow-ups, simple reads) to small_model, leaving the strong default model
+  // for code/plan/search/vision turns. This is the ~3-5x cost cut that was
+  // always promised — the router engine existed, it just had no rules to match.
+  router: {
+    default: "zai/glm-4.6",
+    rules: [
+      // Cheap turns → small_model (fast + cheap).
+      { match: { taskKind: "chat" }, use: "zai/glm-4.5-air", fallbacks: ["zai/glm-4.6"] },
+      // Everything else (code/plan/search) → default strong model.
+    ],
+    roles: {
+      // Named roles for GSD phase routing (wired by the runner).
+      smol: { model: "zai/glm-4.5-air", fallback: ["zai/glm-4.6"] },
+      plan: { model: "zai/glm-4.6" },
+      commit: { model: "zai/glm-4.5-air", fallback: ["zai/glm-4.6"] },
+    },
+  },
   // Lazy-senior-dev discipline: on at "ultra" out of the box. Override in
   // config with `"ponytail": { "enabled": false }` or `{ "level": "lite" }`.
   ponytail: { ...DEFAULT_PONYTAIL },

@@ -1,6 +1,7 @@
 import { AIProvider, ChatMessage, ChatOptions, ChatResponse, StreamChunk } from "./types.js";
 import { providerManager } from "./provider.js";
 import { route, runWithRouter, RouterConfig } from "./router.js";
+import { classifyTurn } from "./classify-turn.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "router" });
@@ -13,6 +14,12 @@ const log = createLogger({ prefix: "router" });
  *
  * Each chain target's model overrides ChatOptions.model, so the runner is
  * constructed with model: undefined when routing is active.
+ *
+ * **v2.2:** resolveChain now calls {@link classifyTurn} on the messages to
+ * populate `taskKind` and `requiresVision` before consulting the rule engine —
+ * so simple reads/chat route to `small_model` (when configured) and vision
+ * turns route to vision-capable targets. Previously the router only received
+ * `requiresTools`, leaving it effectively single-model.
  */
 export class RoutedProvider implements AIProvider {
   name = "router";
@@ -30,19 +37,23 @@ export class RoutedProvider implements AIProvider {
     return !!prov && prov.isAvailable();
   };
 
-  private resolveChain(options?: ChatOptions): string[] {
+  private resolveChain(messages: ChatMessage[], options?: ChatOptions): string[] {
+    const { taskKind, requiresVision } = classifyTurn(
+      messages,
+      !!(options?.tools && options.tools.length)
+    );
     const chain = route(
       this.cfg,
-      { agent: this.agent, requiresTools: !!(options?.tools && options.tools.length) },
+      { agent: this.agent, requiresTools: !!(options?.tools && options.tools.length), taskKind, requiresVision },
       this.targetAvailable
     );
-    log.debug(`route -> ${chain.join(" | ")}`);
+    log.debug(`route [${taskKind}${requiresVision ? "+vision" : ""}] -> ${chain.join(" | ")}`);
     return chain;
   }
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
     return runWithRouter(
-      this.resolveChain(options),
+      this.resolveChain(messages, options),
       (providerName, model) => providerManager.chat(providerName, messages, { ...options, model }),
       { retry: this.cfg.retry, firstChunkSeen: () => false }
     );
@@ -59,7 +70,7 @@ export class RoutedProvider implements AIProvider {
       onChunk?.(c);
     };
     return runWithRouter(
-      this.resolveChain(options),
+      this.resolveChain(messages, options),
       (providerName, model) =>
         providerManager.chatStream(providerName, messages, { ...options, model }, wrapped),
       { retry: this.cfg.retry, firstChunkSeen: () => firstChunk }
