@@ -1,0 +1,6 @@
+===LINE16===
+sh: 1: awk: not found
+===LINE47===
+sh: 1: awk: not found
+===TOTALLINES===
+63

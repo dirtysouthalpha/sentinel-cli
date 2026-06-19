@@ -213,6 +213,28 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
       },
     },
   },
+  memory: {
+    type: "function",
+    function: {
+      name: "memory",
+      description:
+        "Persistent cross-session memory. Store facts/decisions/preferences and recall them in " +
+        "later sessions. Actions: store (topic+content+region), recall (query → matches), " +
+        "list (all), delete (by id). Survives across sessions — use for project decisions, " +
+        "user preferences, and workarounds.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", description: "store|recall|list|delete", enum: ["store", "recall", "list", "delete"] },
+          topic: { type: "string", description: "Topic/tag (for store) or search query (for recall)" },
+          content: { type: "string", description: "Memory content to store (for store)" },
+          region: { type: "string", description: "knowledge|context|preference|decision", enum: ["knowledge", "context", "preference", "decision"] },
+          id: { type: "string", description: "Entry ID to delete (for delete)" },
+        },
+        required: ["action"],
+      },
+    },
+  },
 };
 
 export function getToolDefinitions(): AIToolDef[] {
