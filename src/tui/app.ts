@@ -6,6 +6,7 @@ import { providerManager } from "../ai/provider.js";
 import { ContextManager } from "../ai/context.js";
 import { commandRegistry } from "../commands/registry.js";
 import { parseCommand, resolveTemplate } from "../commands/loader.js";
+import { refineGoal } from "../core/refine-goal.js";
 import { AgentRunner } from "../core/agent-runner.js";
 import { makeCompactionSummarizer } from "../core/compaction-summarizer.js";
 import { extractToolCalls } from "../core/tool-call-extractor.js";
@@ -1741,7 +1742,15 @@ export class TUIApp {
 
     const cmd = commandRegistry.get(parsed.name);
     if (cmd) {
-      await this.chatWithAI(resolveTemplate(cmd.template, parsed.args));
+      // For the automation loop, refine casual goal input into a well-structured
+      // loop goal (pure heuristic, model-independent) before substituting into
+      // the template — so "/automationloop login validation" gets a done-condition.
+      let args = parsed.args;
+      if (cmd.name === "automationloop" && args.length > 0) {
+        const { refined } = refineGoal(args.join(" "));
+        args = [refined];
+      }
+      await this.chatWithAI(resolveTemplate(cmd.template, args));
       return;
     }
 

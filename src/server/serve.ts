@@ -30,6 +30,7 @@ import { providerKeyName } from "../core/secrets/resolver.js";
 import { commandRegistry } from "../commands/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { resolveTemplate } from "../commands/loader.js";
+import { refineGoal } from "../core/refine-goal.js";
 import { attachmentFromDataUrl } from "../core/attachments.js";
 import { ClientMessage, ClientAttachment, ServerMessage, StateSnapshot, ConfigView } from "./protocol.js";
 import {
@@ -573,7 +574,13 @@ class Connection {
   private async handleCommand(name: string, args: string[]): Promise<void> {
     const cmd = commandRegistry.get(name);
     if (cmd) {
-      await this.handleSend(resolveTemplate(cmd.template, args));
+      // Refine casual goal input for the automation loop (pure, model-independent).
+      let sendArgs = args;
+      if (cmd.name === "automationloop" && args.length > 0) {
+        const { refined } = refineGoal(args.join(" "));
+        sendArgs = [refined];
+      }
+      await this.handleSend(resolveTemplate(cmd.template, sendArgs));
       return;
     }
     this.send({ type: "system", text: `Unknown command: /${name}` });

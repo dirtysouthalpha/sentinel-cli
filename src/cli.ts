@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { resolve } from "path";
+import { join } from "path";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { TUIApp } from "./tui/app.js";
@@ -40,6 +42,8 @@ import { runMcpServer } from "./mcp/server.js";
 import { runServe } from "./server/serve.js";
 import { launchGui } from "./server/gui-launcher.js";
 import { runAutopilotSession, summarizeAutopilot } from "./core/autopilot-session.js";
+import { refineGoal } from "./core/refine-goal.js";
+import { formatLoopBanner } from "./core/loop-banner.js";
 import { usageTracker } from "./core/usage-tracker.js";
 import { estimateCostUSD } from "./core/pricing.js";
 import { writeRouterConfig, routerStartHelp, probeRouter, DEFAULT_ROUTER_URL } from "./core/router-connect.js";
@@ -252,7 +256,7 @@ program
 
 program
   .command("run <task>")
-  .description("Run an agentic task headlessly — executes tools (file, bash, search, git, web, patch)")
+  .description("Run ONE agentic task headlessly (single pass, not a loop). Executes tools: file, bash, search, git, web, patch. For an autonomous loop until done, use 'sentinel loop' instead.")
   .option("--model <model>", "AI model to use (provider/model)")
   .option("--agent <agent>", "Agent to use (default: config default_agent)")
   .option("--max-steps <n>", "Maximum tool rounds")
@@ -440,38 +444,209 @@ async function runHeadless(task: string, opts: any, command: any): Promise<void>
 }
 
 program
-  .command("loop <goal>")
-  .description("Run the autonomous PLAN -> ACT -> AUDIT -> REPEAT loop headlessly until project_state.md reads 100%. Auto-approves tool use (unattended).")
+  .command("loop [goal]")
+  .description(
+    "The easy button: refine your goal (casual input OK), then run an autonomous " +
+    "PLAN -> ACT -> AUDIT -> REPEAT daemon until project_state.md reads 100%. " +
+    "Bare 'sentinel loop' prompts for a goal or resumes. Sandbox ON by default. " +
+    "Tip: 'sentinel run' for one task, 'sentinel autopilot' for full budget/verify knobs."
+  )
   .option("--model <model>", "AI model to use (provider/model)")
   .option("--agent <agent>", "Agent to use (default: gsd)")
-  .option("--max-steps <n>", "Maximum tool rounds per pass")
-  .option("--json", "Emit newline-delimited JSON events instead of text")
+  .option("--max-iterations <n>", "Max loop iterations (default: 10)")
+  .option("--max-stalls <n>", "Consecutive no-progress iterations before stopping (default: 2)")
+  .option("--max-minutes <n>", "Stop after this many wall-clock minutes (default: 60)")
+  .option("--max-cost <usd>", "Stop after this estimated spend in USD (default: 5)")
+  .option("--resume", "Resume a prior interrupted run for the same goal")
   .option("--project <path>", "Project root directory")
-  .option("--permission-mode <mode>", "Permission mode: gated | auto | yolo (default: auto for loop)")
-  .option("--gated", "Force gated permissions (ask before each mutation) instead of the loop default of auto-approve")
-  .option("--sandbox", "Run bash commands in a bubblewrap sandbox (Linux+bwrap): FS confined to project, network blocked. Recommended for unattended loops")
-  .option("--sandbox-net", "Allow network inside the sandbox (for installs/fetches); pairs with --sandbox")
+  .option("--sandbox", "Run bash in a bubblewrap sandbox (default ON when bwrap is available)")
+  .option("--no-sandbox", "Disable the sandbox even when bwrap is available")
+  .option("--sandbox-net", "Allow network inside the sandbox (installs/fetches)")
   .action(async (goal, opts, command) => {
-    // Resolve the automationloop builtin template, substitute $ARGUMENTS, and
-    // delegate to the shared headless runner. Loops are unattended by nature, so
-    // auto-approve unless --gated is explicit.
-    const projectRoot = (command.optsWithGlobals().project || opts.project || process.cwd()) as string;
+    const merged = command.optsWithGlobals();
+    const projectRoot = (merged.project || opts.project || process.cwd()) as string;
+    const statePath = join(projectRoot, "project_state.md");
+    const resuming = existsSync(statePath);
+
+    // Resolve the goal: explicit arg → resume-if-bare → interactive prompt.
+    let rawGoal = goal as string | undefined;
+    if (!rawGoal) {
+      if (resuming) {
+        rawGoal = ""; // resume — the goal lives in project_state.md
+      } else if (process.stdin.isTTY) {
+        // Friendly interactive prompt for first-time use.
+        process.stdout.write("🔁 Sentinel loop — what do you want built?\n> ");
+        rawGoal = await new Promise<string>((resolveRead) => {
+          let buf = "";
+          process.stdin.setEncoding("utf-8");
+          process.stdin.resume();
+          process.stdin.once("data", (d: string) => {
+            buf = d;
+            process.stdin.pause();
+            resolveRead(buf);
+          });
+        });
+      } else {
+        // Non-interactive (piped stdin / CI) with no goal and no state file.
+        console.error("No goal provided and no project_state.md to resume. Pass a goal: sentinel loop \"<your goal>\"");
+        process.exitCode = 1;
+        return;
+      }
+    }
+
+    // Refine casual input into a well-structured goal (pure, model-independent).
+    const { refined, raw } = refineGoal(rawGoal || "");
     const commands = loadAllCommands(projectRoot);
     const tmpl = commands.find((c) => c.name === "automationloop");
-    const prompt = tmpl
-      ? resolveTemplate(tmpl.template, [goal])
-      : `AUTONOMOUS CODING LOOP\n\nGOAL: ${goal}\n\nRun a continuous PLAN -> ACT -> AUDIT -> REPEAT loop, maintaining project_state.md as your brain, until the goal is 100% complete.`;
-    const loopOpts = {
-      ...opts,
-      yes: opts.gated ? false : true,
-      permissionMode: (opts.permissionMode as string) || (opts.gated ? "gated" : "auto"),
+    // The loop daemon's per-iteration task: the automationloop template enforces
+    // ORIENT->SCAN->PLAN->ACT->AUDIT->REPEAT against project_state.md. Inject the
+    // refined goal as $ARGUMENTS so every iteration re-orients toward it.
+    const loopGoal = tmpl
+      ? resolveTemplate(tmpl.template, [refined])
+      : `AUTONOMOUS CODING LOOP\n\nGOAL: ${refined}\n\nRun a continuous PLAN -> ACT -> AUDIT -> REPEAT loop, maintaining project_state.md as your brain, until the goal is 100% complete.`;
+
+    // --- boot provider/tools/config (same as autopilot) ---
+    const config = getConfigManager(projectRoot).load();
+    await bootstrapKeys(config, projectRoot);
+    providerManager.initializeFromConfig(config.provider as any);
+    const useSandbox = opts.sandbox === true || (opts.sandbox === undefined && opts.noSandbox !== true);
+    toolManager.initialize(projectRoot, { sandbox: useSandbox, sandboxAllowNetwork: !!opts.sandboxNet });
+    loadRegistries(getInstallRoot(), config.skills.paths);
+
+    const explicitModel = merged.model as string | undefined;
+    const agentName = opts.agent || "gsd";
+    let provider;
+    let modelName: string | undefined;
+    if (config.router && !explicitModel) {
+      provider = new RoutedProvider(config.router, agentName);
+      modelName = undefined;
+    } else {
+      const model = explicitModel || config.model;
+      const parts = model.split("/");
+      modelName = parts.slice(1).join("/") || undefined;
+      const single = providerManager.getProvider(parts[0]);
+      if (!single || !single.isAvailable()) {
+        console.error(printProviderHelp(parts[0]));
+        process.exitCode = 1;
+        return;
+      }
+      provider = single;
+    }
+
+    const mcp = new MCPManager();
+    await mcp.connect((config.mcp as any) || {});
+    const toolDefs = [...getToolDefinitions(), ...mcp.getToolDefs()];
+    const mcpAware = createMcpAwareExecutor(mcp, executeToolCall);
+    // Loop is unattended => yolo (checkpoints still snapshot edits). Use --gated
+    // semantics via autopilot's engine if you want per-mutation asks instead.
+    const engine = new PermissionEngine("yolo", config.permissions as any, projectRoot);
+    const checkpoints = new CheckpointManager(projectRoot);
+    const guardedExecute = createGuardedExecutor({ engine, checkpoints, baseExecute: mcpAware, ask: async () => true });
+    const costModel = explicitModel || config.model;
+    const subagentTool = createSubagentTool({
+      provider,
+      toolDefs,
+      executeTool: guardedExecute,
+      extractToolCalls,
+      model: modelName,
+      systemPrompt: buildSystemPrompt(agentName, projectRoot),
+      onUsage: (u) => usageTracker.recordCostUSD(estimateCostUSD(costModel, u.promptTokens, u.completionTokens)),
+    });
+
+    const ap = config.autopilot ?? { maxIterations: 10, maxStalls: 2 };
+    const maxIterations = opts.maxIterations ? parseInt(opts.maxIterations, 10) : Math.max(1, ap.maxIterations ?? 10);
+    const maxStalls = opts.maxStalls ? parseInt(opts.maxStalls, 10) : Math.max(1, ap.maxStalls ?? 2);
+    const maxMinutes = opts.maxMinutes ? parseFloat(opts.maxMinutes) : (ap.maxMinutes ?? 60);
+    const maxCostUSD = opts.maxCost ? parseFloat(opts.maxCost) : (ap.maxCostUSD ?? 5);
+
+    // Print the friendly banner so the user knows what's happening.
+    console.log(formatLoopBanner({
+      refinedGoal: refined,
+      rawGoal: raw,
+      statePath,
+      budget: { maxMinutes, maxCostUSD, maxIterations },
+      sandbox: useSandbox,
+      resuming,
+    }));
+
+    const ac = new AbortController();
+    process.once("SIGINT", () => {
+      console.error("\n[loop] stopping after the current step… (resume with: sentinel loop)");
+      ac.abort();
+    });
+
+    let result;
+    try {
+      result = await runAutopilotSession({
+        goal: loopGoal,
+        projectRoot,
+        maxIterations,
+        maxStalls,
+        verifyCommands: ap.verifyCommands,
+        maxMinutes,
+        maxCostUSD,
+        costSpent: () => usageTracker.snapshot().estimatedCostUSD,
+        resume: !!opts.resume || resuming,
+        runSubagent: (args, sig) => subagentTool.execute(args, sig),
+        signal: ac.signal,
+        log: (m) => console.log(m),
+      });
+    } finally {
+      await mcp.disconnect();
+    }
+    const statusLabel: Record<string, string> = {
+      production_ready: "complete — goal achieved",
+      max_iterations: "stopped — max iterations reached",
+      stalled: "stopped — stalled (no progress)",
+      aborted: "aborted",
+      budget_exhausted: "stopped — budget exhausted",
     };
-    await runHeadless(prompt, loopOpts, command);
+    console.log(`\n[loop] ${statusLabel[result.status] ?? result.status} (${result.iterations} iterations)`);
+    process.exitCode = result.status === "production_ready" ? 0 : result.status === "aborted" ? 130 : 1;
+  });
+
+program
+  .command("loopstatus")
+  .description("Read and pretty-print project_state.md — check automation-loop progress at a glance, read-only. Works in a second terminal while the loop runs.")
+  .option("--project <path>", "Project root directory")
+  .action((opts, command) => {
+    const projectRoot = (command.optsWithGlobals().project || opts.project || process.cwd()) as string;
+    const statePath = join(projectRoot, "project_state.md");
+    if (!existsSync(statePath)) {
+      console.log(`No project_state.md at ${statePath}. Run 'sentinel loop "<goal>"' to start an automation loop.`);
+      return;
+    }
+    const text = readFileSync(statePath, "utf-8");
+    const goal = text.match(/##?\s*GOAL\s*\n([\s\S]*?)(?:\n##|\n$|$)/i)?.[1]?.trim() || "(unknown)";
+    const phase = text.match(/##?\s*PHASE\s*\n([\s\S]*?)(?:\n##|\n$|$)/i)?.[1]?.trim() || "(unknown)";
+    const progressMatch = text.match(/##?\s*OVERALL PROGRESS\s*\n.*?(\d+)\s*%/is)?.[1];
+    const pct = progressMatch ? parseInt(progressMatch, 10) : 0;
+    const completed = (text.match(/\[x\]/gi) || []).length;
+    const inProgressMatch = text.match(/##?\s*IN PROGRESS\s*\n\s*-?\s*\[.\]\s*(.+)$/im);
+    const inProgress = inProgressMatch?.[1]?.trim() || "(none)";
+    // Queue items, excluding the in-progress task so it doesn't show twice.
+    const queueItems = [...text.matchAll(/^\s*-\s*\[\s\]\s*(.+)$/gm)]
+      .map((m) => m[1].trim())
+      .filter((q) => q !== inProgress)
+      .slice(0, 3);
+    const blockers = [...text.matchAll(/(?:^|\n)\s*-\s*(\[FIXED\].*|\w[^\n]*(?:error|fail|broken|missing)[^\n]*)/gi)].map((m) => m[1].trim());
+
+    const filled = Math.round(pct / 10);
+    const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+    console.log("");
+    console.log(`  Goal:      ${goal}`);
+    console.log(`  Phase:     ${phase}`);
+    console.log(`  Progress:  [${bar}] ${pct}%`);
+    console.log(`  In progress: ${inProgress}`);
+    console.log(`  Up next:   ${queueItems.length ? queueItems.map((q) => `• ${q}`).join("  ") : "(queue empty)"}`);
+    console.log(`  Blockers:  ${blockers.length ? blockers.map((b) => `! ${b}`).join("  ") : "none"}`);
+    console.log(`  Done:      ${completed} task${completed === 1 ? "" : "s"} complete`);
+    console.log("");
   });
 
 program
   .command("autopilot <goal>")
-  .description("Set-and-forget: autonomously loop the GSD cycle until the project is production-ready")
+  .description("Advanced autonomous driver — same engine as 'sentinel loop' but with full control over verify gates, budgets, and stall detection. Use 'sentinel loop' for the easy default; this is the power-user path.")
   .option("--model <model>", "AI model to use (provider/model)")
   .option("--agent <agent>", "Agent to use (default: gsd)")
   .option("--project <path>", "Project root directory")
