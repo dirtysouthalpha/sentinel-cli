@@ -14,7 +14,15 @@
 
 export const GSD_PHASES = ["plan", "implement", "test", "review", "fix"] as const;
 
-export type GsdPhase = (typeof GSD_PHASES)[number];
+/**
+ * v2.6: TDD phase variant — red-green-refactor discipline. Write a failing test
+ * first, watch it fail, implement until it passes, then review. Feeds real
+ * test-runner exit codes (via test-runner-parse.ts) into the fix gate instead of
+ * prose regex. Use via `sentinel run --tdd` or `/tdd`.
+ */
+export const TDD_PHASES = ["plan", "test-red", "implement", "test-green", "review", "fix"] as const;
+
+export type GsdPhase = (typeof GSD_PHASES)[number] | (typeof TDD_PHASES)[number];
 
 export interface GsdPhaseResult {
   phase: string;
@@ -34,6 +42,8 @@ export interface RunGsdOptions {
    * Default: any of fail/error/bug/broken/todo (word-boundary, case-insensitive).
    */
   needsFix?: (reviewOutput: string) => boolean;
+  /** v2.6: override the phase pipeline (default: GSD_PHASES; TDD uses TDD_PHASES). */
+  phases?: readonly string[];
   /** Fired right before a phase is dispatched. */
   onPhaseStart?: (phase: string) => void;
   /** Fired after a phase settles (success or recorded error). */
@@ -75,6 +85,17 @@ export function buildPhasePrompt(
       "You are in the FIX phase. The review found problems. Address every issue raised in " +
       "the review by making the necessary code changes with your tools, then re-verify. " +
       "Report what you fixed and confirm the task is now complete.",
+    "test-red":
+      "You are in the TEST-RED phase (TDD). Write a failing test for the task BEFORE " +
+      "implementing any solution code. Then RUN the test and confirm it FAILS. This is " +
+      "the 'red' step — a failing test proves the behavior doesn't exist yet and that your " +
+      "test is meaningful. Report the test you wrote and the failure output. Do NOT write " +
+      "any implementation yet.",
+    "test-green":
+      "You are in the TEST-GREEN phase (TDD). The implementation is done. RUN the tests you " +
+      "wrote in the red phase and confirm they now PASS (green). If any test fails, the " +
+      "implementation is incomplete — report the failures so the fix phase can address them. " +
+      "Report the commands you ran, PASS/FAIL, and the output.",
   };
 
   const phaseInstruction =
@@ -118,7 +139,8 @@ export async function runGsd(
     return res;
   };
 
-  for (const phase of GSD_PHASES) {
+  const phases = opts.phases ?? GSD_PHASES;
+  for (const phase of phases) {
     if (phase === "fix") {
       const review = results.find((r) => r.phase === "review");
       // Only run fix when the review signals a problem (and didn't itself error out).

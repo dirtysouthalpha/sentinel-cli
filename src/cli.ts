@@ -267,9 +267,14 @@ program
   .option("--yes", "Auto-approve permission prompts (non-interactive). Equivalent to --permission-mode yolo for unattended/CI runs")
   .option("--sandbox", "Run bash commands in a bubblewrap sandbox (Linux+bwrap): FS confined to project, network blocked. Recommended for unattended runs")
   .option("--sandbox-net", "Allow network inside the sandbox (for installs/fetches); pairs with --sandbox")
+  .option("--tdd", "Test-driven: write a failing test first, implement until it passes, then review (red-green-refactor)")
   .action(async (task, opts, command) => {
     // Delegate to the shared headless runner (also backs `sentinel loop`).
-    await runHeadless(task, opts, command);
+    // v2.6: --tdd wraps the task in red-green-refactor discipline.
+    const finalTask = opts.tdd
+      ? `TDD MODE (red-green-refactor):\n1. Write a failing test for: ${task}\n2. Run it, confirm it FAILS (red)\n3. Implement the minimum code to pass\n4. Run the test again, confirm it PASSES (green)\n5. Review for correctness and clean up\n\nOriginal task: ${task}`
+      : task;
+    await runHeadless(finalTask, opts, command);
   });
 
 /**
