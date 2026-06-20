@@ -1032,7 +1032,7 @@ program
 
     // Install to the right location per type.
     const { join: joinPath } = await import("node:path");
-    const { writeFileSync, mkdirSync, existsSync: fsExists } = await import("node:fs");
+    const { writeFileSync, mkdirSync } = await import("node:fs");
 
     try {
       if (type === "skill") {

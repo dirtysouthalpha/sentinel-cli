@@ -4,6 +4,40 @@ All notable changes to Sentinel CLI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] — 2026-06-19
+
+The "everything wired" release. v3.0 shipped 9 pure modules; v3.1 wires every
+one of them end-to-end. No more "built but not wired."
+
+### Wiring (9 steps connecting existing pure modules to their surfaces)
+- **routing**: `resolveRole` per-phase model routing in GSD (plan→strong, review→smol).
+- **team**: `/team` command + `team` tool → `runTeam()` with real `WorktreeManager`.
+- **memory**: Top 5 memories auto-injected into the system prompt across sessions.
+- **diff**: GUI permission cards show the actual diff (green/red) for file mutations.
+- **TDD**: `/tdd` runs TDD_PHASES (test-red before implement); `parseTestRunnerOutput` in the fix gate.
+- **budget**: `--max-cost` passes `budgetUSD` into the runner; proactive warnings active.
+- **cache**: `executeToolCall` memoizes file:read/search/web across turns with mtime invalidation.
+- **fork**: `/fork [turn]` branches a session at a turn index.
+- **install**: `sentinel install <type> <id>` validates + installs plugins per-type.
+
+823 tests, lint clean, build green.
+
+---
+
+## [3.0.0] — 2026-06-19
+
+The 10-version roadmap complete. 9 versions (v2.2–v3.0), each a pure-tested
+module + thin wiring, shipped with a tag. Every competitive gap from the analysis
+("built but not wired") addressed.
+
+- **v2.2** Multi-model routing (`classifyTurn`), **v2.3** PR tool + conflict extraction,
+  **v2.4** Persistent memory (`MemoryStore`), **v2.5** Diff-at-approval (`formatApprovalPrompt`),
+  **v2.6** TDD mode (`TDD_PHASES` + `parseTestRunnerOutput`), **v2.7** Proactive budgets
+  (`budgetThresholds`), **v2.8** Cross-turn cache (`ToolResultCache`), **v2.9** Session
+  branching (`forkMessages`), **v3.0** Plugin types (`validatePluginEntry`).
+
+---
+
 ## [2.1.0] — 2026-06-19
 
 The "extremely easy automation loop" release. The loop went from a single
