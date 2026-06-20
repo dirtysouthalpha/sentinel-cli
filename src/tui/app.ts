@@ -2183,8 +2183,8 @@ export class TUIApp {
       if (this.mcp.has(DEFAULT_RECALL_TOOL)) {
         try {
           outbound += await recallRelevant(mcpAware, userMessage);
-        } catch {
-          // recall is best-effort; never block the turn on it
+        } catch (e) {
+          log.debug(`recall failed: ${e}`);
         }
       }
       const runResult = await runner.run(outbound, this.ac.signal, imageAttachments);

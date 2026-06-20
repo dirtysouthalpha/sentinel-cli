@@ -434,8 +434,8 @@ async function runHeadless(task: string, opts: any, command: any): Promise<void>
       if (mcp.has(DEFAULT_RECALL_TOOL)) {
         try {
           outboundTask += await recallRelevant(mcpAware, task);
-        } catch {
-          // best-effort
+        } catch (e) {
+          log.debug(`recall failed: ${e}`);
         }
       }
       result = await runner.run(outboundTask, ac.signal);

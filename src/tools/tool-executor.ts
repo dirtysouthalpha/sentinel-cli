@@ -23,7 +23,7 @@ async function executeAndCache(
   const result = await toolManager.execute(name, args);
   const rawOutput = result.success ? result.output : `ERROR: ${result.error || "Unknown error"}\n${result.output}`;
   let output = rawOutput;
-  try { output = await compressToolOutput(rawOutput, name); } catch { /* compression failed */ }
+  try { output = await compressToolOutput(rawOutput, name); } catch (e) { log.debug(`compression failed for ${name}: ${e}`); }
   // Cache only successful results.
   if (result.success) toolResultCache.set(cacheKey, output, mtime);
   const truncated = output.length > 50000 ? output.slice(0, 50000) + "\n... (truncated)" : output;
@@ -359,8 +359,8 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ChatMessage> 
     let output = rawOutput;
     try {
       output = await compressToolOutput(rawOutput, name);
-    } catch {
-      // compression failed, use raw output
+    } catch (e) {
+      log.debug(`compression failed for ${name}: ${e}`);
     }
 
     const truncated = output.length > 50000 ? output.slice(0, 50000) + "\n... (truncated)" : output;
