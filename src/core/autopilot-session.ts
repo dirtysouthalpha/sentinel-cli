@@ -204,9 +204,16 @@ export async function runAutopilotSession(deps: AutopilotSessionDeps): Promise<A
       const changed = before == null || after == null ? true : before !== after;
 
       // Per-iteration atomic commit so each step is a revertable point in history.
-      if (changed) {
+      // CRITICAL: only commit GREEN iterations. Committing a red iteration (failed
+      // lint/test/build) accumulates broken commits — the loop then spends every
+      // subsequent iteration fighting the breakage instead of making progress,
+      // spiraling. On failure, leave the working tree dirty so the next iteration
+      // fixes forward from the last known-good commit.
+      if (changed && v.passed) {
         const committed = await commit(`autopilot[${iteration}] ${summary.split("\n")[0].slice(0, 100)}`);
         if (committed) log(`  ✓ committed iteration ${iteration}`);
+      } else if (changed && !v.passed) {
+        log(`  ⊘ skipped commit (checks failed — working tree left dirty for next iteration)`);
       }
 
       return { iteration, summary, checksPassed: v.passed, productionReady: reallyReady, remaining, changed };
