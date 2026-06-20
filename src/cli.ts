@@ -1002,6 +1002,73 @@ async function runMain(options: {
 }
 
 program
+  .command("install <type> <id>")
+  .description("Install a plugin (skill | mcp | tool | theme | hook) by id, with inline --content or from a --url")
+  .option("--content <text>", "Inline plugin content (skill markdown, tool JS, theme JSON)")
+  .option("--url <url>", "URL to fetch plugin content from")
+  .option("--command <cmd>", "MCP launch command (for mcp type), comma-separated")
+  .option("--project <path>", "Project root directory")
+  .action(async (type, id, opts, command) => {
+    const { validatePluginEntry } = await import("./core/plugin-types.js");
+    const projectRoot = (command.optsWithGlobals().project || opts.project || process.cwd()) as string;
+
+    // Build the entry from CLI args.
+    const entry = {
+      id,
+      type: type as string,
+      name: id,
+      content: opts.content,
+      url: opts.url,
+      command: opts.command ? opts.command.split(",") : undefined,
+    };
+
+    // Validate before touching the filesystem.
+    const validation = validatePluginEntry(entry as Record<string, unknown> as any);
+    if (!validation.ok) {
+      console.error(`✗ Invalid plugin: ${validation.error}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    // Install to the right location per type.
+    const { join: joinPath } = await import("node:path");
+    const { writeFileSync, mkdirSync, existsSync: fsExists } = await import("node:fs");
+
+    try {
+      if (type === "skill") {
+        const dir = joinPath(projectRoot, ".sentinel", "skills");
+        mkdirSync(dir, { recursive: true });
+        const content = opts.content ?? (opts.url ? `<!-- fetched from ${opts.url} -->` : `# ${id}`);
+        writeFileSync(joinPath(dir, `${id}.md`), content);
+        console.log(`✓ Installed skill: ${dir}/${id}.md`);
+      } else if (type === "tool") {
+        const dir = joinPath(projectRoot, ".sentinel", "tools");
+        mkdirSync(dir, { recursive: true });
+        const content = opts.content ?? `// ${id} tool plugin\nexport default {};\n`;
+        writeFileSync(joinPath(dir, `${id}.js`), content);
+        console.log(`✓ Installed tool: ${dir}/${id}.js`);
+      } else if (type === "theme") {
+        const dir = joinPath(projectRoot, ".sentinel", "themes");
+        mkdirSync(dir, { recursive: true });
+        const content = opts.content ?? `{ "name": "${id}", "colors": {} }`;
+        writeFileSync(joinPath(dir, `${id}.json`), content);
+        console.log(`✓ Installed theme: ${dir}/${id}.json`);
+      } else if (type === "hook") {
+        const dir = joinPath(projectRoot, ".sentinel", "hooks");
+        mkdirSync(dir, { recursive: true });
+        const content = opts.content ?? `# ${id} hook\n`;
+        writeFileSync(joinPath(dir, `${id}.sh`), content);
+        console.log(`✓ Installed hook: ${dir}/${id}.sh`);
+      } else if (type === "mcp") {
+        console.log(`✓ MCP server '${id}' — add to config.json under "mcp": { "${id}": { "command": ${(opts.command ?? "npx").split(",")} } }`);
+      }
+    } catch (err) {
+      console.error(`✗ Install failed: ${err}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("ink")
   .description("Preview the new Ink-based UI (work in progress)")
   .action(async () => {

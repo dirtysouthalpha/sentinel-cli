@@ -1757,6 +1757,23 @@ export class TUIApp {
         await this.runGsdDelegated(args.join(" "), TDD_PHASES);
         return;
       }
+      // v2.9: /fork branches the session at a turn index.
+      if (cmd.name === "fork") {
+        const activeId = sessionManager.getActiveSession()?.id;
+        if (!activeId) { this.addSystem("No active session to fork."); return; }
+        const turnIdx = args.length > 0 ? parseInt(args[0], 10) : undefined;
+        const msgs = this.getContextManager().getMessageCount();
+        const idx = turnIdx !== undefined && !Number.isNaN(turnIdx) ? Math.max(0, Math.min(turnIdx, msgs - 1)) : msgs - 1;
+        const forked = sessionManager.forkSession(activeId, idx);
+        if (forked) {
+          sessionManager.setActiveSession(forked.id);
+          this.addSystem(`Forked session at turn ${idx + 1} → new session "${forked.title}".`);
+          this.tabManager.refresh();
+        } else {
+          this.addSystem("Fork failed — see logs.");
+        }
+        return;
+      }
       await this.chatWithAI(resolveTemplate(cmd.template, args));
       return;
     }

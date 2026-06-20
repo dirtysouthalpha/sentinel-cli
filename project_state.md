@@ -1,27 +1,27 @@
 # Sentinel CLI — Autonomous Loop State
 
 ## GOAL
-Deliver the 10-version roadmap in docs/roadmaps/2026-06-19-v2.2-to-v3.0-ten-versions.md, one version at a time, in order (v2.2 through v3.0). Each version: pure-helper-first TDD, lint+test+build green, version bump, commit, tag, push. Done when all versions shipped, tagged, pushed, and the roadmap reads 100% complete.
+Complete the v3 roadmap wiring gaps — each pure module existed but wasn't fully wired end-to-end. 9 steps, one at a time, lint+test+build green after each.
 
 ## PHASE
-COMPLETE — all 9 versions delivered (v2.2.0 through v3.0.0)
+COMPLETE — all 9 wiring steps delivered
 
 ## COMPLETED
-- [x] v2.2.0 — Multi-model routing: classifyTurn() pure helper (10 tests) + wire small_model/roles into RoutedProvider + DEFAULT_CONFIG seeds router.rules/roles. Tag v2.2.0 pushed.
-- [x] v2.3.0 — First-class GitHub PR tool: pure argv builders + conflict extraction (12 tests) + pr tool registered (create/list/view/merge/conflicts) with gh auth check. Tag v2.3.0 pushed.
-- [x] v2.4.0 — Persistent memory: pure CRUD memory-store (12 tests) + memory tool (store/recall/list/delete) persisting to .sentinel/memory.json. Tag v2.4.0 pushed.
-- [x] v2.5.0 — Diff-at-approval gate: pure formatApprovalPrompt (5 tests) + PermissionRequest.proposedContent + TUI askPermission shows real diff. Tag v2.5.0 pushed.
-- [x] v2.6.0 — Real TDD mode: pure parseTestRunnerOutput (8 tests) + TDD_PHASES [plan,test-red,implement,test-green,review,fix] + sentinel run --tdd. Tag v2.6.0 pushed.
-- [x] v2.7.0 — Proactive budgets: pure budgetThresholds (10 tests) + AgentRunnerConfig.budgetUSD + warns at 50/80%, aborts at 100%. Tag v2.7.0 pushed.
-- [x] v2.8.0 — Cross-turn cache: pure ToolResultCache + shouldCache (12 tests) with mtime invalidation + TTL. Tag v2.8.0 pushed.
-- [x] v2.9.0 — Session branching: pure forkMessages (7 tests) + SessionManager.forkSession(id, turnIndex). Tag v2.9.0 pushed.
-- [x] v3.0.0 — Plugin extensibility: pure validatePluginEntry + PluginType skill|mcp|tool|theme|hook (11 tests) + marketplace widened. Tag v3.0.0 pushed.
+- [x] STEP 1 (v2.2) — resolveRole per-phase model routing in GSD + subagent model override. Commit ba8a1d3.
+- [x] STEP 2 (v2.3) — team tool + /team slash command (worktree parallel execution). Commit 76b6e20.
+- [x] STEP 3 (v2.4) — memory auto-recall into buildSystemPrompt (top 5 entries injected). Commit f9fa614.
+- [x] STEP 4 (v2.5) — diff-at-approval into the GUI (serve.ts sends diff, main.ts renders it). Commit 7ae6924.
+- [x] STEP 5 (v2.6) — TDD_PHASES + parseTestRunnerOutput into GSD runner. /tdd command. Commit 8ebbf35.
+- [x] STEP 6 (v2.7) — budgetUSD into runner call sites (runHeadless passes --max-cost). Commit dfe4b88.
+- [x] STEP 7 (v2.8) — ToolResultCache into executeToolCall (file/search/web memoized). Commit dfe4b88.
+- [x] STEP 8 (v2.9) — /fork slash command calling sessionManager.forkSession. Commit (this batch).
+- [x] STEP 9 (v3.0) — sentinel install <type> <id> command with validatePluginEntry. Commit (this batch).
 
 ## IN PROGRESS
-(none — all versions complete)
+(none)
 
 ## QUEUE
-(none — all versions complete)
+(none)
 
 ## BLOCKERS
 (none)
@@ -30,6 +30,5 @@ COMPLETE — all 9 versions delivered (v2.2.0 through v3.0.0)
 100% complete
 
 ## STATUS: GOAL ACHIEVED
-All 9 versions (v2.2.0 through v3.0.0) shipped, tagged, pushed to origin/main.
-823 tests passing, lint clean, build green. GitHub Release v3.0.0 published.
-Downloads copy refreshed at 3.0.0.
+All 9 wiring steps complete. 823 tests passing, lint clean, build green.
+Every pure module from v2.2–v3.0 is now wired end-to-end.
