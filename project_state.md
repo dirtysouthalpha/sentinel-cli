@@ -1,36 +1,35 @@
 # Sentinel CLI — Autonomous Loop State
 
 ## GOAL
-Improve the TUI and GUI, optimize the code and tighten it up. Audit for security issues and fix everything found. Measure before and after. Done when improvement is demonstrable and lint+test pass.
-
-## BASELINE (measured)
-- **Lint**: PASS (exit 0, clean)
-- **Tests**: 729 passed / 7 failed / 736 total — 94 files (91 passed / 3 failed)
-- **Failures** (all env-dependent, NOT code bugs):
-  - `tests/bash-sandbox.test.ts` x2 (needs bwrap namespace perms)
-  - `tests/sandbox-live.test.ts` x3 (needs bwrap namespace perms)
-  - `tests/browser.test.ts` x1 (needs puppeteer/chrome)
-  - `1 more` (env)
-- **LOC**: src 21,631 / gui 1,791 — biggest files: `src/tui/app.ts` (2,496), `src/cli.ts` (1,007), `gui/src/main.ts` (57,244 bytes), `src/server/serve.ts` (697)
+Deliver the 10-version roadmap in docs/roadmaps/2026-06-19-v2.2-to-v3.0-ten-versions.md, one version at a time, in order (v2.2 through v3.0). Each version: pure-helper-first TDD, lint+test+build green, version bump, commit, tag, push. Done when all versions shipped, tagged, pushed, and the roadmap reads 100% complete.
 
 ## PHASE
-AUDIT (security scan first, then code quality, then TUI/GUI polish)
+COMPLETE — all 9 versions delivered (v2.2.0 through v3.0.0)
 
 ## COMPLETED
-- [x] O1 — Established baseline: lint pass, 729/736 tests (7 env failures cataloged)
+- [x] v2.2.0 — Multi-model routing: classifyTurn() pure helper (10 tests) + wire small_model/roles into RoutedProvider + DEFAULT_CONFIG seeds router.rules/roles. Tag v2.2.0 pushed.
+- [x] v2.3.0 — First-class GitHub PR tool: pure argv builders + conflict extraction (12 tests) + pr tool registered (create/list/view/merge/conflicts) with gh auth check. Tag v2.3.0 pushed.
+- [x] v2.4.0 — Persistent memory: pure CRUD memory-store (12 tests) + memory tool (store/recall/list/delete) persisting to .sentinel/memory.json. Tag v2.4.0 pushed.
+- [x] v2.5.0 — Diff-at-approval gate: pure formatApprovalPrompt (5 tests) + PermissionRequest.proposedContent + TUI askPermission shows real diff. Tag v2.5.0 pushed.
+- [x] v2.6.0 — Real TDD mode: pure parseTestRunnerOutput (8 tests) + TDD_PHASES [plan,test-red,implement,test-green,review,fix] + sentinel run --tdd. Tag v2.6.0 pushed.
+- [x] v2.7.0 — Proactive budgets: pure budgetThresholds (10 tests) + AgentRunnerConfig.budgetUSD + warns at 50/80%, aborts at 100%. Tag v2.7.0 pushed.
+- [x] v2.8.0 — Cross-turn cache: pure ToolResultCache + shouldCache (12 tests) with mtime invalidation + TTL. Tag v2.8.0 pushed.
+- [x] v2.9.0 — Session branching: pure forkMessages (7 tests) + SessionManager.forkSession(id, turnIndex). Tag v2.9.0 pushed.
+- [x] v3.0.0 — Plugin extensibility: pure validatePluginEntry + PluginType skill|mcp|tool|theme|hook (11 tests) + marketplace widened. Tag v3.0.0 pushed.
 
 ## IN PROGRESS
-- A1 — Security audit: scan all source for command injection, path traversal, prototype pollution, unsafe eval, hardcoded secrets, regex DoS
+(none — all versions complete)
 
 ## QUEUE
-- [ ] A2 — Fix every security issue found in A1
-- [ ] Q1 — Code tightening: dedupe, remove dead code, simplify hotspots (app.ts, cli.ts, main.ts)
-- [ ] Q2 — TUI improvements (borders, rendering, input handling)
-- [ ] Q3 — GUI improvements (main.ts, style.css)
-- [ ] V1 — Verify: lint + tests must pass, compare before/after metrics
+(none — all versions complete)
 
 ## BLOCKERS
 (none)
 
 ## OVERALL PROGRESS
-5%
+100% complete
+
+## STATUS: GOAL ACHIEVED
+All 9 versions (v2.2.0 through v3.0.0) shipped, tagged, pushed to origin/main.
+823 tests passing, lint clean, build green. GitHub Release v3.0.0 published.
+Downloads copy refreshed at 3.0.0.
