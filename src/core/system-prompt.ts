@@ -3,6 +3,7 @@ import { loadProjectContext } from "./project-context.js";
 import { skillRegistry } from "../skills/registry.js";
 import { getConfigManager } from "./config.js";
 import { normalizePonytailConfig, resolvePonytailSection } from "./ponytail.js";
+import { MemoryStore, fileBackend } from "./memory-store.js";
 
 /**
  * Build the system prompt for a given agent + project root.
@@ -13,6 +14,9 @@ import { normalizePonytailConfig, resolvePonytailSection } from "./ponytail.js";
  *
  * Ponytail (lazy-senior-dev discipline) is appended last, when enabled — by
  * default it's on at "ultra", so the YAGNI ladder governs every response.
+ *
+ * v2.4 wiring: injects the top 5 memory entries from prior sessions under a
+ * '# Relevant memories' section, so the agent remembers across sessions.
  */
 export function buildSystemPrompt(agentName: string, projectRoot: string): string {
   const agent = agentRegistry.get(agentName);
@@ -58,7 +62,25 @@ Rules: Do it. Don't ask. Be concise. Show results. When you unblock yourself, no
   const ponytailBody = skillRegistry.get("ponytail")?.content;
   const ponytailSection = resolvePonytailSection(ponytailCfg, ponytailBody);
 
-  return [basePrompt, agentPrompt, projectContext, ponytailSection]
+  // v2.4 wiring: inject top 5 memories from prior sessions so the agent
+  // remembers decisions/preferences/facts across sessions. Best-effort — a
+  // missing/empty memory store injects nothing; never breaks the prompt.
+  let memorySection = "";
+  try {
+    const store = new MemoryStore(fileBackend(projectRoot), { source: "system-prompt" });
+    const memories = store.query("").slice(0, 5);
+    if (memories.length > 0) {
+      memorySection = "# Relevant memories from prior sessions\n\n" +
+        memories
+          .map((m) => `- [${m.region}] ${m.topic}: ${m.content}`)
+          .join("\n") +
+        "\n\nUse these as context. They persist across sessions via the memory tool.";
+    }
+  } catch {
+    // best-effort — never break the prompt on a memory read failure
+  }
+
+  return [basePrompt, agentPrompt, projectContext, memorySection, ponytailSection]
     .filter(Boolean)
     .join("\n\n");
 }
