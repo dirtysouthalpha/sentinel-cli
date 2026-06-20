@@ -3,6 +3,7 @@ import { events } from "./events.js";
 import { SessionStorage, SessionData, SessionMessage } from "./session-storage.js";
 import { ContextManager } from "../ai/context.js";
 import { state } from "./state.js";
+import { forkMessages } from "./session-fork.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "session-manager" });
@@ -73,6 +74,35 @@ class SessionManager {
     }
 
     return session;
+  }
+
+  /**
+   * v2.9: Fork a session at a turn index — creates a new session whose context
+   * is a deep copy of the source's messages up to `upToTurn`. The original
+   * session is untouched. Explore alternatives without losing the trunk.
+   */
+  forkSession(sourceId: string, upToTurn: number, options?: { title?: string }): Session | null {
+    const source = this.sessions.get(sourceId);
+    if (!source) return null;
+    const sourceMessages = source.contextManager.getMessages();
+    const forked = forkMessages(
+      sourceMessages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "", metadata: m.metadata })) as Parameters<typeof forkMessages>[0],
+      upToTurn
+    );
+    const newSession = this.createSession({
+      title: options?.title || `${source.title} (fork)`,
+      projectRoot: source.projectRoot,
+      model: source.model,
+      agent: source.agent,
+    });
+    // Seed the forked context with the copied messages (skip system — it lives
+    // in the system prompt, not the conversation array).
+    for (const msg of forked) {
+      if (msg.role === "system") continue;
+      newSession.contextManager.addMessage(msg.role, msg.content, msg.metadata);
+    }
+    log.info(`Forked session ${sourceId} at turn ${upToTurn} → ${newSession.id}`);
+    return newSession;
   }
 
   getSession(id: string): Session | undefined {
