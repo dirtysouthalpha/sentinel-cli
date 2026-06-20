@@ -235,6 +235,23 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
       },
     },
   },
+  team: {
+    type: "function",
+    function: {
+      name: "team",
+      description:
+        "Run multiple independent tasks in PARALLEL across isolated git worktrees. Each task " +
+        "gets its own branch + working tree; results merge back sequentially; conflicts reported. " +
+        "Use for independent subtasks that don't share files.",
+      parameters: {
+        type: "object",
+        properties: {
+          tasks: { type: "string", description: "JSON array: [{\"branch\":\"fix-a\",\"prompt\":\"fix test A\"},...]" },
+        },
+        required: ["tasks"],
+      },
+    },
+  },
 };
 
 export function getToolDefinitions(): AIToolDef[] {
