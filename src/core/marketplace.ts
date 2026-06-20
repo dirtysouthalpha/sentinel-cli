@@ -18,14 +18,15 @@ import { join } from "node:path";
 
 export interface MarketplaceEntry {
   id: string;
-  type: "skill" | "mcp";
+  /** v3.0: widened from skill|mcp to include tool|theme|hook. */
+  type: "skill" | "mcp" | "tool" | "theme" | "hook";
   name: string;
   description?: string;
-  /** Remote URL to fetch skill content from (skills), or remote MCP endpoint. */
+  /** Remote URL to fetch skill/tool/theme content from, or remote MCP endpoint. */
   url?: string;
   /** MCP launch command, e.g. ["npx","-y","@scope/server"]. */
   command?: string[];
-  /** Inline skill markdown content (preferred over `url` when present). */
+  /** Inline content (skill markdown, tool JS, theme JSON). Preferred over `url`. */
   content?: string;
 }
 
@@ -87,15 +88,17 @@ function validateRegistry(parsed: unknown): Registry {
     if (typeof entry.id !== "string" || !entry.id) {
       throw new Error("registry entry missing string `id`");
     }
-    if (entry.type !== "skill" && entry.type !== "mcp") {
-      throw new Error(`registry entry "${entry.id}" has invalid type (expected skill|mcp)`);
+    // v3.0: widened from skill|mcp to skill|mcp|tool|theme|hook.
+    const validTypes = ["skill", "mcp", "tool", "theme", "hook"];
+    if (typeof entry.type !== "string" || !validTypes.includes(entry.type)) {
+      throw new Error(`registry entry "${entry.id}" has invalid type (expected ${validTypes.join("|")})`);
     }
     if (typeof entry.name !== "string" || !entry.name) {
       throw new Error(`registry entry "${entry.id}" missing string \`name\``);
     }
     entries.push({
       id: entry.id,
-      type: entry.type,
+      type: entry.type as MarketplaceEntry["type"],
       name: entry.name,
       description: typeof entry.description === "string" ? entry.description : undefined,
       url: typeof entry.url === "string" ? entry.url : undefined,
