@@ -160,6 +160,6 @@ export function clearCompressionCache(): void {
   compressionCache.clear();
 }
 
-export function getCompressionStats() {
+export function getCompressionStats(): { originalTokens: number; compressedTokens: number; savingsPercent: number; lastCompressed: number } {
   return state.get("compressionStats");
 }

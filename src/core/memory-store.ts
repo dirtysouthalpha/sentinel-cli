@@ -74,8 +74,11 @@ export class MemoryStore {
     private readonly opts: { maxEntries?: number; source?: string } = {}
   ) {}
 
-  /** Add a memory entry. The log is capped to maxEntries (default 500). */
+  /** Add a memory entry. The log is capped to maxEntries (default 500).
+   *  @throws if topic or content is empty. */
   add(topic: string, content: string, region: MemoryRegion = "knowledge"): MemoryEntry {
+    if (!topic || !topic.trim()) throw new Error("memory add: topic must not be empty");
+    if (!content || !content.trim()) throw new Error("memory add: content must not be empty");
     const entry: MemoryEntry = {
       id: makeId(),
       topic,
