@@ -696,9 +696,27 @@ function computeDiff(b: Extract<Block, { kind: "tool" }>): HTMLElement | null {
     const cls = p.added ? "add" : p.removed ? "del" : "ctx";
     const prefix = p.added ? "+" : p.removed ? "-" : " ";
     for (const ln of p.value.replace(/\n$/, "").split("\n")) {
-      if (lines++ > 40) { wrap.append(el("div", "ln ctx", "  … more")); return wrap; }
+      if (lines++ > 40) { wrap.append(el("div", "ln ctx", "  … more")); break; }
       wrap.append(el("div", "ln " + cls, esc(prefix + " " + ln)));
     }
+  }
+  // F4: accept/reject buttons for file edits (the checkpoint system backs the reject).
+  if (b.tool === "file" || b.tool === "patch") {
+    const actionBar = el("div", "diff-actions");
+    const acceptBtn = el("button", "btn primary sm", "✓ Accept");
+    const rejectBtn = el("button", "btn danger sm", "✗ Reject");
+    rejectBtn.addEventListener("click", () => {
+      send({ type: "command", name: "undo" });
+      rejectBtn.textContent = "↩ Reverted";
+      rejectBtn.setAttribute("disabled", "true");
+    });
+    acceptBtn.addEventListener("click", () => {
+      acceptBtn.textContent = "✓ Kept";
+      acceptBtn.setAttribute("disabled", "true");
+    });
+    actionBar.append(acceptBtn, rejectBtn);
+    actionBar.style.cssText = "display:flex;gap:8px;padding:8px 0;";
+    wrap.append(actionBar);
   }
   return wrap;
 }

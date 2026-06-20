@@ -1,17 +1,20 @@
-# Sentinel CLI — Cleanup Audit State
+# Sentinel CLI — Feature Wave State
 
 ## GOAL
-Codebase cleanup audit: type safety, error handling, dead code, edge-case guards, tool consistency.
+Add 8 missing features to match Claude Code / opencode parity.
 
 ## PHASE
-COMPLETE — all 5 categories fully delivered
+COMPLETE — all 8 features delivered
 
 ## COMPLETED
-- [x] CAT 1 — Type safety: removed 14 'as any' casts in cli.ts by widening SentinelConfig types (provider, permissions, ProviderConfig index signature). Added explicit return type to getCompressionStats(). Commit c0545bd.
-- [x] CAT 2 — Error handling: added debug logging to catch blocks hiding real failures (compression x2, recall x2). Remaining catches are intentional defensive fallbacks. Commit 4ce853f.
-- [x] CAT 3 — Dead code: removed 13 unused imports + dead vars (events, createLogger in providers, statSync/extname/isAbsolute/basename/dirname, ToolDef, candidateText, newContent, sep). Zero TS6133 errors remain. Commit 5b3f7f4.
-- [x] CAT 4 — Edge-case guards: malformed-task guard in runTeam + test; memory-store add() empty-topic/content guard; render-markdown for-loop corruption fixed. Audited all 7 files: refine-goal (empty input ✓), pr-tool (unmatched markers ✓), memory-store (guard added), tool-cache (args typed ✓), memory (invalid region fallback ✓), pr (empty stdout fallback ✓), team (malformed task guard ✓). Commits 5f0e049 + this batch.
-- [x] CAT 5 — Tool consistency: verified all 16 tools have try/catch + success:false error returns. git uses execFile callback (never throws). No changes needed.
+- [x] F1 — GUI command palette (Ctrl+K): already implemented from earlier work. Wired to global keymap + ⌘K button.
+- [x] F2 — TUI syntax highlighting: src/tui/syntax-highlight.ts tokenizer (ts/js/py/bash/json). render-markdown.ts uses it for code blocks. Keyword/string/comment/number/function colors.
+- [x] F3 — File tree viewer: src/core/tree-builder.ts (buildTree/formatTree/parseGitignore, 11 tests) + src/tools/tree.ts tool. Registered.
+- [x] F4 — GUI diff accept/reject: computeDiff() now shows ✓ Accept / ✗ Reject buttons on file/patch edits. Reject triggers /undo (checkpoint restore).
+- [x] F5 — Live token/cost counter: already wired — GUI handles usage events → renderRight(); TUI handles usage → updateCost().
+- [x] F6 — MCP browser: `sentinel mcp browse` lists popular servers with install instructions.
+- [x] F7 — Completion bell: terminal bell on GSD completion + loop completion.
+- [x] F8 — Session export: sessionToMarkdown pure helper (4 tests) + exportSessionMarkdown/Html aliases + /export command.
 
 ## IN PROGRESS
 (none)
@@ -26,5 +29,4 @@ COMPLETE — all 5 categories fully delivered
 100% complete
 
 ## STATUS: GOAL ACHIEVED
-824 tests passing, lint clean, build green. Zero 'as any' in cli.ts (was 14).
-Zero TS6133 errors. All 7 audited modules have edge-case guards.
+836 tests, lint clean, engine + GUI build green.

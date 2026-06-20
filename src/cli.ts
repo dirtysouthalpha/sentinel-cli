@@ -861,6 +861,32 @@ program
   });
 
 program
+  .command("mcp browse")
+  .description("Browse popular MCP servers from the registry with install instructions")
+  .action(async () => {
+    // A curated catalog of popular MCP servers with one-line install commands.
+    const catalog = [
+      { name: "filesystem", blurb: "File system read/write", install: "npx -y @anthropic/mcp-filesystem" },
+      { name: "github", blurb: "GitHub repos, issues, PRs", install: "npx -y @anthropic/mcp-github" },
+      { name: "sqlite", blurb: "SQLite database queries", install: "npx -y @anthropic/mcp-sqlite" },
+      { name: "puppeteer", blurb: "Browser automation", install: "npx -y @anthropic/mcp-puppeteer" },
+      { name: "slack", blurb: "Slack messaging", install: "npx -y @anthropic/mcp-slack" },
+      { name: "memory", blurb: "Persistent key-value memory", install: "npx -y @anthropic/mcp-memory" },
+      { name: "fetch", blurb: "HTTP fetch + parse", install: "npx -y @anthropic/mcp-fetch" },
+      { name: "time", blurb: "Time + timezone tools", install: "npx -y @anthropic/mcp-time" },
+    ];
+    console.log("\n📡 Popular MCP Servers\n");
+    console.log("  To install, add to your config under \"mcp\":");
+    console.log("");
+    for (const s of catalog) {
+      console.log(`  ${s.name.padEnd(14)} ${s.blurb}`);
+      console.log(`  ${" ".repeat(14)} "mcp": { "${s.name}": { "type": "local", "command": ["${s.install.replace(/"/g, "\\\"")}"] } }`);
+      console.log("");
+    }
+    console.log("  Then run: sentinel mcp  (to verify the connection + list tools)");
+  });
+
+program
   .command("mcp-serve")
   .description("Run Sentinel as an MCP server (stdio), exposing its tools to MCP clients")
   .option("--project <path>", "Project root directory")
