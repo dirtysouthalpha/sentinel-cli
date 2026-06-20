@@ -1,15 +1,16 @@
 import type { RouterConfig } from "../ai/router.js";
 import type { HooksConfig } from "./hooks.js";
 import { DEFAULT_PONYTAIL, type PonytailConfig } from "./ponytail.js";
+import type { PermissionsConfigLike } from "./permissions.js";
 
 export interface SentinelConfig {
   model: string;
   small_model: string;
-  provider: Record<string, unknown>;
+  provider: Record<string, ProviderConfig>;
   router?: RouterConfig;
   theme: string;
   custom_css: string;
-  permissions: PermissionsConfig;
+  permissions: PermissionsConfig | PermissionsConfigLike;
   skills: SkillsConfig;
   mcp: Record<string, McpServerConfig>;
   default_agent: string;
@@ -49,11 +50,12 @@ export interface ProviderConfig {
     [key: string]: unknown;
   };
   models: Record<string, { name: string; [key: string]: unknown }>;
+  [key: string]: unknown;
 }
 
 export interface PermissionsConfig {
   bash: "allow" | "deny" | "ask";
-  edit: string | Record<string, "allow" | "deny" | "ask">;
+  edit: "allow" | "deny" | "ask" | Record<string, "allow" | "deny" | "ask">;
   read: "allow" | "deny" | "ask";
   skill: Record<string, "allow" | "deny" | "ask">;
   [key: string]: unknown;

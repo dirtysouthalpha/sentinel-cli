@@ -233,7 +233,7 @@ program
     // stored as `keyring://<provider>` markers are never resolved in headless
     // `ask` mode and the call fails with "API key not configured".
     await bootstrapKeys(config, projectRoot);
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider);
     // --model is also defined on the root command, so commander binds it to the
     // global opts; merge both so the subcommand override is honored either way.
     const merged = command.optsWithGlobals();
@@ -294,7 +294,7 @@ async function runHeadless(task: string, opts: any, command: any): Promise<void>
     const projectRoot = merged.project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
     await bootstrapKeys(config, projectRoot);
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider);
     toolManager.initialize(projectRoot, {
       sandbox: !!opts.sandbox,
       sandboxAllowNetwork: !!opts.sandboxNet,
@@ -330,7 +330,7 @@ async function runHeadless(task: string, opts: any, command: any): Promise<void>
 
     // R3: connect configured MCP servers and merge their tools into the toolset.
     const mcp = new MCPManager();
-    await mcp.connect((config.mcp as any) || {});
+    await mcp.connect(config.mcp || {});
     const toolDefs = [...getToolDefinitions(), ...mcp.getToolDefs()];
     const mcpAware = createMcpAwareExecutor(mcp, executeToolCall);
 
@@ -341,7 +341,7 @@ async function runHeadless(task: string, opts: any, command: any): Promise<void>
     // you explicitly want full auto-allow with no guardrails.
     const mode: PermissionMode = (opts.permissionMode as PermissionMode) || "gated";
     const autoApprove = !!opts.yes;
-    const engine = new PermissionEngine(mode, config.permissions as any, projectRoot);
+    const engine = new PermissionEngine(mode, config.permissions, projectRoot);
     const checkpoints = new CheckpointManager(projectRoot);
     const guardedExecute = createGuardedExecutor({
       engine,
@@ -537,7 +537,7 @@ program
     // --- boot provider/tools/config (same as autopilot) ---
     const config = getConfigManager(projectRoot).load();
     await bootstrapKeys(config, projectRoot);
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider);
     const useSandbox = opts.sandbox === true || (opts.sandbox === undefined && opts.noSandbox !== true);
     toolManager.initialize(projectRoot, { sandbox: useSandbox, sandboxAllowNetwork: !!opts.sandboxNet });
     loadRegistries(getInstallRoot(), config.skills.paths);
@@ -563,12 +563,12 @@ program
     }
 
     const mcp = new MCPManager();
-    await mcp.connect((config.mcp as any) || {});
+    await mcp.connect(config.mcp || {});
     const toolDefs = [...getToolDefinitions(), ...mcp.getToolDefs()];
     const mcpAware = createMcpAwareExecutor(mcp, executeToolCall);
     // Loop is unattended => yolo (checkpoints still snapshot edits). Use --gated
     // semantics via autopilot's engine if you want per-mutation asks instead.
-    const engine = new PermissionEngine("yolo", config.permissions as any, projectRoot);
+    const engine = new PermissionEngine("yolo", config.permissions, projectRoot);
     const checkpoints = new CheckpointManager(projectRoot);
     const guardedExecute = createGuardedExecutor({ engine, checkpoints, baseExecute: mcpAware, ask: async () => true });
     const costModel = explicitModel || config.model;
@@ -692,7 +692,7 @@ program
     const projectRoot = merged.project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
     await bootstrapKeys(config, projectRoot);
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider);
     // Autopilot is the unattended path — sandbox by default when bwrap is
     // present, unless --no-sandbox is passed. --sandbox forces it on explicitly.
     const useSandbox = opts.sandbox === true || (opts.sandbox === undefined && opts.noSandbox !== true);
@@ -724,11 +724,11 @@ program
     }
 
     const mcp = new MCPManager();
-    await mcp.connect((config.mcp as any) || {});
+    await mcp.connect(config.mcp || {});
     const toolDefs = [...getToolDefinitions(), ...mcp.getToolDefs()];
     const mcpAware = createMcpAwareExecutor(mcp, executeToolCall);
     // Autonomous => yolo (no human in the loop). Checkpoints still snapshot edits.
-    const engine = new PermissionEngine("yolo", config.permissions as any, projectRoot);
+    const engine = new PermissionEngine("yolo", config.permissions, projectRoot);
     const checkpoints = new CheckpointManager(projectRoot);
     const guardedExecute = createGuardedExecutor({ engine, checkpoints, baseExecute: mcpAware, ask: async () => true });
     const costModel = explicitModel || config.model;
@@ -840,13 +840,13 @@ program
   .action(async (opts, command) => {
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
-    const servers = (config.mcp as Record<string, unknown>) || {};
+    const servers = config.mcp || {};
     if (Object.keys(servers).length === 0) {
       console.log('No MCP servers configured. Add them under "mcp" in sentinel.json.');
       return;
     }
     const mcp = new MCPManager();
-    await mcp.connect(servers as any);
+    await mcp.connect(servers);
     const tools = mcp.list();
     if (tools.length === 0) {
       console.log("Connected, but no tools were discovered.");
@@ -885,7 +885,7 @@ program
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
     await bootstrapKeys(config, projectRoot);
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider);
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
     try {
@@ -906,7 +906,7 @@ program
     const projectRoot = command.optsWithGlobals().project || opts.project || process.cwd();
     const config = getConfigManager(projectRoot).load();
     await bootstrapKeys(config, projectRoot);
-    providerManager.initializeFromConfig(config.provider as any);
+    providerManager.initializeFromConfig(config.provider);
     toolManager.initialize(projectRoot);
     loadRegistries(getInstallRoot(), config.skills.paths);
     await launchGui({ projectRoot, installRoot: getInstallRoot(), windowed: !!opts.window });
@@ -950,7 +950,7 @@ async function runMain(options: {
   }
 
   await bootstrapKeys(config, projectRoot);
-  providerManager.initializeFromConfig(config.provider as any);
+  providerManager.initializeFromConfig(config.provider);
 
   toolManager.initialize(projectRoot);
 
@@ -1023,7 +1023,7 @@ program
     };
 
     // Validate before touching the filesystem.
-    const validation = validatePluginEntry(entry as Record<string, unknown> as any);
+    const validation = validatePluginEntry(entry as Partial<import("./core/plugin-types.js").PluginEntry>);
     if (!validation.ok) {
       console.error(`✗ Invalid plugin: ${validation.error}`);
       process.exitCode = 1;

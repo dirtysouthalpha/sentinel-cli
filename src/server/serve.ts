@@ -396,7 +396,7 @@ class Connection {
 
   private configView(): ConfigView {
     const cfg = getConfigManager(this.projectRoot).getAll();
-    const provCfg = (cfg.provider as Record<string, Record<string, unknown>>) || {};
+    const provCfg = cfg.provider as unknown as Record<string, Record<string, unknown>>;
     const builtins = ["anthropic", "openai", "zai", "gemini", "ollama"];
     const names = [...new Set([...builtins, ...Object.keys(provCfg)])];
     const available = providerManager.getAvailableProviderNames();
