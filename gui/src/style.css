@@ -463,3 +463,11 @@ body {
   cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; border-radius: 4px;
 }
 .att-chip .att-remove:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+
+/* ---- permission diff (v2.5) ---- */
+.perm-diff {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  background: rgba(0,0,0,0.3); border-radius: var(--radius-sm);
+  padding: 8px 12px; margin: 8px 0; max-height: 300px; overflow: auto;
+  white-space: pre-wrap; color: var(--text-dim);
+}

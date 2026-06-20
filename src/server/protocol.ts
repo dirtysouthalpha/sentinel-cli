@@ -87,7 +87,7 @@ export type ServerMessage =
   | { type: "tool_start"; tool: string; name: string; args: ToolArgs; argsRaw: string }
   | { type: "tool_result"; name: string; ok: boolean; firstLine: string; full: string }
   | { type: "round_end"; round: number; willContinue: boolean }
-  | { type: "permission_request"; tool: string; action?: string; path?: string; reason: string }
+  | { type: "permission_request"; tool: string; action?: string; path?: string; reason: string; diff?: string }
   | { type: "done"; stopReason: string; rounds: number }
   | { type: "system"; text: string }
   | { type: "error"; message: string }

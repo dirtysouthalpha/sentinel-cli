@@ -31,6 +31,7 @@ import { commandRegistry } from "../commands/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { resolveTemplate } from "../commands/loader.js";
 import { refineGoal } from "../core/refine-goal.js";
+import { formatApprovalPrompt } from "../core/approval-diff.js";
 import { attachmentFromDataUrl } from "../core/attachments.js";
 import { ClientMessage, ClientAttachment, ServerMessage, StateSnapshot, ConfigView } from "./protocol.js";
 import {
@@ -477,7 +478,19 @@ class Connection {
         ask: (req: PermissionRequest, reason: string) =>
           new Promise<boolean>((resolve) => {
             this.permResolver = resolve;
-            this.send({ type: "permission_request", tool: req.tool, action: req.action, path: req.path, reason });
+            // v2.5 wiring: include a diff preview for file mutations so the
+            // GUI shows actual code changes, not just a filename.
+            let diff: string | undefined;
+            if (req.proposedContent && req.path) {
+              try {
+                const { readFileSync } = require("node:fs");
+                const { resolve: resolvePath } = require("node:path");
+                let prior = "";
+                try { prior = readFileSync(resolvePath(this.projectRoot, req.path), "utf-8"); } catch { /* new file */ }
+                diff = formatApprovalPrompt(prior, req.proposedContent, req.path);
+              } catch { /* best-effort */ }
+            }
+            this.send({ type: "permission_request", tool: req.tool, action: req.action, path: req.path, reason, diff });
           }),
       });
 

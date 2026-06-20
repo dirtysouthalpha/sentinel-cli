@@ -39,7 +39,7 @@ type ServerMessage =
   | { type: "tool_start"; tool: string; name: string; args: ToolArgs; argsRaw: string }
   | { type: "tool_result"; name: string; ok: boolean; firstLine: string; full: string }
   | { type: "round_end"; round: number; willContinue: boolean }
-  | { type: "permission_request"; tool: string; action?: string; path?: string; reason: string }
+  | { type: "permission_request"; tool: string; action?: string; path?: string; reason: string; diff?: string }
   | { type: "done"; stopReason: string; rounds: number }
   | { type: "system"; text: string }
   | { type: "error"; message: string }
@@ -70,7 +70,7 @@ let blocks: Block[] = [];
 // Auto-follow the chat bottom only when the user is already there, so scrolling
 // up during a stream isn't yanked back down. (C2 scroll gate.)
 let stick = true;
-let pendingPerm: { tool: string; action?: string; path?: string; reason: string } | null = null;
+let pendingPerm: { tool: string; action?: string; path?: string; reason: string; diff?: string } | null = null;
 let pendingToolArgs = "";
 let todos: TodoItem[] = [];
 let cfg: ConfigView | null = null;
@@ -692,6 +692,16 @@ function renderPerm(): HTMLElement {
   const p = pendingPerm!;
   const card = el("div", "perm");
   card.append(el("div", "t", `⚠ Allow <b>${esc(p.tool)}${p.action ? "(" + esc(p.action) + ")" : ""}</b>${p.path ? " on " + esc(p.path) : ""}?  <span style="color:var(--text-faint);font-size:12px">(${esc(p.reason)})</span>`));
+  // v2.5: show the actual diff for file mutations.
+  if (p.diff) {
+    const pre = el("pre", "perm-diff");
+    // Color +/- lines green/red.
+    pre.innerHTML = esc(p.diff)
+      .split("\n")
+      .map((l) => l.startsWith("+") ? `<span style="color:var(--good)">${esc(l)}</span>` : l.startsWith("-") ? `<span style="color:var(--bad)">${esc(l)}</span>` : esc(l))
+      .join("\n");
+    card.append(pre);
+  }
   const btns = el("div", "btns");
   const yes = el("button", "btn primary", "Allow"); yes.onclick = () => { send({ type: "permission", allow: true }); pendingPerm = null; renderChat(); };
   const no = el("button", "btn danger", "Deny"); no.onclick = () => { send({ type: "permission", allow: false }); pendingPerm = null; renderChat(); };
@@ -1103,7 +1113,7 @@ export function dispatch(m: ServerMessage) {
       for (let i = blocks.length - 1; i >= 0; i--) { const b = blocks[i]; if (b.kind === "tool" && b.running) { b.running = false; b.ok = m.ok; b.firstLine = m.firstLine; b.full = m.full; break; } }
       renderChat(); break;
     }
-    case "permission_request": pendingPerm = { tool: m.tool, action: m.action, path: m.path, reason: m.reason }; renderChat(); break;
+    case "permission_request": pendingPerm = { tool: m.tool, action: m.action, path: m.path, reason: m.reason, diff: m.diff }; renderChat(); break;
     case "usage": if (snap) { snap.cost.totalTokens += m.totalTokens; snap.cost.estimatedCostUSD = m.estimatedCostUSD; renderRight(); } break;
     case "system": blocks.push({ kind: "system", text: m.text }); renderChat(); break;
     case "error": endStream(); blocks.push({ kind: "error", text: m.message }); renderChat(); break;
