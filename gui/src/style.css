@@ -144,7 +144,7 @@ body {
 .block .who .dot { width: 7px; height: 7px; border-radius: 50%; }
 .block.user .who .dot { background: var(--accent); }
 .block.assistant .who .dot { background: var(--good); box-shadow: 0 0 8px var(--good); }
-.block .body { font-size: 14px; line-height: 1.65; color: var(--text); white-space: pre-wrap; word-break: break-word; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.block .body { font-size: 14px; line-height: 1.65; color: var(--text); white-space: pre-wrap; word-break: break-word; min-width: 0; max-width: 100%; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; cursor: text; }
 /* assistant bodies hold rendered markdown HTML: let block layout breathe, collapse trailing blank lines */
 .block.assistant .body { white-space: normal; }
 .block.assistant .body p { overflow-wrap: anywhere; max-width: 100%; }

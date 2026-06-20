@@ -600,6 +600,21 @@ function renderBlock(b: Block, index: number): HTMLElement {
   }
   if (b.kind === "assistant") {
     const node = wrap("assistant", "Sentinel", `<div class="body">${renderMarkdownHTML(b.text)}${b.streaming ? '<span class="cursor"></span>' : ""}</div>`);
+    // Copy button: copies the raw markdown text to clipboard.
+    if (!b.streaming) {
+      const copyBtn = el("span", "turn-act", "⎘ copy");
+      copyBtn.title = "Copy response";
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(b.text).then(() => {
+          copyBtn.textContent = "✓ copied";
+          setTimeout(() => { copyBtn.textContent = "⎘ copy"; }, 1500);
+        }).catch(() => {
+          copyBtn.textContent = "✗ failed";
+          setTimeout(() => { copyBtn.textContent = "⎘ copy"; }, 1500);
+        });
+      });
+      node.append(copyBtn);
+    }
     // Regenerate: drop this assistant response + re-run the preceding user turn.
     if (!b.streaming && index === blocks.length - 1 && index > 0) {
       let userIdx = -1;

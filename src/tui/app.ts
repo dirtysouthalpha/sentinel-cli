@@ -274,8 +274,11 @@ export class TUIApp {
       bottom: 4,
       scrollable: true,
       alwaysScroll: true,
-      mouse: true, // wheel scroll only; keys/vi removed so the box never steals
-      // focus-based keys from the raw-stdin line editor.
+      // mouse: false — DO NOT enable mouse capture on the chat box. Blessed's
+      // mouse: true intercepts mouse-drag, which blocks the terminal's native
+      // text selection (mouse-select + Ctrl+Shift+C to copy). Scroll via
+      // PageUp/PageDown, arrow keys, or the terminal's own scrollback instead.
+      mouse: false,
       tags: true,
       wrap: true,
       padding: { left: 2, right: 2, top: 0, bottom: 0 },
