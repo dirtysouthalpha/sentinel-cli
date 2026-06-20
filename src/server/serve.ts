@@ -585,6 +585,26 @@ class Connection {
   }
 
   private async handleCommand(name: string, args: string[]): Promise<void> {
+    // /export — write the session transcript to a file directly (no agent round).
+    if (name === "export") {
+      const filename = args[0] || "sentinel-export.md";
+      const session = sessionManager.getActiveSession();
+      if (!session) { this.send({ type: "system", text: "No active session to export." }); return; }
+      const messages = session.contextManager.getMessages().map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }));
+      if (messages.length === 0) { this.send({ type: "system", text: "Nothing to export." }); return; }
+      try {
+        const { exportSessionMarkdown } = await import("../core/session-export.js");
+        const { writeFileSync } = await import("node:fs");
+        const { resolve: resolvePath } = await import("node:path");
+        const content = exportSessionMarkdown({ title: session.title, messages });
+        const outPath = resolvePath(this.projectRoot, filename);
+        writeFileSync(outPath, content, "utf-8");
+        this.send({ type: "system", text: `Exported ${messages.length} messages to ${outPath}` });
+      } catch (err) {
+        this.send({ type: "system", text: `Export failed: ${err}` });
+      }
+      return;
+    }
     const cmd = commandRegistry.get(name);
     if (cmd) {
       // Refine casual goal input for the automation loop (pure, model-independent).
