@@ -390,7 +390,7 @@ async function runHeadless(task: string, opts: any, command: any): Promise<void>
         extractToolCalls,
         summarizeForCompaction: makeCompactionSummarizer(provider, modelName),
       },
-      { model: modelName, maxRounds }
+      { model: modelName, maxRounds, budgetUSD: opts.maxCost ? parseFloat(opts.maxCost as string) : undefined }
     );
 
     const emit = (obj: Record<string, unknown>) => {

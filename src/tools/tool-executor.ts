@@ -3,8 +3,32 @@ import { ChatMessage, ToolCall, ToolDef as AIToolDef } from "../ai/types.js";
 import { ToolDef } from "./types.js";
 import { compressToolOutput } from "../ai/compression.js";
 import { createLogger } from "../utils/logger.js";
+import { ToolResultCache, shouldCache, type CacheKey } from "../core/tool-cache.js";
 
 const log = createLogger({ prefix: "tool-exec" });
+
+// v2.8: cross-turn tool-result cache. Module-level singleton — lives for the
+// process. file:read / search / web GET results are memoized with mtime
+// invalidation so re-reads cost zero tokens.
+const toolResultCache = new ToolResultCache();
+
+/** Execute a cacheable tool and store the result. */
+async function executeAndCache(
+  name: string,
+  args: Record<string, unknown>,
+  id: string,
+  cacheKey: CacheKey,
+  mtime: number | undefined
+): Promise<ChatMessage> {
+  const result = await toolManager.execute(name, args);
+  const rawOutput = result.success ? result.output : `ERROR: ${result.error || "Unknown error"}\n${result.output}`;
+  let output = rawOutput;
+  try { output = await compressToolOutput(rawOutput, name); } catch { /* compression failed */ }
+  // Cache only successful results.
+  if (result.success) toolResultCache.set(cacheKey, output, mtime);
+  const truncated = output.length > 50000 ? output.slice(0, 50000) + "\n... (truncated)" : output;
+  return { role: "tool", content: wrapUntrusted(name, truncated), toolCallId: id, name };
+}
 
 const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
   file: {
@@ -288,6 +312,33 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ChatMessage> 
       toolCallId: id,
       name,
     };
+  }
+
+  // v2.8 wiring: check the cross-turn cache for deterministic tools (file:read,
+  // search, web GET). On hit, return the cached result without re-executing.
+  if (shouldCache(name, args)) {
+    const cacheKey = { tool: name, args: argsStr };
+    let mtime: number | undefined;
+    if (name === "file" && typeof args.path === "string") {
+      try {
+        const { statSync } = await import("node:fs");
+        const { resolve: resolvePath } = await import("node:path");
+        mtime = statSync(resolvePath(args.path as string)).mtimeMs;
+      } catch { /* file doesn't exist yet — no mtime */ }
+    }
+    const cached = toolResultCache.get(cacheKey, mtime);
+    if (cached !== null) {
+      log.debug(`Cache hit: ${name}`);
+      return {
+        role: "tool",
+        content: wrapUntrusted(name, cached),
+        toolCallId: id,
+        name,
+      };
+    }
+    // Execute, then cache the result.
+    const result = await executeAndCache(name, args, id, cacheKey, mtime);
+    return result;
   }
 
   try {
