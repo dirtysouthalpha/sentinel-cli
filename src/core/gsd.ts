@@ -120,7 +120,19 @@ export async function runGsd(
   runPhase: RunPhaseFn,
   opts: RunGsdOptions = {}
 ): Promise<GsdPhaseResult[]> {
-  const needsFix = opts.needsFix ?? ((out: string) => DEFAULT_FIX_SIGNAL.test(out));
+  const needsFix = opts.needsFix ?? ((out: string) => {
+    // v2.6 wiring: check both the prose regex AND real test-runner output.
+    if (DEFAULT_FIX_SIGNAL.test(out)) return true;
+    try {
+      const { parseTestRunnerOutput } = require("./test-runner-parse.js") as typeof import("./test-runner-parse.js");
+      // If the review output looks like test runner output, parse it for failures.
+      if (/\d+\s*(failed|passed)|FAIL|PASS|exit code/i.test(out)) {
+        const result = parseTestRunnerOutput(out, out.match(/exit (?:code\s*)?(\d)/i) ? parseInt(out.match(/exit (?:code\s*)?(\d)/i)![1], 10) : 0);
+        return !result.passed;
+      }
+    } catch { /* fall through to regex */ }
+    return false;
+  });
   const results: GsdPhaseResult[] = [];
 
   const runOne = async (phase: string): Promise<GsdPhaseResult> => {

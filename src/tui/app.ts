@@ -26,7 +26,7 @@ import { expandMentions } from "../core/mentions.js";
 import { extractImageMentions, loadAttachment, type Attachment } from "../core/attachments.js";
 import { formatApprovalPrompt } from "../core/approval-diff.js";
 import { parsePipeline, runPipeline, type Pipeline } from "../core/pipeline-engine.js";
-import { runGsd, buildPhasePrompt } from "../core/gsd.js";
+import { runGsd, buildPhasePrompt, TDD_PHASES } from "../core/gsd.js";
 import { runAutopilotSession, summarizeAutopilot } from "../core/autopilot-session.js";
 import { writeRouterConfig, probeRouter, routerStartHelp, DEFAULT_ROUTER_URL, DEFAULT_CLAUDE_MODEL } from "../core/router-connect.js";
 import { buildIndex, search as searchRepoIndex, RepoIndex } from "../core/repo-index.js";
@@ -1752,6 +1752,11 @@ export class TUIApp {
         const { refined } = refineGoal(args.join(" "));
         args = [refined];
       }
+      // v2.6: /tdd runs the GSD pipeline with TDD_PHASES (test-red before implement).
+      if (cmd.name === "tdd" && args.length > 0) {
+        await this.runGsdDelegated(args.join(" "), TDD_PHASES);
+        return;
+      }
       await this.chatWithAI(resolveTemplate(cmd.template, args));
       return;
     }
@@ -2290,7 +2295,7 @@ export class TUIApp {
    * the task plus all prior phase outputs. After review, a fix phase runs only when
    * the review output signals a problem. Mirrors `runPipelineDelegated`'s wiring.
    */
-  private async runGsdDelegated(task: string): Promise<void> {
+  private async runGsdDelegated(task: string, phases?: readonly string[]): Promise<void> {
     // v2.2 wiring: resolve router roles for per-phase model selection.
     const config = getConfigManager(this.projectRoot).getAll();
     const resolvePhaseModel = (phase: string): string | undefined => {
@@ -2333,6 +2338,7 @@ export class TUIApp {
             const first = r.output.split("\n")[0].slice(0, 200);
             this.addSystem(`    ${r.output.startsWith("ERROR") ? "✗" : "✓"} ${r.phase}: ${first}`);
           },
+          ...(phases ? { phases } : {}),
         }
       );
 
