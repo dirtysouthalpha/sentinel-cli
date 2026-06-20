@@ -8,9 +8,7 @@ import {
 } from "../types.js";
 import { buildRequestBody, parseOpenAIResponse, parseOpenAIStream } from "./openai-compat.js";
 import { ProviderError } from "../errors.js";
-import { createLogger } from "../../utils/logger.js";
 
-const log = createLogger({ prefix: "openai" });
 
 export class OpenAIProvider implements AIProvider {
   name = "openai";

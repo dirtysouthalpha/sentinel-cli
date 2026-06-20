@@ -1,5 +1,4 @@
 import { AgentDef } from "./types.js";
-import { events } from "../core/events.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger({ prefix: "agent-registry" });

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, statSync } from "fs";
-import { join, resolve, dirname, basename, sep } from "path";
+import { join, resolve, dirname, sep } from "path";
 import { createHash } from "crypto";
 import { ToolDef, ToolResult } from "./types.js";
 
@@ -228,7 +228,6 @@ export function createFileTool(projectRoot: string): ToolDef {
 
               if (candidates.length > 0 && !args.strictWhitespace) {
                 for (const candidate of candidates) {
-                  const candidateText = lines.slice(candidate - 1, candidate - 1 + actualOldText.split("\n").length).join("\n");
                   if (lines[candidate - 1]?.trim() === trimmedMatch) {
                     const reconstructed = lines.slice(candidate - 1, candidate - 1 + actualOldText.split("\n").length)
                       .map((l, idx) => idx === 0 || idx === actualOldText.split("\n").length - 1 ? l : l.trim())
@@ -312,7 +311,6 @@ export function createFileTool(projectRoot: string): ToolDef {
               return { success: false, output: "", error: `Text not found in file. Check content and whitespace.` };
             }
 
-            const newContent = content.replace(actualOldText, replaceText);
             const diffOutput = diff(actualOldText, replaceText);
 
             return {

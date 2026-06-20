@@ -8,9 +8,7 @@ import {
 } from "../types.js";
 import { buildRequestBody, parseOpenAIResponse, parseOpenAIStream } from "./openai-compat.js";
 import { ProviderError } from "../errors.js";
-import { createLogger } from "../../utils/logger.js";
 
-const log = createLogger({ prefix: "zai" });
 
 const ZAI_CODING_BASE = "https://api.z.ai/api/coding/paas/v4";
 const ZAI_STANDARD_BASE = "https://api.z.ai/api/paas/v4";

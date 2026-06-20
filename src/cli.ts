@@ -21,7 +21,6 @@ import { commandRegistry } from "./commands/registry.js";
 import { loadAllAgents } from "./agents/loader.js";
 import { agentRegistry } from "./agents/registry.js";
 import { themeEngine } from "./tui/themes/engine.js";
-import { sessionManager } from "./core/session-manager.js";
 import { contextManager } from "./ai/context.js";
 import { getToolDefinitions, executeToolCall } from "./tools/tool-executor.js";
 import { AgentRunner } from "./core/agent-runner.js";

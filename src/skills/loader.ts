@@ -1,6 +1,6 @@
 import { SkillDef, SkillLoaderResult } from "./types.js";
 import { existsSync, readdirSync, readFileSync } from "fs";
-import { join, extname } from "path";
+import { join } from "path";
 import { homedir } from "os";
 import { resolveBuiltinDir } from "../utils/builtins.js";
 import { createLogger } from "../utils/logger.js";

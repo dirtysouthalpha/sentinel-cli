@@ -9,9 +9,7 @@ import {
   contentToText,
 } from "../types.js";
 import { ProviderError } from "../errors.js";
-import { createLogger } from "../../utils/logger.js";
 
-const log = createLogger({ prefix: "anthropic" });
 
 /**
  * Attach the system prompt as a cacheable content block. Render order is

@@ -1,6 +1,5 @@
 import { toolManager } from "./index.js";
 import { ChatMessage, ToolCall, ToolDef as AIToolDef } from "../ai/types.js";
-import { ToolDef } from "./types.js";
 import { compressToolOutput } from "../ai/compression.js";
 import { createLogger } from "../utils/logger.js";
 import { ToolResultCache, shouldCache, type CacheKey } from "../core/tool-cache.js";

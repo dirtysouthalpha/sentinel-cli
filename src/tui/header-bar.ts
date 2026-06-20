@@ -49,7 +49,7 @@ export function createHeaderBar(options: HeaderBarOptions): blessed.Widgets.BoxE
     const dot = fx.glow
       ? `{bold}{${c.cyan}-fg}\u25CF{/${c.cyan}-fg}{/bold}`
       : `{${c.cyan}-fg}\u25CF{/${c.cyan}-fg}`;
-    const sep = fx.glow ? c.accent : c.textTertiary;
+  
 
     headerBar.setContent(
       ` ${dot} {bold}${title}{/}   ` +

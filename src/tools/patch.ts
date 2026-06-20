@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { resolve, dirname, sep } from "path";
+import { resolve, sep } from "path";
 import { ToolDef, ToolResult } from "./types.js";
 
 interface PatchOperation {

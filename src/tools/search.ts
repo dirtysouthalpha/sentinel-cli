@@ -1,5 +1,5 @@
 import { execFile } from "child_process";
-import { readdirSync, statSync, existsSync } from "fs";
+import { readdirSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import { ToolDef, ToolResult } from "./types.js";
 

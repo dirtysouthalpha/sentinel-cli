@@ -1,5 +1,5 @@
 import { writeFileSync, mkdirSync, existsSync } from "fs";
-import { join, isAbsolute, resolve, sep } from "path";
+import { join, resolve, sep } from "path";
 import { ToolDef, ToolResult } from "./types.js";
 
 /**
