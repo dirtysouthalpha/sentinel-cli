@@ -190,7 +190,12 @@ export async function runWithRouter(
 
   if (chain.length === 0) {
     throw new ProviderError(
-      "No available provider/model in the router chain — check config.router targets and API keys."
+      "No AI provider is configured or available.\n" +
+      "To get started:\n" +
+      "  1. Run 'sentinel setup' for a guided wizard, OR\n" +
+      "  2. Set an API key: export ZAI_API_KEY=... (or ANTHROPIC_API_KEY / OPENAI_API_KEY), OR\n" +
+      "  3. Run '/connect' in the TUI for keyless OAuth (Claude Max).\n" +
+      "Then restart Sentinel."
     );
   }
 
