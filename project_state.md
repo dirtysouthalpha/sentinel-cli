@@ -1,29 +1,20 @@
-# Sentinel CLI — Hardening Pass State
+# Sentinel CLI — Production Polish State
 
 ## GOAL
-Make everything we built actually work end-to-end. Fix placeholders, add integration tests, polish rough edges.
+Production polish pass — fix rough edges, prepare for public release.
 
 ## PHASE
 COMPLETE — all 5 tasks delivered
 
 ## COMPLETED
-- [x] TASK 1 — Real subagent in team tool: injectTeamRunner() + app.ts injects the real subagent executor after provider init. Parallel worktree tasks now run real agent rounds.
-- [x] TASK 2 — Integration tests: tests/integration.test.ts with 16 end-to-end tests using REAL modules (refineGoal, buildTree, parseTestRunnerOutput, forkMessages, budgetThresholds, memory persistence, tool cache, validatePluginEntry, context manager, team runner).
-- [x] TASK 3 — TUI keyboard shortcuts: Ctrl+L (scroll top), Ctrl+R (rename tab), Esc (close slash menu), Tab (command completion + empty→@mention trigger). All verified present.
-- [x] TASK 4 — GUI polish: palette lists commands ✓, copy button uses clipboard ✓, diff accept/reject wired ✓, attachment × removable ✓, scroll-to-bottom button ✓. All verified — no changes needed.
-- [x] TASK 5 — Team tool verification: test confirms injected runner produces real output (not placeholder).
-
-## IN PROGRESS
-(none)
-
-## QUEUE
-(none)
-
-## BLOCKERS
-(none)
+- [x] TASK 1 — /export writes file directly: TUI already wired (handleExportCommand). GUI server now intercepts /export in handleCommand, calls exportSessionMarkdown, writes file, replies with path. No agent round.
+- [x] TASK 2 — First-run audit: router error message rewritten from technical jargon to actionable steps (run sentinel setup / set API key / /connect). Verified sentinel run with no config shows the helpful message.
+- [x] TASK 3 — README updated: badges → v3.2.0 + 849 tests. "What's new" callout rewritten with full v3.2 feature list (loop, routing, LSP, memory, PR tool, TDD, teams, diff, fork, plugins, syntax highlighting, tree, export).
+- [x] TASK 4 — Error audit: no "Error: undefined" or bare unhelpful throws found. Router message was the worst offender — fixed in TASK 2.
+- [x] TASK 5 — dist/ already in .gitignore + not tracked. Verified clean.
 
 ## OVERALL PROGRESS
 100% complete
 
 ## STATUS: GOAL ACHIEVED
-849 tests, lint clean, build green. The team tool's placeholder is gone — parallel agents run real rounds.
+849 tests, lint clean, build green. Ready for public release.
