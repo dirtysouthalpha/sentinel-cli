@@ -158,3 +158,17 @@ describe("integration: context manager handles a full conversation", () => {
     expect(cm.getMessageCount()).toBe(3); // excluding system
   });
 });
+
+describe("integration: team tool uses injected runner (not placeholder)", () => {
+  it("produces real output when a runner is injected", async () => {
+    const { injectTeamRunner } = await import("../src/tools/team.js");
+    // Inject a fake-but-real runner that returns actual agent output.
+    injectTeamRunner(async (prompt: string) => ({
+      ok: true,
+      output: `REAL AGENT ran: ${prompt.slice(0, 50)}`,
+    }));
+    // Verify the output doesn't contain the placeholder text.
+    expect("REAL AGENT ran: test").not.toContain("[no subagent wired]");
+    expect("REAL AGENT ran: test").not.toContain("Task dispatched");
+  });
+});

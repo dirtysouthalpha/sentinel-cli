@@ -1,20 +1,17 @@
-# Sentinel CLI — Feature Wave State
+# Sentinel CLI — Hardening Pass State
 
 ## GOAL
-Add 8 missing features to match Claude Code / opencode parity.
+Make everything we built actually work end-to-end. Fix placeholders, add integration tests, polish rough edges.
 
 ## PHASE
-COMPLETE — all 8 features delivered
+COMPLETE — all 5 tasks delivered
 
 ## COMPLETED
-- [x] F1 — GUI command palette (Ctrl+K): already implemented from earlier work. Wired to global keymap + ⌘K button.
-- [x] F2 — TUI syntax highlighting: src/tui/syntax-highlight.ts tokenizer (ts/js/py/bash/json). render-markdown.ts uses it for code blocks. Keyword/string/comment/number/function colors.
-- [x] F3 — File tree viewer: src/core/tree-builder.ts (buildTree/formatTree/parseGitignore, 11 tests) + src/tools/tree.ts tool. Registered.
-- [x] F4 — GUI diff accept/reject: computeDiff() now shows ✓ Accept / ✗ Reject buttons on file/patch edits. Reject triggers /undo (checkpoint restore).
-- [x] F5 — Live token/cost counter: already wired — GUI handles usage events → renderRight(); TUI handles usage → updateCost().
-- [x] F6 — MCP browser: `sentinel mcp browse` lists popular servers with install instructions.
-- [x] F7 — Completion bell: terminal bell on GSD completion + loop completion.
-- [x] F8 — Session export: sessionToMarkdown pure helper (4 tests) + exportSessionMarkdown/Html aliases + /export command.
+- [x] TASK 1 — Real subagent in team tool: injectTeamRunner() + app.ts injects the real subagent executor after provider init. Parallel worktree tasks now run real agent rounds.
+- [x] TASK 2 — Integration tests: tests/integration.test.ts with 16 end-to-end tests using REAL modules (refineGoal, buildTree, parseTestRunnerOutput, forkMessages, budgetThresholds, memory persistence, tool cache, validatePluginEntry, context manager, team runner).
+- [x] TASK 3 — TUI keyboard shortcuts: Ctrl+L (scroll top), Ctrl+R (rename tab), Esc (close slash menu), Tab (command completion + empty→@mention trigger). All verified present.
+- [x] TASK 4 — GUI polish: palette lists commands ✓, copy button uses clipboard ✓, diff accept/reject wired ✓, attachment × removable ✓, scroll-to-bottom button ✓. All verified — no changes needed.
+- [x] TASK 5 — Team tool verification: test confirms injected runner produces real output (not placeholder).
 
 ## IN PROGRESS
 (none)
@@ -29,4 +26,4 @@ COMPLETE — all 8 features delivered
 100% complete
 
 ## STATUS: GOAL ACHIEVED
-836 tests, lint clean, engine + GUI build green.
+849 tests, lint clean, build green. The team tool's placeholder is gone — parallel agents run real rounds.

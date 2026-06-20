@@ -985,6 +985,12 @@ export class TUIApp {
         this.renderInput();
       } else if (code === 9) {
         if (this.slashActive) this.acceptSlash(); // Tab selects from the menu
+        else if (this.inputBuffer.length === 0) {
+          // TASK 3: Tab on empty input → insert @mention trigger (Claude Code parity).
+          this.inputBuffer = "@";
+          this.inputCursor = 1;
+          this.renderInput();
+        }
         else this.completeInput();
       } else if (code === 1) {
         this.inputCursor = 0; // Ctrl+A → start of line
