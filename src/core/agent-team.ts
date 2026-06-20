@@ -97,9 +97,28 @@ export async function runTeam(
     return { results: [], merged: 0, conflicts: 0, failed: 0 };
   }
 
+  // v3.1 guard: filter out malformed tasks (missing branch or prompt) before
+  // fanning out — they'd crash the worktree creation. Report them as failures.
+  const valid: TeamTask[] = [];
+  const malformed: TeamTaskResult[] = [];
+  for (const t of tasks) {
+    if (!t.branch || !t.prompt) {
+      malformed.push({
+        branch: t.branch || "(missing)",
+        ok: false,
+        error: "Task missing required 'branch' or 'prompt' field.",
+      });
+    } else {
+      valid.push(t);
+    }
+  }
+  if (valid.length === 0) {
+    return { results: malformed, merged: 0, conflicts: 0, failed: malformed.length };
+  }
+
   // Fan out: all tasks run concurrently in their own worktrees.
   const executions = await Promise.all(
-    tasks.map((t) => runOne(t, opts.runSubagent, opts.worktree))
+    valid.map((t) => runOne(t, opts.runSubagent, opts.worktree))
   );
 
   // Merge successful branches back sequentially (one HEAD, can't parallelize).
@@ -143,8 +162,8 @@ export async function runTeam(
     }
   }
 
-  const failed = results.filter((r) => !r.ok).length;
-  return { results, merged, conflicts, failed };
+  const failed = results.filter((r) => !r.ok).length + malformed.length;
+  return { results: [...malformed, ...results], merged, conflicts, failed };
 }
 
 /** Adapt a WorktreeManager to the WorktreeOps interface. */

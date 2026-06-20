@@ -106,6 +106,25 @@ describe("runTeam — fan-out + merge + cleanup", () => {
     expect(report.merged).toBe(0);
   });
 
+  it("rejects malformed tasks (missing branch or prompt) without crashing", async () => {
+    const wt = fakeWorktree();
+    const runSubagent: RunSubagent = vi.fn(async () => ({ ok: true, output: "done" }));
+    const tasks = [
+      { branch: "valid", prompt: "do thing" },
+      { branch: "", prompt: "missing branch" }, // malformed
+      { branch: "no-prompt", prompt: "" },       // malformed
+    ] as TeamTask[];
+    const report = await runTeam(tasks, { runSubagent, worktree: wt });
+    expect(report.failed).toBe(2);
+    expect(report.merged).toBe(1);
+    expect(report.results).toHaveLength(3);
+    // The valid task ran; the malformed ones are marked failed.
+    const malformedResults = report.results.filter((r) => !r.ok);
+    expect(malformedResults.every((r) => r.error?.includes("missing"))).toBe(true);
+    // Subagent only ran for the valid task.
+    expect(runSubagent).toHaveBeenCalledTimes(1);
+  });
+
   it("always cleans up worktrees even when a subagent throws", async () => {
     const wt = fakeWorktree();
     const runSubagent: RunSubagent = async () => {
