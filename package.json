@@ -67,8 +67,15 @@
   "files": [
     "dist",
     "!dist/**/*.map",
-    "config"
+    "config",
+    "gui/dist",
+    "docs",
+    "LICENSE",
+    "NOTICE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "cli",
     "ai",
