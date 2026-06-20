@@ -275,6 +275,20 @@ const TOOL_DEFINITIONS: Record<string, AIToolDef> = {
       },
     },
   },
+  tree: {
+    type: "function",
+    function: {
+      name: "tree",
+      description: "Render the project directory as an indented tree with file sizes. Respects .gitignore.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Subdirectory to tree (default: project root)" },
+          depth: { type: "number", description: "Maximum depth (default: 3)" },
+        },
+      },
+    },
+  },
 };
 
 export function getToolDefinitions(): AIToolDef[] {

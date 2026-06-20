@@ -1,93 +1,49 @@
 /**
- * Pure, singleton-free helpers for exporting a session transcript to Markdown or
- * HTML. They take a plain messages array so they stay trivially testable.
+ * sessionToMarkdown — pure transcript-to-markdown formatter.
+ *
+ * Turns a conversation transcript into a clean markdown document the user can
+ * save, share, or archive. Pure: no I/O — the caller writes the file.
  */
 
 export interface ExportMessage {
-  role: string;
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
 }
 
-export interface ExportOptions {
-  title: string;
-  messages: ExportMessage[];
-}
-
-function roleHeader(role: string): string {
-  switch (role) {
-    case "user":
-      return "You";
-    case "assistant":
-      return "Sentinel";
-    case "system":
-      return "System";
-    case "tool":
-      return "Tool";
-    default:
-      return role.charAt(0).toUpperCase() + role.slice(1);
+export function sessionToMarkdown(messages: ExportMessage[]): string {
+  const lines: string[] = ["# Sentinel Session", ""];
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      lines.push("## User", "");
+      lines.push(msg.content || "(empty)");
+      lines.push("");
+    } else if (msg.role === "assistant") {
+      if (msg.content.trim()) {
+        lines.push("## Assistant", "");
+        lines.push(msg.content);
+        lines.push("");
+      }
+    } else if (msg.role === "tool") {
+      lines.push("### Tool Result", "");
+      lines.push("```");
+      lines.push(msg.content.slice(0, 2000));
+      lines.push("```");
+      lines.push("");
+    }
   }
+  return lines.join("\n");
 }
 
-/**
- * Render a conversation as a clean Markdown transcript: an H1 title followed by,
- * per message, a bold role header and the message content. Empty messages are
- * skipped.
- */
-export function exportSessionMarkdown(opts: ExportOptions): string {
-  const parts: string[] = [`# ${opts.title}`];
-
-  for (const msg of opts.messages) {
-    const content = (msg.content ?? "").trim();
-    if (!content) continue;
-    parts.push(`**${roleHeader(msg.role)}**\n\n${content}`);
-  }
-
-  return parts.join("\n\n") + "\n";
+/** Alias for backward compat with session-commands.ts. Accepts { title, messages }. */
+export function exportSessionMarkdown(input: ExportMessage[] | { title: string; messages: ExportMessage[] }): string {
+  const msgs = Array.isArray(input) ? input : input.messages;
+  const title = Array.isArray(input) ? "Sentinel Session" : input.title;
+  const body = sessionToMarkdown(msgs);
+  return body.replace("# Sentinel Session", `# ${title}`);
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-/**
- * Render the same transcript wrapped in minimal, self-contained HTML. All
- * user-supplied text (title, role, content) is HTML-escaped. Empty messages are
- * skipped.
- */
-export function exportSessionHtml(opts: ExportOptions): string {
-  const body: string[] = [`<h1>${escapeHtml(opts.title)}</h1>`];
-
-  for (const msg of opts.messages) {
-    const content = (msg.content ?? "").trim();
-    if (!content) continue;
-    body.push(
-      `<div class="message ${escapeHtml(msg.role)}">\n` +
-        `<p class="role"><strong>${escapeHtml(roleHeader(msg.role))}</strong></p>\n` +
-        `<pre>${escapeHtml(content)}</pre>\n` +
-        `</div>`
-    );
-  }
-
-  return [
-    "<!DOCTYPE html>",
-    '<html lang="en">',
-    "<head>",
-    '<meta charset="utf-8">',
-    `<title>${escapeHtml(opts.title)}</title>`,
-    "<style>",
-    "body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }",
-    ".message { margin-bottom: 1.5rem; }",
-    ".role { margin: 0 0 0.25rem; }",
-    "pre { white-space: pre-wrap; word-wrap: break-word; margin: 0; }",
-    "</style>",
-    "</head>",
-    "<body>",
-    body.join("\n"),
-    "</body>",
-    "</html>",
-    "",
-  ].join("\n");
+/** HTML export — wraps the markdown in a basic HTML shell. */
+export function exportSessionHtml(input: ExportMessage[] | { title: string; messages: ExportMessage[] }): string {
+  const md = exportSessionMarkdown(input);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sentinel Session</title></head><body><pre>${md.replace(/</g, "&lt;")}</pre></body></html>`;
 }

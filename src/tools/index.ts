@@ -12,6 +12,7 @@ import { createLspTool } from "./lsp.js";
 import { createPrTool } from "./pr.js";
 import { createMemoryTool } from "./memory.js";
 import { createTeamTool } from "./team.js";
+import { createTreeTool } from "./tree.js";
 import { events } from "../core/events.js";
 import { createLogger } from "../utils/logger.js";
 
@@ -45,6 +46,7 @@ class ToolManager {
     this.register(createPrTool());
     this.register(createMemoryTool(projectRoot));
     this.register(createTeamTool(projectRoot));
+    this.register(createTreeTool(projectRoot));
     log.info(`Initialized ${this.tools.size} tools${bashOpts.sandbox ? " (bash sandboxed)" : ""}`);
   }
 

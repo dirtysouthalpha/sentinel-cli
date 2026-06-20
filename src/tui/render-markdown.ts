@@ -15,6 +15,7 @@
  */
 import { parseMarkdownBlocks } from "../core/markdown.js";
 import type { ThemeEffects } from "./themes/types.js";
+import { tokenizeLine, type TokenType } from "./syntax-highlight.js";
 
 /**
  * Escape Blessed special chars so content cannot inject tags. Single-pass so a
@@ -50,12 +51,27 @@ export function renderMarkdown(
   const footer = (): string => `{${frameColor}-fg}╰─{/${frameColor}-fg}`;
 
   // Style a single line that lives inside a fenced code block.
-  const renderCodeLine = (line: string): string => {
+  const renderCodeLine = (line: string, lang = ""): string => {
     const e = esc(line);
+    // Diff lines keep their dedicated coloring.
     if (line.startsWith("@@")) return `{${col("cyan")}-fg}${e}{/}`;
     if (line.startsWith("+")) return `{${col("lime")}-fg}${e}{/}`;
     if (line.startsWith("-")) return `{${col("error")}-fg}${e}{/}`;
-    return `{${col("textSecondary")}-fg}${e}{/}`;
+    // v3.2: syntax-highlight non-diff lines via the tokenizer.
+    const tokenColors: Record<TokenType, string> = {
+      keyword: col("accent") || col("cyan"),
+      string: col("lime"),
+      comment: col("textTertiary"),
+      number: col("amber"),
+      function: col("magenta") || col("cyan"),
+      plain: col("textSecondary"),
+    };
+    const tokens = tokenizeLine(line, lang);
+    return tokens.map((t) => {
+      const color = tokenColors[t.type];
+      const text = esc(t.text);
+      return `{${color}-fg}${text}{/${color}-fg}`;
+    }).join("");
   };
 
   // Style a standalone (un-fenced) diff line (always add/del/hunk).
@@ -90,7 +106,7 @@ export function renderMarkdown(
   for (const block of parseMarkdownBlocks(text)) {
     if (block.kind === "code") {
       out.push(header(block.lang));
-      for (const line of block.lines) out.push(renderCodeLine(line));
+      for (const line of block.lines) out.push(renderCodeLine(line, block.lang));
       if (block.complete) out.push(footer());
     } else if (block.kind === "diff") {
       for (const line of block.lines) out.push(renderDiffLine(line));

@@ -630,6 +630,7 @@ program
       budget_exhausted: "stopped — budget exhausted",
     };
     console.log(`\n[loop] ${statusLabel[result.status] ?? result.status} (${result.iterations} iterations)`);
+    process.stdout.write("\x07"); // F7: terminal bell on completion
     process.exitCode = result.status === "production_ready" ? 0 : result.status === "aborted" ? 130 : 1;
   });
 

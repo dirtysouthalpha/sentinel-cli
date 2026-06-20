@@ -2363,6 +2363,8 @@ export class TUIApp {
       );
 
       let summary = `GSD pipeline complete (${results.length} phase(s)):\n`;
+      // F7: ring the terminal bell on completion so the user notices.
+      process.stdout.write("\x07");
       for (const r of results) {
         const first = r.output.split("\n")[0].slice(0, 200);
         summary += `  ${r.output.startsWith("ERROR") ? "✗" : "✓"} ${r.phase}: ${first}\n`;
