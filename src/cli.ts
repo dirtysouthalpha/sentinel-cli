@@ -861,7 +861,7 @@ program
   });
 
 program
-  .command("mcp browse")
+  .command("mcp-browse")
   .description("Browse popular MCP servers from the registry with install instructions")
   .action(async () => {
     // A curated catalog of popular MCP servers with one-line install commands.
