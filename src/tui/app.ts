@@ -2291,6 +2291,21 @@ export class TUIApp {
    * the review output signals a problem. Mirrors `runPipelineDelegated`'s wiring.
    */
   private async runGsdDelegated(task: string): Promise<void> {
+    // v2.2 wiring: resolve router roles for per-phase model selection.
+    const config = getConfigManager(this.projectRoot).getAll();
+    const resolvePhaseModel = (phase: string): string | undefined => {
+      if (!config.router) return undefined;
+      const { resolveRole } = require("../ai/router.js") as typeof import("../ai/router.js");
+      if (phase === "plan" || phase === "test-red") {
+        const chain = resolveRole(config.router!, "plan");
+        return chain[0]?.split("/").slice(1).join("/");
+      }
+      if (phase === "review" || phase === "test-green") {
+        const chain = resolveRole(config.router!, "smol");
+        return chain[0]?.split("/").slice(1).join("/");
+      }
+      return undefined;
+    };
     await this.runDelegated(async ({ subagentTool, signal }) => {
       this.addSystem(`▶ Shipping: "${task}" — autonomous GSD pipeline (plan → implement → test → review → fix)...`);
 
@@ -2301,10 +2316,13 @@ export class TUIApp {
           const priorBlock = prior.length
             ? prior.map((p) => `### ${p.phase}\n${p.output}`).join("\n\n")
             : undefined;
+          // v2.2: pass the per-phase model override (plan → strong, review → smol).
+          const phaseModel = resolvePhaseModel(phase);
           return subagentTool.execute(
             {
               task: buildPhasePrompt(phase, t, prior),
               context: priorBlock,
+              ...(phaseModel ? { model: phaseModel } : {}),
             },
             signal
           );

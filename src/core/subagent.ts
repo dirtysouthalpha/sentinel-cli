@@ -293,7 +293,9 @@ export function createSubagentTool(deps: SubagentDeps): SubagentToolHandle {
     const rounds = specialist?.steps
       ? Math.max(1, Math.floor(specialist.steps))
       : deps.maxRounds ?? 10;
-    const model = specialist?.model ?? deps.model;
+    // v2.2 wiring: allow a per-call model override (e.g. GSD plan phase → 'plan'
+    // role, commit message → 'commit' role). Falls back to specialist → deps.
+    const model = (typeof args.model === "string" && args.model.trim()) || specialist?.model || deps.model;
 
     const runner = new AgentRunner(
       {
