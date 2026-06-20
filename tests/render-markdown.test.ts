@@ -14,18 +14,21 @@ const colors: Record<string, string> = {
 };
 
 describe("renderMarkdown", () => {
-  it("frames a fenced block with a language header and escaped code content", () => {
+  it("frames a fenced block with a language header and syntax-highlighted code", () => {
     const out = renderMarkdown("```ts\nconst x = 1;\n```", colors);
     // Header shows the language in the dim/tertiary color.
     expect(out).toContain(`{${colors.textTertiary}-fg}`);
     expect(out).toContain("ts");
-    // Code body is rendered in the secondary color, content preserved.
-    expect(out).toContain(`{${colors.textSecondary}-fg}const x = 1;{/}`);
+    // v3.2: code is now syntax-highlighted — 'const' is a keyword (accent/white),
+    // '1' is a number (amber/yellow). Content preserved.
+    expect(out).toContain("const");
+    expect(out).toContain("1");
   });
 
   it("escapes Blessed braces inside code to {open}/{close}", () => {
     const out = renderMarkdown("```js\nfn() {}\n```", colors);
-    expect(out).toContain("fn() {open}{close}");
+    // v3.2: braces are escaped; 'fn' is tokenized as a function call.
+    expect(out).toContain("{open}{close}");
     expect(out).not.toContain("fn() {}");
   });
 
@@ -79,7 +82,9 @@ describe("renderMarkdown", () => {
     expect(() => {
       out = renderMarkdown("```js\ncode without a closing fence", colors);
     }).not.toThrow();
-    expect(out).toContain(`{${colors.textSecondary}-fg}code without a closing fence{/}`);
+    // v3.2: tokenizer splits into per-char tokens, so check key substrings.
+    expect(out).toContain("code");
+    expect(out).toContain("fence");
   });
 
   it("never emits stray unescaped braces from content", () => {

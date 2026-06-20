@@ -84,7 +84,17 @@ export function tokenizeLine(line: string, lang: string): Token[] {
       continue;
     }
 
-    // Plain char — accumulate until next interesting position.
+    // Plain text — accumulate a run of non-interesting chars. If the current
+    // char IS a letter but didn't match keyword/function, consume the whole
+    // word so we don't emit per-char tokens.
+    const wordRun = rest.match(/^[a-zA-Z_$][a-zA-Z0-9_$]*/);
+    if (wordRun && wordRun[0].length > 0) {
+      tokens.push({ type: "plain", text: wordRun[0] });
+      i += wordRun[0].length;
+      continue;
+    }
+
+    // Non-letter plain char — accumulate until next interesting position.
     let nextStop = rest.length;
     if (pat.comment) { const c = rest.indexOf(pat.comment); if (c !== -1) nextStop = Math.min(nextStop, c); }
     const s = rest.search(pat.str); if (s !== -1) nextStop = Math.min(nextStop, s);
