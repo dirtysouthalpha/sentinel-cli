@@ -77,6 +77,7 @@ import { sessionManager, Session } from "../core/session-manager.js";
 import { PermissionMode, PermissionRequest } from "../core/permissions.js";
 import { CheckpointManager } from "../core/checkpoints.js";
 import { createSubagentAwareExecutor } from "../core/subagent.js";
+import { injectTeamRunner } from "../tools/team.js";
 import { createTodoTool, createTodoAwareExecutor } from "../core/todos.js";
 import { createHookAwareExecutor, defaultRunShell } from "../core/hooks.js";
 import { BackgroundTaskManager } from "../core/background.js";
@@ -2251,6 +2252,20 @@ export class TUIApp {
         projectRoot: this.projectRoot,
         ask: (req, reason) => this.askPermission(req, reason),
       });
+
+      // TASK 1 wiring: inject the real subagent runner into the team tool so
+      // parallel worktree tasks run real agent rounds, not placeholders.
+      if (subagentTool && this.ac) {
+        const ac = this.ac;
+        injectTeamRunner(async (prompt: string, _worktreePath: string) => {
+          try {
+            const output = await subagentTool.execute({ task: prompt }, ac.signal);
+            return { ok: !output.startsWith("ERROR:"), output };
+          } catch (err) {
+            return { ok: false, error: String(err) };
+          }
+        });
+      }
 
       await body({ subagentTool, signal: this.ac.signal });
 

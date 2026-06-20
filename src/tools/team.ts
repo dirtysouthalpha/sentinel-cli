@@ -29,6 +29,20 @@ const realGit: GitRunner = {
   },
 };
 
+/** Module-level singleton for the injected subagent runner.
+ *  Set by injectTeamRunner() once the provider is available. */
+let activeRunner: RunSubagent | undefined;
+
+/** Inject the real subagent runner (called from app.ts/cli.ts after provider init). */
+export function injectTeamRunner(runner: RunSubagent): void {
+  activeRunner = runner;
+}
+
+/**
+ * Create the team tool. Uses the injected subagent runner when available
+ * (set via injectTeamRunner after provider init); otherwise falls back to a
+ * placeholder for standalone/test use.
+ */
 export function createTeamTool(projectRoot: string): ToolDef {
   return {
     name: "team",
@@ -67,19 +81,13 @@ export function createTeamTool(projectRoot: string): ToolDef {
         const wt = new WorktreeManager(projectRoot, realGit, parentDir);
         const ops = asWorktreeOps(wt);
 
-        // The runSubagent seam: lazy-import to avoid a circular dep on the
-        // subagent tool (which is constructed with the provider). In
-        // production this runs the real subagent; for tests the caller
-        // injects a fake. Here we use a minimal inline runner that delegates
-        // to a bash-based "echo the prompt" fallback if no subagent is wired.
-        const runSubagent: RunSubagent = async (prompt: string, worktreePath: string) => {
-          // In the real wiring, this calls the subagent tool with cwd=worktreePath.
-          // For now, return a placeholder indicating the task was dispatched.
+        // Use the injected runner when available; otherwise placeholder.
+        const runSubagent: RunSubagent = activeRunner ?? (async (prompt: string, worktreePath: string) => {
           return {
             ok: true,
-            output: `Task dispatched to worktree ${worktreePath}: ${prompt.slice(0, 100)}`,
+            output: `[no subagent wired] Task for worktree ${worktreePath}: ${prompt.slice(0, 100)}`,
           };
-        };
+        });
 
         const report = await runTeam(tasks, { runSubagent, worktree: ops });
         const lines = [
