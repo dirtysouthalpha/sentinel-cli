@@ -471,3 +471,51 @@ body {
   padding: 8px 12px; margin: 8px 0; max-height: 300px; overflow: auto;
   white-space: pre-wrap; color: var(--text-dim);
 }
+
+/* ---- workspace file browser (sidebar) ---- */
+.file-browser { max-height: 300px; overflow-y: auto; margin: 4px 0 8px; }
+.file-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 8px;
+  cursor: pointer; border-radius: 4px; font-size: 12px; color: var(--text-dim);
+  transition: background 0.1s;
+}
+.file-row:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+.file-row .fi { font-size: 14px; flex-shrink: 0; }
+.file-row .fn { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row .fs { font-size: 10px; color: var(--text-faint); flex-shrink: 0; }
+.file-row.dir .fn { color: var(--accent); font-weight: 500; }
+
+/* ---- file preview overlay ---- */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-box {
+  background: var(--bg-glass-2, rgba(14,21,40,0.95));
+  border: 1px solid var(--border-strong, rgba(120,150,210,0.3));
+  border-radius: var(--radius); padding: 0;
+  max-width: 80vw; max-height: 85vh; overflow: hidden;
+  box-shadow: var(--shadow); display: flex; flex-direction: column;
+}
+.file-preview-box { min-width: 400px; }
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.modal-title { font-size: 13px; color: var(--text-dim); font-family: var(--font-mono); }
+.modal-close {
+  background: none; border: none; color: var(--text-faint); font-size: 18px;
+  cursor: pointer; padding: 0 4px; border-radius: 4px;
+}
+.modal-close:hover { color: var(--text); background: rgba(255,255,255,0.1); }
+.code-preview {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  padding: 16px; overflow: auto; max-height: 70vh; white-space: pre-wrap;
+  color: var(--text-dim); background: rgba(0,0,0,0.2);
+}
+.md-preview { padding: 16px; overflow: auto; max-height: 70vh; font-size: 14px; line-height: 1.65; }
+.md-preview h1, .md-preview h2, .md-preview h3 { color: var(--text); margin: 12px 0 6px; }
+.md-preview p { margin: 6px 0; }
+.md-preview code { font-family: var(--font-mono); background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+.md-preview pre { background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow: auto; }

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { state } from "../../core/state.js";
+import { getConfigManager } from "../../core/config.js";
 import { providerManager } from "../../ai/provider.js";
 import { loadAttachment } from "../../core/attachments.js";
 import { buildVisionMessage } from "../../core/vision.js";
@@ -19,9 +20,16 @@ export async function handleAskPrime(host: CommandHost, args: string[]): Promise
     );
     return;
   }
+
+  // Get the first available model from the provider's config, or use a sensible default
+  const config = getConfigManager().getAll();
+  const primeModels = config.provider?.["sentinel-prime"]?.models || {};
+  const primeModelNames = Object.keys(primeModels);
+  const model = primeModelNames.length > 0 ? primeModelNames[0] : "claude-sonnet-4-20250514";
+
   try {
     const res = await prime.chat([{ role: "user", content: question }], {
-      model: "hermes-agent",
+      model,
     });
     host.addSystem(res.content || "(no answer)");
   } catch (err) {

@@ -407,6 +407,30 @@ function renderSidebar() {
   const s = $("#sidebar"); s.innerHTML = "";
   s.append(el("div", "side-head", "Workspace"));
   s.append(el("div", "project", esc(projectName())));
+  // File browser: shows the current directory, click to navigate/preview.
+  const fileList = el("div", "file-browser");
+  if (currentDir !== ".") {
+    const up = el("div", "file-row dir", "📁 ../");
+    up.onclick = () => { currentDir = currentDir.split("/").slice(0, -1).join("/") || "."; refreshFiles(); };
+    fileList.append(up);
+  }
+  for (const f of fileEntries) {
+    const row = el("div", "file-row " + (f.isDir ? "dir" : "file"));
+    const icon = f.isDir ? "📁" : fileIcon(f.ext || "");
+    row.append(el("span", "fi", icon));
+    row.append(el("span", "fn", esc(f.name)));
+    if (!f.isDir && f.size > 0) row.append(el("span", "fs", formatSize(f.size)));
+    row.onclick = () => {
+      if (f.isDir) { currentDir = f.path; refreshFiles(); }
+      else { send({ type: "readFile", path: f.path }); }
+    };
+    fileList.append(row);
+  }
+  // Refresh button
+  const refresh = el("div", "file-row dir", "🔄 refresh");
+  refresh.onclick = () => refreshFiles();
+  fileList.append(refresh);
+  s.append(fileList);
   s.append(el("div", "side-head", "Sessions"));
   const list = el("div", "list");
   for (const ses of snap!.sessions) {
@@ -427,6 +451,30 @@ function renderSidebar() {
     al.append(row);
   }
   s.append(al);
+}
+
+// ---- workspace file browser state ----
+let fileEntries: { name: string; path: string; isDir: boolean; size: number; ext?: string }[] = [];
+let currentDir = ".";
+
+function refreshFiles(): void {
+  send({ type: "browseFiles", dir: currentDir });
+}
+
+function fileIcon(ext: string): string {
+  if (["ts", "js", "tsx", "jsx", "mjs"].includes(ext)) return "📜";
+  if (["md", "txt", "rst"].includes(ext)) return "📄";
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return "🖼";
+  if (["json", "yaml", "yml", "toml"].includes(ext)) return "⚙";
+  if (["py", "rb", "go", "rs", "c", "cpp"].includes(ext)) return "📜";
+  if (["html", "css", "scss"].includes(ext)) return "🎨";
+  return "📄";
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + "B";
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + "K";
+  return (bytes / 1048576).toFixed(1) + "M";
 }
 
 function renderRight() {
@@ -846,6 +894,44 @@ function acceptAc(idx: number) {
 }
 function closeAc() { acItems = []; renderAc(); }
 
+// ---- file preview overlay ------------------------------------------------
+function showFilePreview(path: string, content: string, mimeType: string, isBinary: boolean): void {
+  const existing = document.getElementById("file-preview");
+  if (existing) existing.remove();
+
+  const overlay = el("div", "modal-overlay");
+  overlay.id = "file-preview";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  const box = el("div", "modal-box file-preview-box");
+  // Header with filename + close button.
+  const head = el("div", "modal-head");
+  head.append(el("span", "modal-title", "📄 " + esc(path)));
+  const close = el("button", "modal-close", "✕");
+  close.onclick = () => overlay.remove();
+  head.append(close);
+  box.append(head);
+
+  // Content: image → <img>, markdown → rendered HTML, other → <pre>.
+  if (isBinary && content.startsWith("data:image/")) {
+    const img = document.createElement("img");
+    img.src = content;
+    img.style.cssText = "max-width:100%;max-height:70vh;border-radius:var(--radius-sm);";
+    box.append(img);
+  } else if (mimeType === "text/markdown") {
+    const md = el("div", "md-preview");
+    md.innerHTML = renderMarkdownHTML(content);
+    box.append(md);
+  } else {
+    const pre = el("pre", "code-preview");
+    pre.textContent = content;
+    box.append(pre);
+  }
+
+  overlay.append(box);
+  document.body.append(overlay);
+}
+
 // ---- cheatsheet + search (E1) ----------------------------------------------
 function showCheatsheet(): void {
   const existing = document.getElementById("cheatsheet");
@@ -1130,7 +1216,7 @@ function scheduleReconnect() {
  */
 export function dispatch(m: ServerMessage) {
   switch (m.type) {
-    case "hello": snap = m.state; shell(); renderAll(); renderChat(); break;
+    case "hello": snap = m.state; shell(); renderAll(); renderChat(); refreshFiles(); break;
     case "state": snap = m.state; renderAll(); break;
     case "busy": busy = m.busy; if (!busy) round = 0; setSendBtn(); if (snap) renderRight(); break;
     case "user": blocks.push({ kind: "user", text: m.text, contextCount: m.contextCount }); renderChat(); break;
@@ -1178,6 +1264,16 @@ export function dispatch(m: ServerMessage) {
         } as Block;
       });
       renderChat();
+      break;
+    }
+    case "fileTree": {
+      fileEntries = m.entries;
+      currentDir = m.dir;
+      if (snap) renderSidebar();
+      break;
+    }
+    case "fileContent": {
+      showFilePreview(m.path, m.content, m.mimeType, m.isBinary);
       break;
     }
     case "files": {

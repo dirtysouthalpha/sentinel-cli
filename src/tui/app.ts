@@ -436,6 +436,23 @@ export class TUIApp {
     this.scheduleRender();
   }
 
+  /** Scroll the chat by a percentage (PageUp/PageDown). */
+  private pageScroll(dir: "up" | "down"): void {
+    this.stickToBottom = false; // page breaks auto-follow
+    try {
+      const current = this.chat.getScrollPerc() ?? 0;
+      const step = 30; // scroll 30% of viewport per page
+      const next = dir === "up" 
+        ? Math.max(0, current - step) 
+        : Math.min(100, current + step);
+      this.chat.setScrollPerc(next);
+    } catch {
+      // setScrollPerc can throw before the box has laid out — ignore.
+    }
+    this.refreshStatus();
+    this.scheduleRender();
+  }
+
   /** Start/stop the working-indicator spinner as the run state flips. */
   private onProcessingChange(): void {
     const proc = state.get("isProcessing");
@@ -732,6 +749,7 @@ export class TUIApp {
       s += `\n${glowText("▸", c, fx, c.cyan)} {${c.textPrimary}-fg}type a message to start{/}\n`;
     }
     s += `${glowText("▸", c, fx, c.cyan)} {${c.amber}-fg}/{/} {${c.textPrimary}-fg}for commands & skills{/}  {${c.textSecondary}-fg}— /connect · /model · /skill · /theme{/}\n`;
+    s += `${glowText("▸", c, fx, c.cyan)} {${c.amber}-fg}/export{/} {${c.textPrimary}-fg}save transcript as Markdown/HTML{/}\n`;
     s += `${glowText("▸", c, fx, c.cyan)} {${c.amber}-fg}gsd{/} {${c.textPrimary}-fg}<task>{/}  {${c.textSecondary}-fg}— plan → build → test → ship, autonomously{/}\n`;
     s += `${glowText("▸", c, fx, c.cyan)} {${c.textSecondary}-fg}tab completes · ↑ history · ctrl+q quit · ? for shortcuts{/}\n`;
     s += `\n${frame(false)}\n`;
@@ -1077,6 +1095,12 @@ export class TUIApp {
         break;
       case "end": // jump the scrollback to the bottom (line-end is Ctrl+E)
         this.scrollChat(false);
+        break;
+      case "pageUp": // page up through the scrollback
+        this.pageScroll("up");
+        break;
+      case "pageDown": // page down through the scrollback
+        this.pageScroll("down");
         break;
       case "delete":
         if (this.inputCursor < this.inputBuffer.length) {

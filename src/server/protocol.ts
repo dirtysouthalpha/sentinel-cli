@@ -62,6 +62,9 @@ export type ClientMessage =
   | { type: "toggleMcp"; name: string; enabled: boolean }
   // D2: @-mention file autocomplete — client queries, server globs the project.
   | { type: "listFiles"; query: string }
+  // Workspace browser: list files in a directory (tree), read a file for preview.
+  | { type: "browseFiles"; dir?: string }
+  | { type: "readFile"; path: string }
   // Onboarding: the GUI wizard submits the user's provider/key/model choice.
   | { type: "configure"; providerId: string; model: string; apiKey?: string; baseURL?: string };
 
@@ -100,7 +103,10 @@ export type ServerMessage =
   // chat even though ContextManager still holds every turn.
   | { type: "history"; messages: HistoryMessage[] }
   // D2: reply to listFiles — project paths matching the @-mention query.
-  | { type: "files"; items: string[] };
+  | { type: "files"; items: string[] }
+  // Workspace browser: directory listing + file content for preview.
+  | { type: "fileTree"; entries: FileTreeEntry[]; dir: string }
+  | { type: "fileContent"; path: string; content: string; mimeType: string; isBinary: boolean };
 
 /** One replayed conversation turn for the `history` message. */
 export interface HistoryMessage {
@@ -108,6 +114,15 @@ export interface HistoryMessage {
   content: string;
   /** For tool entries, the tool name (so the GUI can render a tool card). */
   name?: string;
+}
+
+/** A file/directory entry for the workspace browser. */
+export interface FileTreeEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  ext?: string;
 }
 
 export interface ServeHandshake {

@@ -30,10 +30,12 @@ import { providerKeyName } from "../core/secrets/resolver.js";
 import { commandRegistry } from "../commands/registry.js";
 import { agentRegistry } from "../agents/registry.js";
 import { resolveTemplate } from "../commands/loader.js";
+import { readdirSync, statSync, readFileSync } from "node:fs";
+import { resolve, extname, relative, join } from "node:path";
 import { refineGoal } from "../core/refine-goal.js";
 import { formatApprovalPrompt } from "../core/approval-diff.js";
 import { attachmentFromDataUrl } from "../core/attachments.js";
-import { ClientMessage, ClientAttachment, ServerMessage, StateSnapshot, ConfigView } from "./protocol.js";
+import { ClientMessage, ClientAttachment, ServerMessage, StateSnapshot, ConfigView, type FileTreeEntry } from "./protocol.js";
 import {
   setProviderConfig,
   removeProviderConfig,
@@ -319,6 +321,62 @@ class Connection {
         // D2: glob the project for @-mention autocomplete. Cap results + skip
         // noise dirs (node_modules, .git) so the popup stays useful.
         this.send({ type: "files", items: globProject(this.projectRoot, msg.query) });
+        break;
+      }
+      case "browseFiles": {
+        // Workspace browser: list one directory level (files + subdirs).
+        const targetDir = msg.dir || ".";
+        const absPath = resolve(this.projectRoot, targetDir);
+        // Security: never allow escaping the project root.
+        if (!absPath.startsWith(resolve(this.projectRoot))) {
+          this.send({ type: "fileTree", entries: [], dir: targetDir });
+          break;
+        }
+        try {
+          const items = readdirSync(absPath, { withFileTypes: true });
+          const entries = items
+            .filter((item) => !item.name.startsWith(".") && item.name !== "node_modules" && item.name !== "dist" && item.name !== "__pycache__")
+            .map((item): FileTreeEntry => {
+              const fullPath = join(absPath, item.name);
+              let size = 0;
+              try { size = item.isDirectory() ? 0 : statSync(fullPath).size; } catch { /* */ }
+              return {
+                name: item.name,
+                path: relative(this.projectRoot, fullPath).replace(/\\/g, "/"),
+                isDir: item.isDirectory(),
+                size,
+                ext: item.isFile() ? extname(item.name).slice(1).toLowerCase() : undefined,
+              };
+            })
+            .sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name)));
+          this.send({ type: "fileTree", entries, dir: targetDir });
+        } catch {
+          this.send({ type: "fileTree", entries: [], dir: targetDir });
+        }
+        break;
+      }
+      case "readFile": {
+        // Preview a file — text content for docs/code, base64 data URL for images.
+        const absPath = resolve(this.projectRoot, msg.path);
+        if (!absPath.startsWith(resolve(this.projectRoot))) {
+          this.send({ type: "fileContent", path: msg.path, content: "Access denied", mimeType: "text/plain", isBinary: false });
+          break;
+        }
+        try {
+          const ext = extname(msg.path).slice(1).toLowerCase();
+          const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
+          if (imageExts.includes(ext)) {
+            const buf = readFileSync(absPath);
+            const mime = ext === "svg" ? "image/svg+xml" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`;
+            this.send({ type: "fileContent", path: msg.path, content: `data:${mime};base64,${buf.toString("base64")}`, mimeType: mime, isBinary: true });
+          } else {
+            const content = readFileSync(absPath, "utf-8");
+            const mime = ext === "md" ? "text/markdown" : ext === "json" ? "application/json" : "text/plain";
+            this.send({ type: "fileContent", path: msg.path, content: content.slice(0, 50000), mimeType: mime, isBinary: false });
+          }
+        } catch (err) {
+          this.send({ type: "fileContent", path: msg.path, content: `Cannot read: ${err}`, mimeType: "text/plain", isBinary: false });
+        }
         break;
       }
       case "configure": {

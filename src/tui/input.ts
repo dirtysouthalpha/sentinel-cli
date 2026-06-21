@@ -82,6 +82,8 @@ export type CsiAction =
   | "home"
   | "end"
   | "delete"
+  | "pageUp"
+  | "pageDown"
   | "none";
 
 /**
@@ -109,6 +111,8 @@ export function parseCsi(seq: string): CsiAction {
       if (seq.startsWith("1") || seq.startsWith("7")) return "home";
       if (seq.startsWith("4") || seq.startsWith("8")) return "end";
       if (seq.startsWith("3")) return "delete";
+      if (seq.startsWith("5")) return "pageUp";
+      if (seq.startsWith("6")) return "pageDown";
       return "none";
     default:
       return "none";
