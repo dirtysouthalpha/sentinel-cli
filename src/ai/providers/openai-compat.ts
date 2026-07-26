@@ -115,6 +115,56 @@ export async function parseOpenAIStream(
   let usageData: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
   let finishReason = "";
 
+  // Handle one already-stripped SSE data payload. Extracted so it can run
+  // both inside the read loop and once more on the trailing buffer.
+  const handleData = (data: string): void => {
+    if (data === "[DONE]") return;
+    try {
+      const parsed = JSON.parse(data);
+      const delta = parsed.choices?.[0]?.delta;
+      if (delta?.content) {
+        fullContent.push(delta.content);
+        onChunk?.({ content: delta.content, done: false });
+      }
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          if (!toolCallMap.has(idx)) {
+            toolCallMap.set(idx, {
+              id: tc.id || `call_${idx}`,
+              name: tc.function?.name || "",
+              args: "",
+            });
+          }
+          const existing = toolCallMap.get(idx)!;
+          if (tc.id) existing.id = tc.id;
+          if (tc.function?.name) existing.name = tc.function.name;
+          if (tc.function?.arguments) existing.args += tc.function.arguments;
+        }
+      }
+      if (parsed.model) model = parsed.model;
+      if (parsed.choices?.[0]?.finish_reason) finishReason = parsed.choices[0].finish_reason;
+      if (parsed.usage) {
+        usageData = {
+          promptTokens: parsed.usage.prompt_tokens || 0,
+          completionTokens: parsed.usage.completion_tokens || 0,
+          totalTokens: parsed.usage.total_tokens || 0,
+        };
+      }
+    } catch {
+      // skip malformed event
+    }
+  };
+
+  // Accept `data:` with OR without the spec-optional space. Requiring the
+  // space silently dropped every event from providers (e.g. Gemini) that emit
+  // `data:{...}`.
+  const handleLine = (line: string): void => {
+    if (line.startsWith("data:")) {
+      handleData(line.slice(5).trim());
+    }
+  };
+
   if (response.body) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -129,47 +179,17 @@ export async function parseOpenAIStream(
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6).trim();
-          if (data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(data);
-            const delta = parsed.choices?.[0]?.delta;
-            if (delta?.content) {
-              fullContent.push(delta.content);
-              onChunk?.({ content: delta.content, done: false });
-            }
-            if (delta?.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                const idx = tc.index ?? 0;
-                if (!toolCallMap.has(idx)) {
-                  toolCallMap.set(idx, {
-                    id: tc.id || `call_${idx}`,
-                    name: tc.function?.name || "",
-                    args: "",
-                  });
-                }
-                const existing = toolCallMap.get(idx)!;
-                if (tc.id) existing.id = tc.id;
-                if (tc.function?.name) existing.name = tc.function.name;
-                if (tc.function?.arguments) existing.args += tc.function.arguments;
-              }
-            }
-            if (parsed.model) model = parsed.model;
-            if (parsed.choices?.[0]?.finish_reason) finishReason = parsed.choices[0].finish_reason;
-            if (parsed.usage) {
-              usageData = {
-                promptTokens: parsed.usage.prompt_tokens || 0,
-                completionTokens: parsed.usage.completion_tokens || 0,
-                totalTokens: parsed.usage.total_tokens || 0,
-              };
-            }
-          } catch {
-            // skip
-          }
-        }
+        handleLine(line);
       }
+    }
+
+    // Flush any bytes the decoder is still holding, then process the final
+    // line. A stream that ends without a trailing newline leaves its last
+    // event in `buffer` — which carries the `usage` record on many providers,
+    // so dropping it broke cost/token accounting.
+    buffer += decoder.decode();
+    if (buffer.length > 0) {
+      handleLine(buffer);
     }
   }
 
