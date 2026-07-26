@@ -1,6 +1,8 @@
 // Wire protocol for `sentinel serve` — a local WebSocket bridge that exposes the
 // Sentinel engine to a GUI (or any client). All messages are JSON.
 
+import type { TodoStatus } from "../core/todos.js";
+
 export type PermissionMode = "yolo" | "auto" | "gated" | "plan";
 
 /** An image attachment carried over the wire from a GUI paste/drop. */
@@ -95,7 +97,7 @@ export type ServerMessage =
   | { type: "system"; text: string }
   | { type: "error"; message: string }
   | { type: "checkpoints"; items: { id: string; tool: string; path: string; existed: boolean; timestamp: number }[] }
-  | { type: "todos"; items: { content: string; status: "pending" | "in_progress" | "completed" }[] }
+  | { type: "todos"; items: { content: string; status: TodoStatus }[] }
   | { type: "config"; config: ConfigView }
   | { type: "busy"; busy: boolean }
   // Full conversation replay: sent after getState (and on reconnect) so the GUI

@@ -14,7 +14,7 @@ import { ChatMessage, ToolCall, ToolDef } from "../ai/types.js";
 
 export const TODO_TOOL_NAME = "todo_write";
 
-export type TodoStatus = "pending" | "in_progress" | "completed";
+export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 export interface TodoItem {
   content: string;
@@ -25,9 +25,10 @@ const STATUS_MARK: Record<TodoStatus, string> = {
   pending: "[ ]",
   in_progress: "[~]",
   completed: "[x]",
+  cancelled: "[-]",
 };
 
-const VALID_STATUS = new Set<TodoStatus>(["pending", "in_progress", "completed"]);
+const VALID_STATUS = new Set<TodoStatus>(["pending", "in_progress", "completed", "cancelled"]);
 
 export class TodoStore {
   private items: TodoItem[] = [];
@@ -49,8 +50,12 @@ export class TodoStore {
   render(): string {
     if (this.items.length === 0) return "(no todos)";
     const done = this.items.filter((t) => t.status === "completed").length;
+    const cancelled = this.items.filter((t) => t.status === "cancelled").length;
     const lines = this.items.map((t) => `${STATUS_MARK[t.status]} ${t.content}`);
-    return `Todos (${done}/${this.items.length} done):\n${lines.join("\n")}`;
+    // Cancelled items are resolved but not "done"; surface them separately so
+    // progress reads honestly (2/5 done, 1 cancelled).
+    const suffix = cancelled > 0 ? `, ${cancelled} cancelled` : "";
+    return `Todos (${done}/${this.items.length} done${suffix}):\n${lines.join("\n")}`;
   }
 }
 
@@ -63,7 +68,7 @@ function parseTodos(raw: unknown): TodoItem[] {
     const content = typeof e.content === "string" ? e.content.trim() : "";
     if (!content) throw new Error(`todos[${i}].content is required`);
     const status = (typeof e.status === "string" ? e.status : "pending") as TodoStatus;
-    if (!VALID_STATUS.has(status)) throw new Error(`todos[${i}].status must be pending|in_progress|completed`);
+    if (!VALID_STATUS.has(status)) throw new Error(`todos[${i}].status must be pending|in_progress|completed|cancelled`);
     return { content, status };
   });
 }
@@ -84,7 +89,8 @@ export function createTodoTool(store?: TodoStore): TodoToolHandle {
         "Create and manage a structured todo list for the current task. Call this with the " +
         "COMPLETE list every time (it replaces the previous list). Use it to plan multi-step " +
         "work, mark exactly one item 'in_progress' as you work, and flip items to 'completed' " +
-        "the moment they're done. Keeps you and the user aligned on progress.",
+        "the moment they're done. Mark an item 'cancelled' if it is abandoned or no longer " +
+        "needed. Keeps you and the user aligned on progress.",
       parameters: {
         type: "object",
         properties: {
@@ -95,7 +101,7 @@ export function createTodoTool(store?: TodoStore): TodoToolHandle {
               type: "object",
               properties: {
                 content: { type: "string", description: "The task, in imperative form." },
-                status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "pending|in_progress|completed" },
+                status: { type: "string", enum: ["pending", "in_progress", "completed", "cancelled"], description: "pending|in_progress|completed|cancelled" },
               },
               required: ["content", "status"],
             },

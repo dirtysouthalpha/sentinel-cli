@@ -65,3 +65,33 @@ describe("todos", () => {
     expect(baseCalls).toBe(1); // not delegated to base
   });
 });
+
+describe("todos — cancelled status (V1 cancel capability)", () => {
+  it("accepts and renders a cancelled item with its own mark", () => {
+    const { execute, store } = createTodoTool();
+    const out = execute({
+      todos: [
+        { content: "Ship feature", status: "completed" },
+        { content: "Refactor later", status: "cancelled" },
+        { content: "Write docs", status: "pending" },
+      ],
+    });
+    expect(out).toContain("1/3 done");
+    expect(out).toContain("1 cancelled");
+    expect(out).toContain("[-] Refactor later");
+    expect(store.get().find((t) => t.content === "Refactor later")?.status).toBe("cancelled");
+  });
+
+  it("does not append a cancelled suffix when there are none", () => {
+    const { execute } = createTodoTool();
+    const out = execute({ todos: [{ content: "a", status: "pending" }] });
+    expect(out).not.toContain("cancelled");
+  });
+
+  it("rejects an unknown status with a message listing cancelled", () => {
+    const { execute } = createTodoTool();
+    const out = execute({ todos: [{ content: "x", status: "bogus" }] });
+    expect(out).toContain("ERROR");
+    expect(out).toContain("cancelled");
+  });
+});
