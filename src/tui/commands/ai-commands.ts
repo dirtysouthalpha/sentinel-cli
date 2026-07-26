@@ -25,7 +25,7 @@ export async function handleAskPrime(host: CommandHost, args: string[]): Promise
   const config = getConfigManager().getAll();
   const primeModels = config.provider?.["sentinel-prime"]?.models || {};
   const primeModelNames = Object.keys(primeModels);
-  const model = primeModelNames.length > 0 ? primeModelNames[0] : "claude-sonnet-4-20250514";
+  const model = primeModelNames.length > 0 ? primeModelNames[0] : "claude-sonnet-5";
 
   try {
     const res = await prime.chat([{ role: "user", content: question }], {
