@@ -22,6 +22,8 @@ export class ChatRenderer {
   private stream = "";
   private streamRaw = "";
   private streamHeaderShown = false;
+  /** Most recent committed assistant response (raw markdown, unescaped). */
+  private lastResponse = "";
 
   private cost: CostTracker = {
     promptTokens: 0,
@@ -90,6 +92,7 @@ export class ChatRenderer {
 
   endAssistant(): void {
     if (this.streamHeaderShown) {
+      this.lastResponse = this.streamRaw;
       this.transcript += renderMarkdown(this.streamRaw, themeEngine.getBlessedColors() as unknown as Record<string, string>) + "\n";
     }
     this.stream = "";
@@ -142,7 +145,7 @@ export class ChatRenderer {
     s += `  {${c.cyan}-fg}{bold}◈ SENTINEL{/} {${c.textTertiary}-fg}v${this.version}{/}  ${providerList}\n`;
     s += `  {${c.textTertiary}-fg}model:{/} {${c.accent || c.cyan}-fg}${model}{/}  {${c.textTertiary}-fg}agent:{/} {${c.accent || c.cyan}-fg}${agent}{/}\n`;
     s += `\n`;
-    s += `  {${c.textTertiary}-fg}↩ send  /{/}{${c.cyan}-fg}cmd{/}{${c.textTertiary}-fg}  ↑↓ history  Ctrl+P palette  Ctrl+Q quit{/}\n`;
+    s += `  {${c.textTertiary}-fg}↩ send  /{/}{${c.cyan}-fg}cmd{/}{${c.textTertiary}-fg}  ↑↓ history  Ctrl+Y copy  Ctrl+P palette  Ctrl+Q quit{/}\n`;
     this.push(s);
     this.divider();
   }
@@ -227,4 +230,10 @@ export class ChatRenderer {
   getTranscript(): string { return this.transcript; }
   setTranscript(t: string): void { this.transcript = t; }
   clearStream(): void { this.stream = ""; this.streamRaw = ""; this.streamHeaderShown = false; }
+
+  /** The most recent assistant reply (raw markdown). Empty until the first
+   *  response completes. If a stream is in flight, returns the partial text. */
+  getLastResponse(): string {
+    return this.streamRaw || this.lastResponse;
+  }
 }

@@ -58,6 +58,7 @@ import { MCPManager } from "../mcp/manager.js";
 import { createMcpAwareExecutor } from "../mcp/mcp-executor.js";
 import { getConfigManager } from "../core/config.js";
 import { createLogger } from "../utils/logger.js";
+import { copyToClipboard } from "../utils/clipboard.js";
 import { join, resolve } from "node:path";
 import { createSidebar } from "./sidebar.js";
 import { VERSION } from "../core/version.js";
@@ -291,6 +292,22 @@ export class TUIApp {
   private addTool(name: string, args: string, ok: boolean, firstLine: string): void { this.renderer.addTool(name, args, ok, firstLine); }
   private addSystem(text: string): void { this.renderer.addSystem(text); }
   private addError(text: string): void { this.renderer.addError(text); }
+
+  /** Copy the most recent assistant response to the OS clipboard. */
+  private copyLastResponse(): void {
+    const text = this.renderer.getLastResponse().trim();
+    if (!text) {
+      this.addSystem("Nothing to copy yet — no response captured.");
+      return;
+    }
+    const result = copyToClipboard(text);
+    if (result.ok) {
+      const len = text.length;
+      this.addSystem(result.note ?? `Copied last response (${len} chars) to clipboard.`);
+    } else {
+      this.addError(result.note ?? "Failed to copy response.");
+    }
+  }
   private divider(): void { this.renderer.divider(); }
   private printWelcome(): void { this.renderer.printWelcome(providerManager.getAvailableProviderNames()); }
   private refreshStatus(): void { this.renderer.refreshStatus(); }
@@ -492,6 +509,7 @@ export class TUIApp {
     const cm = this.getContextManager();
     const [providerName, ...modelParts] = state.get("currentModel").split("/");
     const modelName = modelParts.join("/") || undefined;
+    let offCompact: (() => void) | undefined;
 
     try {
       const config = getConfigManager().getAll();
@@ -600,7 +618,6 @@ export class TUIApp {
         {
           model: runnerModel,
           maxRounds: isAutonomous ? (autoCfg.maxRounds || 50) : (agentName === "gsd" ? 30 : 15),
-          largeContextWarnAt: 50,
           selfEvaluation: isAutonomous && autoCfg.selfEvaluation !== false,
           stuckDetection: isAutonomous && autoCfg.stuckDetection !== false,
           stuckThreshold: autoCfg.stuckThreshold || 3,
@@ -628,9 +645,6 @@ export class TUIApp {
         usageTracker.recordTool(name, ok); // V17: per-tool metrics
         this.addTool(name, this.truncateArgs(this.pendingToolArgs), ok, firstLine);
       });
-      runner.on("contextLarge", () =>
-        this.addSystem("Context is getting large — /compact to save tokens.")
-      );
       runner.on("runError", (e) => {
         this.endAssistant();
         this.addError(e instanceof Error ? e.message : String(e));
@@ -647,7 +661,6 @@ export class TUIApp {
         this.addSystem("Verification found problems — feeding them back to fix…")
       );
       runner.on("verifyPassed", () => this.addSystem("Verification passed ✓"));
-      runner.on("compacted", () => this.addSystem("Context compacted (summarized older turns)."));
       runner.on("retry", (attempt, delayMs, err) =>
         this.addSystem(
           `Transient error (${err instanceof Error ? err.message.slice(0, 80) : String(err)}) — ` +
@@ -668,6 +681,19 @@ export class TUIApp {
       }
       // Size the compaction budget to the model's actual context window.
       cm.setMaxTokens(compactionBudget(runnerModel || state.get("currentModel")));
+
+      // Surface every compaction (the per-round LLM summarizer AND the heuristic
+      // safety net that fires when a single round's tool output overflows) once,
+      // from a single source of truth — the context manager. Unsubscribed in the
+      // finally block below so we never leak a listener across turns.
+      offCompact = cm.onCompact((method) => {
+        const util = Math.round(cm.getContextUtilization() * 100);
+        this.addSystem(
+          method === "llm"
+            ? `Context auto-compacted (LLM summary) — now at ${util}% of window.`
+            : `Context auto-compacted (heuristic) — now at ${util}% of window.`
+        );
+      });
       await runner.run(outbound, this.ac.signal);
 
       const activeId = sessionManager.getActiveSessionId();
@@ -692,6 +718,7 @@ export class TUIApp {
         this.addError(formatChatError(err, state.get("currentModel")));
       }
     } finally {
+      offCompact?.();
       this.ac = undefined;
       this.isProcessing = false;
       state.set("isProcessing", false);
@@ -1075,6 +1102,11 @@ export class TUIApp {
       state.set("currentModel", next);
       events.emit("model:changed", next);
       this.addSystem(`Model → ${next}`);
+    });
+
+    // Ctrl+Y — copy the last assistant response to the clipboard.
+    this.screen.key(["C-y"], () => {
+      this.copyLastResponse();
     });
 
     // F4 — todo panel

@@ -33,6 +33,7 @@ import {
   removeProviderConfig,
   addCustomModel,
   removeCustomModel,
+  getConfigModels,
   getCustomModels,
   setMcpConfig,
   removeMcpConfig,
@@ -48,6 +49,14 @@ const MODEL_CHOICES = [
   "openai/gpt-4o",
   "ollama/llama3",
 ];
+
+/** Models shown in the GUI palette — config provider models first, then custom,
+ *  falling back to MODEL_CHOICES only when neither is populated. */
+function availableModels(): string[] {
+  const list = [...getConfigModels(), ...getCustomModels()];
+  if (list.length) return [...new Set(list)];
+  return MODEL_CHOICES;
+}
 
 export interface ServeOptions {
   projectRoot: string;
@@ -305,7 +314,7 @@ class Connection {
         available: available.includes(name),
       };
     });
-    const models = [...MODEL_CHOICES, ...getCustomModels()].filter((v, i, a) => a.indexOf(v) === i);
+    const models = availableModels();
     const mcpCfg = (cfg.mcp as unknown as Record<string, Record<string, unknown>>) || {};
     const connected = new Set(this.mcp.list().map((t) => t.server));
     const mcp = Object.entries(mcpCfg).map(([name, e]) => ({
@@ -420,7 +429,6 @@ class Connection {
         {
           model: modelName,
           maxRounds: isAutonomous ? (autoCfg.maxRounds || 50) : agent === "gsd" ? 30 : 15,
-          largeContextWarnAt: 50,
           selfEvaluation: isAutonomous && autoCfg.selfEvaluation !== false,
           stuckDetection: isAutonomous && autoCfg.stuckDetection !== false,
           stuckThreshold: autoCfg.stuckThreshold || 3,
@@ -452,9 +460,6 @@ class Connection {
         this.send({ type: "tool_result", name, ok, firstLine, full })
       );
       runner.on("roundEnd", (round, willContinue) => this.send({ type: "round_end", round, willContinue }));
-      runner.on("contextLarge", () =>
-        this.send({ type: "system", text: "Context is getting large — compact to save tokens." })
-      );
       runner.on("runError", (e) => this.send({ type: "error", message: e instanceof Error ? e.message : String(e) }));
 
       let outbound = await expandMentions(text, this.projectRoot);
@@ -548,7 +553,7 @@ class Connection {
       theme: themeEngine.getTheme().name,
       permissionMode: this.permissionMode,
       themes: themeEngine.getAllThemes().map((t) => ({ name: t.name, display: t.display })),
-      models: [...MODEL_CHOICES, ...getCustomModels()].filter((v, i, a) => a.indexOf(v) === i),
+      models: availableModels(),
       agents: agentRegistry.getAll().map((a) => a.name),
       sessions: sessionManager.getAllSessions().map((s) => ({ id: s.id, title: s.title, active: s.id === activeId })),
       mcpTools: this.mcp.list().map((t) => ({ server: t.server, tool: t.tool, full: `mcp__${t.server}__${t.tool}` })),

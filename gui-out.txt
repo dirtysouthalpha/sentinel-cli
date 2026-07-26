@@ -1,0 +1,5 @@
+
+  Sentinel GUI is running:
+  http://127.0.0.1:52471/?port=52470&token=71988a5fc824b6a8a4bf682a77b2fc9427dc0d8e69d01623
+  (Ctrl+C to quit)
+

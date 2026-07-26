@@ -54,4 +54,44 @@ describe("ContextManager token accounting", () => {
     // After auto-compaction the message count collapses well below what was added.
     expect(cm.getMessageCount()).toBeLessThan(60);
   });
+
+  it("auto-compaction via addMessage fires the onCompact event", () => {
+    const cm = new ContextManager("obs");
+    cm.setMaxTokens(4000); // small budget so a handful of big messages overflow
+    const events: ("heuristic" | "llm")[] = [];
+    cm.onCompact((method) => events.push(method));
+
+    for (let i = 0; i < 20; i++) {
+      cm.addMessage("user", "z".repeat(3000)); // ~857 tokens each
+    }
+
+    // The overflow triggered the heuristic safety net, and it was observable.
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((m) => m === "heuristic")).toBe(true);
+    expect(cm.getMessageCount()).toBeLessThan(20);
+  });
+
+  it("onCompact is unsubscribed by its returned teardown", () => {
+    const cm = new ContextManager("unsub");
+    cm.setMaxTokens(3000);
+    const seen: ("heuristic" | "llm")[] = [];
+    const off = cm.onCompact((m) => seen.push(m));
+
+    for (let i = 0; i < 20; i++) cm.addMessage("user", "x".repeat(3000));
+    const before = seen.length;
+    off();
+    for (let i = 0; i < 20; i++) cm.addMessage("user", "y".repeat(3000));
+
+    expect(before).toBeGreaterThan(0);
+    expect(seen.length).toBe(before); // no further events after teardown
+  });
+
+  it("compact() returns false (no-op) when there is nothing to compact", () => {
+    const cm = new ContextManager("noop");
+    for (let i = 0; i < 6; i++) cm.addMessage("user", "hi"); // exactly the keep-recent count
+    expect(cm.compact()).toBe(false);
+
+    cm.addMessage("user", "seventh");
+    expect(cm.compact()).toBe(true);
+  });
 });

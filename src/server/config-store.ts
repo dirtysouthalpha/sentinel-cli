@@ -46,6 +46,20 @@ export function removeProviderConfig(name: string): void {
   writeGlobalConfig(g);
 }
 
+/** Derive provider/model entries from the global config's provider.models section. */
+export function getConfigModels(): string[] {
+  const g = readGlobalConfig();
+  const providers = (g.provider as Record<string, Record<string, unknown>>) || {};
+  const out: string[] = [];
+  for (const [name, pcfg] of Object.entries(providers)) {
+    const models = (pcfg?.models as Record<string, unknown>) || {};
+    for (const modelKey of Object.keys(models)) {
+      out.push(`${name}/${modelKey}`);
+    }
+  }
+  return out;
+}
+
 /** The user's custom model list shown in the GUI (provider/model strings). */
 export function getCustomModels(): string[] {
   const g = readGlobalConfig();

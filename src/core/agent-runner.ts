@@ -46,7 +46,6 @@ export interface AgentRunnerConfig {
   maxRounds: number;
   temperature?: number;
   maxTokens?: number;
-  largeContextWarnAt?: number;
   selfEvaluation?: boolean;
   /** Run self-evaluation only every N rounds (default 3). Each eval is a full
    *  extra model call, so evaluating every round triples model spend on long
@@ -93,7 +92,6 @@ export interface AgentRunnerEvents {
   toolStart: (name: string, args: string) => void;
   toolResult: (name: string, ok: boolean, firstLine: string, full: string) => void;
   roundEnd: (round: number, willContinue: boolean) => void;
-  contextLarge: (count: number) => void;
   runError: (err: unknown) => void;
   done: (result: AgentRunResult) => void;
   selfEvaluation: (assessment: string) => void;
@@ -455,11 +453,6 @@ export class AgentRunner extends EventEmitter {
         if (round === maxRounds) {
           stopReason = "max_rounds";
         }
-      }
-
-      const warnAt = this.config.largeContextWarnAt;
-      if (typeof warnAt === "number" && this.context.getMessageCount() > warnAt) {
-        this.emit("contextLarge", this.context.getMessageCount());
       }
     } catch (err) {
       stopReason = "error";

@@ -1,5 +1,10 @@
 import "./style.css";
 import { diffLines } from "diff";
+import { marked } from "marked";
+import hljs from "highlight.js";
+
+// Premium AI-generated guardian-eye mark (Nano Banana).
+const LOGO_MARK = `<img src="logo.png" alt="Sentinel" class="logo-img" draggable="false" />`;
 
 // ---- protocol (mirror of src/server/protocol.ts) ----------------------------
 type PermissionMode = "yolo" | "auto" | "gated" | "plan";
@@ -77,6 +82,50 @@ const el = (tag: string, cls?: string, html?: string) => {
   return e;
 };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// ---- markdown rendering ----
+marked.setOptions({ breaks: true, gfm: true });
+function renderMarkdown(text: string): string {
+  if (!text) return "";
+  try { return marked.parse(text, { async: false }) as string; } catch { return esc(text); }
+}
+function enhanceCodeBlocks(container: HTMLElement): void {
+  container.querySelectorAll("pre > code").forEach((code) => {
+    const c = code as HTMLElement;
+    if (!c.dataset.highlighted) { try { hljs.highlightElement(c); } catch { /* skip */ } c.dataset.highlighted = "true"; }
+  });
+  container.querySelectorAll("pre").forEach((pre) => {
+    const p = pre as HTMLElement;
+    if (p.querySelector(".code-copy-btn")) return;
+    const code = p.querySelector("code");
+    if (!code) return;
+    p.classList.add("code-block");
+    const lm = code.className.match(/language-(\w+)/);
+    if (lm) p.appendChild(el("span", "code-lang-label", lm[1]));
+    const btn = el("button", "code-copy-btn", "⎘");
+    btn.title = "Copy code";
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(code.textContent || "");
+      btn.textContent = "✓"; btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = "⎘"; btn.classList.remove("copied"); }, 2000);
+    };
+    p.appendChild(btn);
+  });
+}
+
+// ---- thinking indicator (shown when busy, no streaming text, no running tool) ----
+function renderThinking(): HTMLElement {
+  const msg = el("div", "msg assistant-msg thinking-msg");
+  msg.append(el("div", "msg-avatar assistant-avatar", "⚡"));
+  const bubble = el("div", "msg-bubble assistant-bubble");
+  const dots = el("div", "thinking-dots");
+  dots.innerHTML = "<span></span><span></span><span></span>";
+  const label = el("span", "thinking-label", "Thinking");
+  bubble.append(dots, label);
+  msg.append(bubble);
+  return msg;
+}
 const accentFor = (theme: string) =>
   /matrix|forest|terminal/.test(theme) ? "matrix" :
   /cyan|tron|ocean/.test(theme) ? "cyan" :
@@ -89,7 +138,7 @@ function shell() {
   app.innerHTML = `
     <div class="app">
       <div class="topbar">
-        <div class="brand"><div class="brand-dot">S</div> Sentinel CLI</div>
+        <div class="brand"><div class="brand-dot">${LOGO_MARK}</div> Sentinel CLI</div>
         <div class="tabs" id="tabs"></div>
         <div class="spacer"></div>
         <div class="pill" id="palette-btn">⌘K  palette</div>
@@ -161,7 +210,7 @@ function renderTabs() {
 const AGENT_ICONS: Record<string, string> = { gsd: "⚡", code: "‹›", ask: "?", plan: "◇", debug: "🐞", architect: "▱" };
 function renderRail() {
   const r = $("#rail"); r.innerHTML = "";
-  r.append(el("div", "logo", "S"));
+  r.append(el("div", "logo", LOGO_MARK));
   for (const a of snap!.agents) {
     const ico = el("div", "ico" + (a === snap!.agent ? " active" : ""), AGENT_ICONS[a] || a[0].toUpperCase());
     ico.title = a;
@@ -277,26 +326,59 @@ function renderChips() {
 function renderChat() {
   const chat = $("#chat"); chat.innerHTML = "";
   if (blocks.length === 0 && !pendingPerm) {
-    chat.append(el("div", "welcome", `<div class="big">Welcome to <b>Sentinel</b></div><p>Describe a bug or feature, or start a slash command. The agent reads files, runs commands, and edits code — gated by your permission mode.</p>`));
+    chat.append(el("div", "welcome", `<div class="logo-hero">${LOGO_MARK}</div><div class="big">Welcome to <b>Sentinel</b></div><p>Describe a bug or feature, or start a slash command. The agent reads files, runs commands, and edits code — gated by your permission mode.</p>`));
     return;
   }
   let lastAssistantBody: HTMLElement | null = null;
   for (const b of blocks) {
     const node = renderBlock(b);
-    if (b === streaming) lastAssistantBody = node.querySelector(".body");
+    if (b === streaming) lastAssistantBody = node.querySelector(".msg-body");
     chat.append(node);
   }
   // Re-capture the live streaming node so subsequent tokens patch it in place.
   streamEl = streaming ? lastAssistantBody : null;
+  // Thinking indicator: show when busy but no streaming text and no running tool
+  const hasRunningTool = blocks.some((b) => b.kind === "tool" && (b as any).running);
+  if (busy && !streaming && !hasRunningTool) chat.append(renderThinking());
   if (pendingPerm) chat.append(renderPerm());
   chat.scrollTop = chat.scrollHeight;
 }
 
 function renderBlock(b: Block): HTMLElement {
-  if (b.kind === "user") return wrap("user", "You", `<div class="body">${esc(b.text)}</div>`);
-  if (b.kind === "assistant") return wrap("assistant", "Sentinel", `<div class="body">${esc(b.text)}${b.streaming ? '<span class="cursor"></span>' : ""}</div>`);
-  if (b.kind === "system") return wrap("", "", `<div class="body" style="color:var(--text-faint);font-size:13px">${esc(b.text)}</div>`);
-  if (b.kind === "error") return wrap("", "", `<div class="body" style="color:var(--bad)">✗ ${esc(b.text)}</div>`);
+  if (b.kind === "user") {
+    const msg = el("div", "msg user-msg");
+    const bubble = el("div", "msg-bubble user-bubble");
+    bubble.innerHTML = `<div class="msg-body">${esc(b.text)}</div>`;
+    msg.append(bubble, el("div", "msg-avatar user-avatar", "👤"));
+    return msg;
+  }
+  if (b.kind === "assistant") {
+    const msg = el("div", "msg assistant-msg");
+    msg.append(el("div", "msg-avatar assistant-avatar", "⚡"));
+    const bubble = el("div", "msg-bubble assistant-bubble");
+    const body = el("div", "msg-body markdown-body");
+    body.innerHTML = renderMarkdown(b.text);
+    if (b.streaming) body.append(el("span", "cursor"));
+    else enhanceCodeBlocks(body);
+    bubble.append(body);
+    msg.append(bubble);
+    return msg;
+  }
+  if (b.kind === "system") {
+    const msg = el("div", "msg system-msg");
+    const bubble = el("div", "msg-bubble system-bubble");
+    bubble.innerHTML = `<div class="msg-body"><span class="emoji">ℹ️</span> ${esc(b.text)}</div>`;
+    msg.append(bubble);
+    return msg;
+  }
+  if (b.kind === "error") {
+    const msg = el("div", "msg error-msg");
+    const bubble = el("div", "msg-bubble error-bubble");
+    bubble.innerHTML = `<div class="msg-body"><span class="emoji">⚠️</span> ${esc(b.text)}</div>`;
+    msg.append(el("div", "msg-avatar error-avatar", "⚠️"));
+    msg.append(bubble);
+    return msg;
+  }
   return renderTool(b);
 }
 function wrap(cls: string, who: string, inner: string): HTMLElement {
@@ -647,7 +729,7 @@ export function dispatch(m: ServerMessage) {
   switch (m.type) {
     case "hello": snap = m.state; shell(); renderAll(); renderChat(); break;
     case "state": snap = m.state; renderAll(); break;
-    case "busy": busy = m.busy; if (!busy) round = 0; setSendBtn(); if (snap) renderRight(); break;
+    case "busy": busy = m.busy; if (!busy) round = 0; setSendBtn(); if (snap) { renderRight(); renderChat(); } break;
     case "user": blocks.push({ kind: "user", text: m.text }); renderChat(); break;
     case "round_start": round = m.round; if (snap) renderRight(); break;
     case "round_end": round = m.round; if (snap) renderRight(); break;
@@ -686,19 +768,23 @@ function renderCheckpoints(items: CheckpointItem[]) {
 
 let streaming: Extract<Block, { kind: "assistant" }> | null = null;
 let streamEl: HTMLElement | null = null; // live DOM body of the streaming block
+let mdRenderPending = false;
 function appendToken(t: string) {
   if (!t) return;
   if (!streaming) { streaming = { kind: "assistant", text: "", streaming: true }; blocks.push(streaming); renderChat(); }
   streaming.text += t;
-  // Update only the streaming node — avoids rebuilding the whole chat per token
-  // (which caused flicker and re-triggered the rise animation on every block).
-  if (streamEl && streamEl.isConnected) {
-    streamEl.innerHTML = esc(streaming.text) + '<span class="cursor"></span>';
-    const chat = document.getElementById("chat");
-    if (chat) chat.scrollTop = chat.scrollHeight;
-  } else {
-    renderChat();
-  }
+  // Throttled markdown re-parse via rAF — avoids parsing on every single token
+  if (mdRenderPending) return;
+  mdRenderPending = true;
+  requestAnimationFrame(() => {
+    mdRenderPending = false;
+    if (streamEl && streamEl.isConnected && streaming) {
+      streamEl.innerHTML = renderMarkdown(streaming.text);
+      streamEl.append(el("span", "cursor"));
+      const chat = document.getElementById("chat");
+      if (chat) chat.scrollTop = chat.scrollHeight;
+    }
+  });
 }
 function endStream() {
   if (streaming) { streaming.streaming = false; streaming = null; streamEl = null; renderChat(); }

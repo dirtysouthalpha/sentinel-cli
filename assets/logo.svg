@@ -1,52 +1,151 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#06080C"/>
-      <stop offset="100%" style="stop-color:#0B0F18"/>
+    <!-- ════════ PALETTE ════════ -->
+    <radialGradient id="bgGrad" cx="50%" cy="40%" r="78%">
+      <stop offset="0%" stop-color="#0E1B2E"/>
+      <stop offset="48%" stop-color="#070D18"/>
+      <stop offset="100%" stop-color="#02040A"/>
+    </radialGradient>
+    <linearGradient id="coreGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#7BF1FF"/>
+      <stop offset="42%" stop-color="#00D4FF"/>
+      <stop offset="100%" stop-color="#0088B3"/>
     </linearGradient>
-    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#00D4FF"/>
-      <stop offset="100%" style="stop-color:#00A8CC"/>
+    <linearGradient id="irisGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#E8FBFF"/>
+      <stop offset="50%" stop-color="#00D4FF"/>
+      <stop offset="100%" stop-color="#005F80"/>
     </linearGradient>
-    <linearGradient id="magentaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#FF2E63"/>
-      <stop offset="100%" style="stop-color:#CC0044"/>
+    <linearGradient id="beamGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#7BF1FF" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#7BF1FF"/>
+      <stop offset="100%" stop-color="#7BF1FF" stop-opacity="0"/>
     </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+    <linearGradient id="magenta" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF3D7F"/>
+      <stop offset="100%" stop-color="#FF2E63"/>
+    </linearGradient>
+
+    <!-- ════════ FILTERS ════════ -->
+    <filter id="neonGlow" x="-60%" y="-60%" width="220%" height="220%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1"   in="SourceGraphic" result="core"/>
+      <feGaussianBlur stdDeviation="4.5" in="SourceGraphic" result="mid"/>
+      <feGaussianBlur stdDeviation="13"  in="SourceGraphic" result="far"/>
       <feMerge>
-        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="far"/>
+        <feMergeNode in="mid"/>
+        <feMergeNode in="core"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
-    <filter id="glowStrong">
-      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+    <filter id="neonTube" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB">
+      <feMorphology operator="erode" radius="0.5" in="SourceAlpha" result="filament"/>
+      <feGaussianBlur stdDeviation="1.6" in="filament" result="filGlow"/>
+      <feGaussianBlur stdDeviation="7" in="SourceAlpha" result="halo"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.48  0 0 0 0 0.94  0 0 0 0 1  0 0 0 1 0" in="halo" result="haloCyan"/>
       <feMerge>
-        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="haloCyan"/>
+        <feMergeNode in="filGlow"/>
+        <feMergeNode in="filGlow"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
+    <filter id="chrome" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2" in="SourceAlpha" result="hmap"/>
+      <feSpecularLighting in="hmap" result="spec" surfaceScale="6" specularConstant="1" specularExponent="28" lighting-color="#BFEFFF">
+        <fePointLight x="70" y="55" z="220"/>
+      </feSpecularLighting>
+      <feComposite in="spec" in2="SourceAlpha" operator="in" result="specClip"/>
+      <feComposite in="SourceGraphic" in2="specClip" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>
+    </filter>
+    <filter id="innerShadow" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+      <feOffset dx="0" dy="3.5" in="SourceAlpha" result="off"/>
+      <feGaussianBlur stdDeviation="4" in="off" result="offBlur"/>
+      <feComposite operator="out" in="offBlur" in2="SourceAlpha" result="shadow"/>
+      <feFlood flood-color="#000000" flood-opacity="0.75" result="color"/>
+      <feComposite operator="in" in="color" in2="shadow" result="dropShadow"/>
+      <feMerge>
+        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="dropShadow"/>
+      </feMerge>
+    </filter>
+
+    <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+      <path d="M15 0 L30 15 L15 30 L0 15 Z" fill="none" stroke="#0E2A3D" stroke-width="0.55" opacity="0.55"/>
+    </pattern>
+    <pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2" fill="#00D4FF" opacity="0"/>
+      <rect y="2" width="4" height="2" fill="#00D4FF" opacity="0.07"/>
+    </pattern>
   </defs>
-  <rect width="512" height="512" rx="80" fill="url(#bgGrad)"/>
-  <rect x="8" y="8" width="496" height="496" rx="76" fill="none" stroke="#1A2236" stroke-width="2"/>
-  <rect x="16" y="16" width="480" height="480" rx="72" fill="none" stroke="#00D4FF" stroke-width="1" opacity="0.3"/>
-  <g filter="url(#glow)">
-    <line x1="60" y1="420" x2="452" y2="420" stroke="#00D4FF" stroke-width="1" opacity="0.2"/>
-    <line x1="60" y1="440" x2="452" y2="440" stroke="#00D4FF" stroke-width="0.5" opacity="0.1"/>
-    <line x1="60" y1="460" x2="452" y2="460" stroke="#00D4FF" stroke-width="0.5" opacity="0.05"/>
-    <line x1="150" y1="350" x2="150" y2="480" stroke="#00D4FF" stroke-width="0.5" opacity="0.1"/>
-    <line x1="250" y1="350" x2="250" y2="480" stroke="#00D4FF" stroke-width="0.5" opacity="0.1"/>
-    <line x1="350" y1="350" x2="350" y2="480" stroke="#00D4FF" stroke-width="0.5" opacity="0.1"/>
+
+  <!-- ════════ BACKGROUND TILE ════════ -->
+  <rect width="512" height="512" rx="100" fill="url(#bgGrad)"/>
+  <rect width="512" height="512" rx="100" fill="url(#grid)" opacity="0.5"/>
+  <rect x="11" y="11" width="490" height="490" rx="90" fill="none" stroke="#16263B" stroke-width="2"/>
+  <rect x="23" y="23" width="466" height="466" rx="80" fill="none" stroke="#00D4FF" stroke-width="1" opacity="0.22"/>
+
+  <!-- perspective Tron floor (lower band, exponential spacing, fades to horizon) -->
+  <g stroke="#00A8CC" opacity="0.2">
+    <line x1="60" y1="402" x2="452" y2="402" stroke-width="0.9"/>
+    <line x1="86" y1="420" x2="426" y2="420" stroke-width="0.8"/>
+    <line x1="112" y1="436" x2="400" y2="436" stroke-width="0.7"/>
+    <line x1="142" y1="450" x2="370" y2="450" stroke-width="0.6" opacity="0.7"/>
+    <line x1="176" y1="462" x2="336" y2="462" stroke-width="0.5" opacity="0.5"/>
   </g>
-  <g filter="url(#glowStrong)">
-    <polygon points="256,80 140,180 180,180 180,320 220,320 220,220 240,220 240,280 272,280 272,220 292,220 292,320 332,320 332,180 372,180" fill="url(#cyanGrad)"/>
-    <rect x="220" y="320" width="72" height="4" fill="#FF2E63" rx="2"/>
-    <circle cx="180" cy="350" r="4" fill="#00D4FF"/>
-    <circle cx="256" cy="350" r="4" fill="#00D4FF"/>
-    <circle cx="332" cy="350" r="4" fill="#00D4FF"/>
-    <line x1="184" y1="350" x2="252" y2="350" stroke="#00D4FF" stroke-width="1" opacity="0.6"/>
-    <line x1="260" y1="350" x2="328" y2="350" stroke="#00D4FF" stroke-width="1" opacity="0.6"/>
+  <g stroke="#00A8CC" opacity="0.13">
+    <line x1="256" y1="402" x2="60" y2="474"/>
+    <line x1="256" y1="402" x2="140" y2="474"/>
+    <line x1="256" y1="402" x2="256" y2="474"/>
+    <line x1="256" y1="402" x2="372" y2="474"/>
+    <line x1="256" y1="402" x2="452" y2="474"/>
   </g>
-  <text x="256" y="400" font-family="'Courier New', monospace" font-size="36" font-weight="bold" fill="#00D4FF" text-anchor="middle" filter="url(#glow)">SENTINEL</text>
-  <text x="256" y="432" font-family="'Courier New', monospace" font-size="16" fill="#FF2E63" text-anchor="middle" letter-spacing="8" filter="url(#glow)">CLI</text>
+  <rect x="60" y="399" width="392" height="1.5" fill="#00D4FF" opacity="0.45"/>
+
+  <!-- ════════ THE SENTINEL GUARDIAN EYE ════════
+       internal viewBox 240x240, centered: mark spans 136..376 horizontally,
+       vertically 56..296 so it sits above the floor horizon. -->
+  <g transform="translate(136 56)">
+    <!-- OUTER HEX FRAME -->
+    <polygon points="120,10 217,66 217,174 120,230 23,174 23,66"
+             fill="none" stroke="url(#coreGrad)" stroke-width="3" filter="url(#chrome)"/>
+    <polygon points="120,10 217,66 217,174 120,230 23,174 23,66"
+             fill="none" stroke="url(#coreGrad)" stroke-width="2.5" filter="url(#neonGlow)"/>
+    <polygon points="120,28 201,75 201,165 120,212 39,165 39,75"
+             fill="none" stroke="#1C4866" stroke-width="1.1"/>
+
+    <!-- vertical scanning beam (through iris, fades at ends) -->
+    <rect x="118" y="62" width="4" height="116" fill="url(#beamGrad)" filter="url(#neonTube)"/>
+
+    <!-- GUARDIAN EYE LENS -->
+    <path d="M40 120 Q120 76 200 120 Q120 164 40 120 Z" fill="#02040A" filter="url(#innerShadow)"/>
+    <path d="M40 120 Q120 76 200 120 Q120 164 40 120 Z" fill="none" stroke="url(#coreGrad)" stroke-width="2.4" filter="url(#neonGlow)"/>
+    <path d="M60 112 Q120 86 180 112" fill="none" stroke="#7BF1FF" stroke-width="1" opacity="0.6" filter="url(#neonGlow)"/>
+
+    <!-- IRIS -->
+    <circle cx="120" cy="120" r="22" fill="url(#irisGrad)" filter="url(#neonGlow)"/>
+    <circle cx="120" cy="120" r="14" fill="#00D4FF" opacity="0.9"/>
+    <rect x="117" y="108" width="6" height="24" rx="3" fill="#02040A"/>
+    <circle cx="114" cy="113" r="3" fill="#FFFFFF" opacity="0.95"/>
+
+    <!-- watchtower chevrons -->
+    <path d="M120 40 L166 68 L150 68 L120 50 L90 68 L74 68 Z" fill="url(#coreGrad)" filter="url(#neonGlow)"/>
+    <path d="M120 200 L74 172 L90 172 L120 190 L150 172 L166 172 Z" fill="url(#coreGrad)" filter="url(#neonGlow)"/>
+
+    <!-- corner bracket ticks (single magenta accent cluster top) -->
+    <g stroke="url(#magenta)" stroke-width="2.4" filter="url(#neonGlow)" fill="none">
+      <path d="M26 42 L26 27 L41 27"/>
+      <path d="M214 27 L199 27 M214 27 L214 42"/>
+      <path d="M26 198 L26 213 L41 213"/>
+      <path d="M214 213 L199 213 M214 213 L214 198"/>
+    </g>
+
+    <!-- orbiting nodes -->
+    <circle cx="120" cy="10" r="3.4" fill="url(#magenta)" filter="url(#neonGlow)"/>
+    <circle cx="217" cy="174" r="2.6" fill="#00D4FF" filter="url(#neonGlow)"/>
+    <circle cx="23" cy="174" r="2.6" fill="#00D4FF" filter="url(#neonGlow)"/>
+  </g>
+
+  <!-- scanline overlay -->
+  <rect width="512" height="512" rx="100" fill="url(#scan)" opacity="0.5" pointer-events="none"/>
 </svg>

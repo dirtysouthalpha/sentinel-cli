@@ -21,9 +21,26 @@ export class ContextManager {
   private messages: ConversationMessage[] = [];
   private maxMessages: number = 100;
   private maxTokens: number = 120000;
+  /** Fired whenever a compaction actually reduces the context (auto or manual). */
+  private compactListeners: Array<(method: "heuristic" | "llm") => void> = [];
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
+  }
+
+  /** Subscribe to compaction events. Returns an unsubscribe function. */
+  onCompact(listener: (method: "heuristic" | "llm") => void): () => void {
+    this.compactListeners.push(listener);
+    return () => {
+      const i = this.compactListeners.indexOf(listener);
+      if (i >= 0) this.compactListeners.splice(i, 1);
+    };
+  }
+
+  private emitCompact(method: "heuristic" | "llm"): void {
+    for (const fn of this.compactListeners) {
+      try { fn(method); } catch { /* listener errors are non-fatal */ }
+    }
   }
 
   getSessionId(): string {
@@ -93,8 +110,8 @@ export class ContextManager {
     this.systemPrompt = "";
   }
 
-  compact(): void {
-    if (this.messages.length <= 6) return;
+  compact(): boolean {
+    if (this.messages.length <= 6) return false;
 
     const recent = this.messages.slice(-6);
     const older = this.messages.slice(0, -6);
@@ -127,12 +144,14 @@ export class ContextManager {
 
     this.messages = [summaryMessage, ...recent];
     log.info(`Context compacted: ${older.length + 6} -> ${this.messages.length} messages`);
+    this.emitCompact("heuristic");
+    return true;
   }
 
   async compactWithLLM(
     summarize: (texts: string[]) => Promise<string>
-  ): Promise<void> {
-    if (this.messages.length <= 6) return;
+  ): Promise<boolean> {
+    if (this.messages.length <= 6) return false;
 
     try {
       const recent = this.messages.slice(-6);
@@ -158,14 +177,20 @@ export class ContextManager {
       log.info(
         `Context compacted with LLM: ${older.length + 6} -> ${this.messages.length} messages`
       );
+      this.emitCompact("llm");
+      return true;
     } catch (err) {
       log.warn(`LLM compaction failed, falling back to compact(): ${String(err)}`);
-      this.compact();
+      return this.compact();
     }
   }
 
   private autoCompact(): void {
-    log.info(`Auto-compacting context (tokens: ${this.getTotalTokens()})`);
+    // Safety net: a single round's tool output can push the token total past
+    // the budget between rounds (the LLM compactor only runs at round start).
+    // This heuristic pass keeps the conversation under the limit. compact()
+    // emits the event, so the TUI can surface that it happened.
+    log.warn(`Auto-compacting context (tokens: ${this.getTotalTokens()} / budget ${this.maxTokens})`);
     this.compact();
   }
 
