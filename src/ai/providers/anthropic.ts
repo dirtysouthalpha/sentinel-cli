@@ -18,6 +18,15 @@ function rejectsTemperature(status: number, errorText: string): boolean {
   return status === 400 && /temperature/i.test(errorText) && /(deprecat|unsupported|not supported)/i.test(errorText);
 }
 
+/**
+ * Models known to remove the sampling params (`temperature`/`top_p`/`top_k`).
+ * Sending `temperature` to these is a 400, so skip it rather than paying a
+ * wasted request and relying on the drop-and-retry path below.
+ */
+function omitsTemperature(model: string): boolean {
+  return /^claude-(fable-5|mythos-5|opus-5|sonnet-5|opus-4-7|opus-4-8)/.test(model);
+}
+
 export class AnthropicProvider implements AIProvider {
   name = "anthropic";
   private apiKey: string;
@@ -68,12 +77,16 @@ export class AnthropicProvider implements AIProvider {
     this.ensureClient();
     const { system, messages: chatMsgs } = this.toAnthropicMessages(messages);
 
+    const model = options?.model || "claude-sonnet-5";
     const body: Record<string, unknown> = {
-      model: options?.model || "claude-sonnet-4-20250514",
+      model,
       max_tokens: options?.maxTokens || 8192,
-      temperature: options?.temperature ?? 0.7,
       messages: chatMsgs,
     };
+
+    if (!omitsTemperature(model)) {
+      body.temperature = options?.temperature ?? 0.7;
+    }
 
     if (system || options?.systemPrompt) {
       body.system = options?.systemPrompt || system;
