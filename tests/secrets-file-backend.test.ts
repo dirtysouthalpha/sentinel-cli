@@ -3,7 +3,10 @@ import { mkdtempSync, existsSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-// Isolate the vault into a temp HOME so the real ~/.config/sentinel is untouched.
+// Isolate the vault into a temp dir so the real ~/.config/sentinel is untouched.
+// Uses SENTINEL_CONFIG_DIR, not HOME: homedir() ignores HOME on Windows, so the
+// old HOME-based sandbox silently resolved to the real profile and this suite
+// wrote its test secrets into the user's actual vault.
 let origHome: string | undefined;
 let sandbox: string;
 
@@ -11,15 +14,16 @@ const MODULE = "../src/core/secrets/file-backend.js";
 
 describe("encrypted-file secret backend", () => {
   beforeEach(() => {
-    origHome = process.env.HOME;
+    origHome = process.env.SENTINEL_CONFIG_DIR;
     sandbox = mkdtempSync(join(tmpdir(), "sentinel-secrets-"));
-    process.env.HOME = sandbox;
+    process.env.SENTINEL_CONFIG_DIR = sandbox;
     // Fresh module + master-key cache per test.
     vi.resetModules();
   });
 
   afterEach(() => {
-    if (origHome !== undefined) process.env.HOME = origHome;
+    if (origHome === undefined) delete process.env.SENTINEL_CONFIG_DIR;
+    else process.env.SENTINEL_CONFIG_DIR = origHome;
   });
 
   it("round-trips a secret (set then get)", async () => {
