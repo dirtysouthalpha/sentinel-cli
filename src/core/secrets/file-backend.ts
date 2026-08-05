@@ -30,7 +30,18 @@ import type { SecretStore } from "./store.js";
  * stronger; this exists so no install is ever forced to store plaintext.
  */
 
-const DIR = join(homedir(), ".config", "sentinel");
+// SENTINEL_CONFIG_DIR relocates the vault wholesale. It exists so tests can
+// sandbox it: they previously set HOME, but homedir() reads USERPROFILE on
+// Windows and ignores HOME, so the isolation silently failed there and the
+// suite wrote its test secrets into the user's real vault.
+//
+// Deliberately NOT keying off HOME. Git Bash sets HOME on Windows (often as
+// /c/Users/...), which join() would resolve against the current drive and
+// quietly move a real user's vault to C:\c\Users\... An explicit variable
+// cannot be triggered by accident.
+const DIR = process.env.SENTINEL_CONFIG_DIR
+  ? join(process.env.SENTINEL_CONFIG_DIR, ".config", "sentinel")
+  : join(homedir(), ".config", "sentinel");
 const SALT_FILE = join(DIR, "master.salt");
 const VAULT_FILE = join(DIR, "secrets.enc.json");
 

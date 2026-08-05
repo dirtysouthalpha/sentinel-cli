@@ -35,7 +35,13 @@ describe("writeAtomicFileSync", () => {
     expect(readFileSync(target, "utf-8")).toBe("x");
   });
 
-  it("does not corrupt the existing file when rename fails (target dir read-only)", () => {
+  // chmodSync(dir, 0o500) does not make a directory read-only on Windows - POSIX
+  // mode bits are ignored there, so the write succeeds and nothing throws. Making
+  // this hold on Win32 needs an ACL denial (icacls), which is far heavier than the
+  // behaviour under test warrants. The guarantee itself (a failed write leaves the
+  // original intact) is platform-independent; only this way of provoking the
+  // failure is POSIX-specific.
+  it.skipIf(process.platform === "win32")("does not corrupt the existing file when rename fails (target dir read-only)", () => {
     // Make the destination dir read-only so the temp write fails; the existing
     // file at the target must be untouched.
     const dir = mkdtempSync(join(tmpdir(), "sentinel-atomic-"));

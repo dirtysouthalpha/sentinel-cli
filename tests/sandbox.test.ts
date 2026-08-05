@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { buildBwrapArgs, sandboxAvailable } from "../src/tools/sandbox.js";
 
+// bubblewrap is a Linux sandbox; buildBwrapArgs is never invoked on Windows.
+// The two assertions that compare a path round-trip cannot hold there because
+// resolve("/home/u/proj") yields "C:\home\u\proj" on Win32. Skipping those two
+// explicitly beats asserting a POSIX-only shape on a platform this project
+// treats as first-class.
+const posixOnly = it.skipIf(process.platform === "win32");
+
 describe("buildBwrapArgs (pure argv builder)", () => {
   const root = "/home/u/proj";
 
@@ -10,7 +17,7 @@ describe("buildBwrapArgs (pure argv builder)", () => {
     expect(args).toContain("--die-with-parent");
   });
 
-  it("bind-mounts the project root read-write", () => {
+  posixOnly("bind-mounts the project root read-write", () => {
     const args = buildBwrapArgs({ projectRoot: root });
     const i = args.indexOf("--bind");
     expect(i).toBeGreaterThan(-1);
@@ -43,7 +50,7 @@ describe("buildBwrapArgs (pure argv builder)", () => {
     expect(args[i + 1]).toBe("/home/u/proj/sub");
   });
 
-  it("adds extra read-only bind mounts", () => {
+  posixOnly("adds extra read-only bind mounts", () => {
     const args = buildBwrapArgs({
       projectRoot: root,
       extraRoBind: ["/home/u/.cache"],

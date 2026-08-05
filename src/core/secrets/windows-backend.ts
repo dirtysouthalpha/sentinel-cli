@@ -22,7 +22,11 @@ const execFileP = promisify(execFile);
  * there is zero native build dependency (no node-gyp, no libsecret-dev).
  */
 
-const FILE = join(homedir(), ".config", "sentinel", "secrets.dpapi.json");
+// Honours SENTINEL_CONFIG_DIR for the same reason as file-backend.ts: tests
+// sandbox the vault through it, and homedir() ignores HOME on Windows so a
+// HOME-based sandbox silently wrote into the user's real vault.
+const CONFIG_ROOT = process.env.SENTINEL_CONFIG_DIR || homedir();
+const FILE = join(CONFIG_ROOT, ".config", "sentinel", "secrets.dpapi.json");
 
 type BlobMap = Record<string, string>;
 
