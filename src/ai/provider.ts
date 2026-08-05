@@ -61,8 +61,21 @@ class ProviderManager {
       // runs, so drop the marker here and let the provider's env-var fallback
       // resolve it. Otherwise the literal "keyring://zai" gets sent as the
       // bearer token and the API rejects it with 401.
+      // 2026-08-05: blanking the marker and leaving it to "the provider's env-var
+      // fallback" only works for the BUILT-IN providers in the switch below -
+      // anthropic, openai, zai and ollama each register their own well-known
+      // variable. A CUSTOM provider (longcat, and anything else added to config by
+      // hand) has no such fallback, so it received an empty bearer token and every
+      // request 401'd.
+      //
+      // This has been patched in the INSTALLED dist on NUKE since 2026-07-03 by
+      // scripts/sentinel-cli-repatch.sh, re-applied by cron every day because
+      // `npm update -g` silently reinstalls dist and wipes it. The fix belongs
+      // here, in source, so that cron can be retired. Resolve the variable
+      // directly instead of assuming a fallback exists downstream.
       if (typeof config.apiKey === "string" && config.apiKey.startsWith("keyring://")) {
-        config.apiKey = "";
+        const envName = `${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
+        config.apiKey = process.env[envName] || "";
       }
       switch (name) {
         case "anthropic":
