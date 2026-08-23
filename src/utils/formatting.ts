@@ -61,6 +61,7 @@ export function escapeRegex(str: string): string {
 }
 
 export function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex -- matching ESC is the point
   return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 

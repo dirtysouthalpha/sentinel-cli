@@ -11,7 +11,9 @@ const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 function loadConfig(): SentinelConfig {
   try {
     if (existsSync(CONFIG_FILE)) return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
-  } catch {}
+  } catch {
+    // unreadable/corrupt config — fall through to defaults
+  }
   return { ...DEFAULT_CONFIG };
 }
 

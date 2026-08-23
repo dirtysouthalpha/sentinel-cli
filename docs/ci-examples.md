@@ -6,19 +6,23 @@ Sentinel CLI's headless mode (`sentinel run`) is designed for non-interactive us
 
 | Flag | Purpose |
 |---|---|
+| `-p` / `--print [prompt]` | One-shot non-interactive run; reads piped stdin when no prompt is given |
+| `--output-format text\|json\|stream-json` | `json`/`stream-json` = NDJSON event stream (same as `--json`) |
 | `--json` | Stream NDJSON events to stdout |
 | `--permission-mode yolo\|auto\|gated` | Control tool-approval behavior |
 | `--yes` | Auto-approve all prompts |
 | `--max-steps N` | Cap the number of agent rounds |
 | `--model provider/model` | Override the default model |
 
-**Exit codes:**
+**Exit codes** (stable since 1.0 — part of the public contract):
 
 | Code | Meaning |
 |---|---|
-| `0` | Success |
-| `1` | Error |
+| `0` | Success (task finished normally) |
+| `1` | Agent error (provider/tool failure, stuck, budget exceeded) |
+| `2` | Configuration error (unknown provider, missing key, bad config) |
 | `3` | Max rounds reached |
+| `4` | A blocking hook vetoed the run |
 | `130` | Aborted (SIGINT) |
 
 ---
@@ -391,3 +395,71 @@ const text = events
 
 console.log(text);
 ```
+
+---
+
+## 5. Hooks (pre/post tool, onStop, session)
+
+Configure hooks in `sentinel.json`. Shell rules receive the context in env
+vars (`SENTINEL_HOOK_EVENT`, `SENTINEL_TOOL_NAME`, `SENTINEL_TOOL_ARGS`,
+`SENTINEL_STOP_REASON`, `SENTINEL_EXIT_CODE`); JS rules are ESM modules whose
+default export receives a structured payload.
+
+```json
+{
+  "hooks": {
+    "preToolUse": [
+      { "match": "file|patch", "command": "npm run lint", "blocking": true }
+    ],
+    "postToolUse": [{ "command": "echo edited $SENTINEL_TOOL_NAME" }],
+    "onStop": [{ "command": "npm test", "blocking": true }],
+    "sessionStart": ["echo session start"],
+    "sessionEnd": ["echo session end $SENTINEL_EXIT_CODE"]
+  }
+}
+```
+
+- **Non-blocking** hooks (default) are observational: a failing hook never
+  breaks the tool call or the run.
+- **`blocking: true`** turns the hook into a gate. A failing `preToolUse` gate
+  denies that tool call (the agent sees *why* and adapts). A failing `onStop`
+  gate escalates the run's exit code to **4** (`HOOK_BLOCKED`) — the
+  pre-commit-blocks-on-failing-test pattern.
+- `match` is a regex (or plain substring) tested against the tool name;
+  omit it to match every tool.
+
+JS hook script (same config, `script` instead of `command`):
+
+```js
+// gate.mjs — deny file writes to protected paths
+export default function ({ event, toolName, toolArgs }) {
+  if (event !== "preToolUse") return;
+  const args = JSON.parse(toolArgs ?? "{}");
+  if (String(args.path ?? "").startsWith("dist/")) {
+    return { block: true, reason: "dist/ is build output" };
+  }
+}
+```
+
+```json
+{ "hooks": { "preToolUse": [{ "match": "file|patch", "script": "./gate.mjs", "blocking": true }] } }
+```
+
+## 6. SDK (programmatic, in-process)
+
+`runHeadless` is exported from the package entry point — same executor stack
+as the CLI, no child process:
+
+```js
+import { runHeadless } from "sentinel-cli";
+
+const outcome = await runHeadless({
+  task: "bump the patch version",
+  projectRoot: process.cwd(),
+  json: false,
+  maxSteps: 10,
+});
+console.log(outcome.finalContent, outcome.exitCode);
+```
+
+---

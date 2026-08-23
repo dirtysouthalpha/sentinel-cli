@@ -152,6 +152,7 @@ export function createFileTool(projectRoot: string): ToolDef {
 
             // Binary guard: NUL bytes almost never occur in text. Refuse rather
             // than dumping mojibake into the model's context.
+            // eslint-disable-next-line no-control-regex -- the NUL byte IS the test
             if (/\u0000/.test(raw.slice(0, 8000))) {
               const bytes = statSync(path).size;
               return {

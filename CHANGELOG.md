@@ -1,3 +1,69 @@
+# Changelog — 1.0.0 (V7: hooks · headless/CI · stable exit codes)
+
+The first release you'd trust in CI. Everything below is live-verified
+against a real provider (`zai/glm-4.6`): a piped `-p` task really edited a
+file on disk and streamed valid NDJSON, and every exit code below was
+exercised end-to-end.
+
+## Headless / non-interactive (V7)
+
+- **`sentinel -p [prompt]` / `--print`** — one-shot non-interactive agentic
+  run. Takes the prompt as an argument or reads a task piped on stdin
+  (`echo "fix the tests" | sentinel -p`); works without a TTY. Composes with
+  `--model`, `--agent`, `--output-format`.
+- **`--output-format text|json|stream-json`** on both `run` and `-p`
+  (`json`/`stream-json` ≡ the existing `--json` NDJSON stream).
+- **Stable, documented exit codes** — now a semver-frozen public contract,
+  pinned by test and printed in `sentinel run --help`:
+  `0` success · `1` agent error (incl. stuck / budget exceeded) ·
+  `2` config error (unknown provider, missing key) · `3` max rounds ·
+  `4` blocked by a hook · `130` SIGINT. `stuck`/`budget_exceeded` now fail
+  loudly (previously mapped to the generic `1` alongside everything else);
+  `task_complete` now succeeds (previously `1`).
+- **`runHeadless` SDK export** — the whole headless path (permissions →
+  checkpoints → MCP → subagents → todos → hooks → agent loop) is extracted
+  from the inline CLI action into `src/core/headless.ts` and exported from
+  the package entry, so CI scripts can run it in-process with injectable
+  I/O seams.
+- `ask` now exits non-zero on failure (401/403 → `2`, everything else → `1`).
+
+## Hooks (V7 completion)
+
+- **Blocking hooks** (`blocking: true`): a failing `preToolUse` gate now
+  DENIES that tool call — the tool never runs and the agent receives a
+  "blocked by hook" error it can react to. A failing `onStop` gate escalates
+  the run's exit code to `4`. Non-blocking hooks remain purely observational
+  (failures swallowed), so existing configs behave identically.
+- **JS script hooks** (`script: "./gate.mjs"`) — ESM module whose default
+  export receives a structured payload (`event`, `toolName`, `toolArgs`,
+  `stopReason`, `exitCode`) and may return `{ block: true, reason }`.
+- **`onStop`** hooks fire after a run with `SENTINEL_STOP_REASON` /
+  `SENTINEL_EXIT_CODE` in env; **`sessionStart`/`sessionEnd`** shell hooks
+  fire once per process (`sessionEnd` sees the final exit code).
+- Env vars on every shell hook: `SENTINEL_HOOK_EVENT`, `SENTINEL_TOOL_NAME`,
+  `SENTINEL_TOOL_ARGS`, plus the above per event.
+
+## Fixes found on the way
+
+- **`getConfigManager` cross-project bug** — a process-global singleton meant
+  the first project's config was silently returned for every other
+  `projectRoot`. Now keyed per root (matters for the SDK path and tests).
+- **Three lint errors** that kept `eslint .` red: NUL-byte binary guard and
+  ANSI-strip regexes (intentional control chars — now scoped disables) and an
+  empty catch in `connect.ts`.
+- **Version drift**: `src/server/serve.ts` still said `0.3.0` and `cli.ts`
+  hard-coded `0.4.0`. Both now import the single `core/version.ts` constant
+  (`1.0.0`, kept in sync with package.json).
+
+## Roadmap position
+
+ROADMAP-V2 V1–V6 were already shipped (subagents/plan/todos/background,
+  LSP + compaction + @-mentions, MCP marketplace/Prime/Composio, palette +
+  command search, workflows, sessions). V7 is now complete enough to call
+  1.0: hooks, headless `--json`/`-p`, SDK export, stable exit codes, and the
+  agentic-hardening test line. V8–V10 (autonomous Agent Mode, deterministic
+  workflow engine, teams/cloud) are explicitly post-1.0.
+
 # Changelog — `agentic-hardening` line
 
 This branch hardens the agent core for reliable real-world coding. It descends
