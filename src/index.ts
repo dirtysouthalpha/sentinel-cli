@@ -26,6 +26,14 @@ export { MCPManager } from "./mcp/manager.js";
 export { createMcpAwareExecutor } from "./mcp/mcp-executor.js";
 export { createHookAwareExecutor, defaultRunShell } from "./core/hooks.js";
 export { runMcpServer } from "./mcp/server.js";
+// V7: headless/CI + hooks + stable exit codes (the 1.0 scriptability surface)
+export { runHeadless } from "./core/headless.js";
+export type { HeadlessOptions, HeadlessOutcome } from "./core/headless.js";
+export { EXIT_CODES, EXIT_CODE_HELP, resolveExitCode } from "./core/exit-codes.js";
+export type { ExitCode, StopReason } from "./core/exit-codes.js";
+export { runOnStopHooks, runSessionHooks } from "./core/hooks.js";
+export type { HookPayload, HookModule, HookModuleResult } from "./core/hooks.js";
+export { getInstallRoot, loadRegistries } from "./core/bootstrap.js";
 // Phase 1: extracted TUI modules
 export { InputHandler } from "./tui/input-handler.js";
 export { ChatRenderer } from "./tui/chat-renderer.js";

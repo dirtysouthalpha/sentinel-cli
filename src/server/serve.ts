@@ -38,8 +38,7 @@ import {
   setMcpConfig,
   removeMcpConfig,
 } from "./config-store.js";
-
-const VERSION = "0.3.0";
+import { VERSION } from "../core/version.js";
 
 const MODEL_CHOICES = [
   "zai/glm-4.6",

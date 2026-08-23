@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { resolve } from "path";
 import { Command } from "commander";
 import { TUIApp } from "./tui/app.js";
 import { getConfigManager } from "./core/config.js";
@@ -9,65 +8,31 @@ import { events } from "./core/events.js";
 import { providerManager } from "./ai/provider.js";
 import { toolManager } from "./tools/index.js";
 import { runSetup } from "./commands/setup.js";
-import { loadAllSkills } from "./skills/loader.js";
-import { skillRegistry } from "./skills/registry.js";
-import { loadAllCommands } from "./commands/loader.js";
-import { commandRegistry } from "./commands/registry.js";
-import { loadAllAgents } from "./agents/loader.js";
-import { agentRegistry } from "./agents/registry.js";
 import { themeEngine } from "./tui/themes/engine.js";
-import { sessionManager } from "./core/session-manager.js";
-import { contextManager } from "./ai/context.js";
-import { getToolDefinitions, executeToolCall } from "./tools/tool-executor.js";
-import { AgentRunner } from "./core/agent-runner.js";
-import { extractToolCalls } from "./core/tool-call-extractor.js";
-import { buildSystemPrompt } from "./core/system-prompt.js";
-import { compactionBudget } from "./core/context-window.js";
-import { runDiagnostics, formatDiagnostics } from "./core/diagnostics.js";
-import { usageTracker } from "./core/usage-tracker.js";
-import { expandMentions } from "./core/mentions.js";
-import { recallRelevant, DEFAULT_RECALL_TOOL } from "./core/brain-recall.js";
-import { RoutedProvider } from "./ai/routed-provider.js";
+import { skillRegistry } from "./skills/registry.js";
+import { agentRegistry } from "./agents/registry.js";
 import { ProviderError } from "./ai/errors.js";
-import { PermissionEngine, PermissionMode, PermissionRequest } from "./core/permissions.js";
-import { CheckpointManager } from "./core/checkpoints.js";
-import { createGuardedExecutor } from "./core/guarded-executor.js";
-import { createSubagentTool, createSubagentAwareExecutor } from "./core/subagent.js";
-import { createTodoTool, createTodoAwareExecutor } from "./core/todos.js";
-import { createHookAwareExecutor, defaultRunShell } from "./core/hooks.js";
-import { MCPManager } from "./mcp/manager.js";
-import { createMcpAwareExecutor } from "./mcp/mcp-executor.js";
 import { runMcpServer } from "./mcp/server.js";
-import { runServe } from "./server/serve.js";
 import { launchGui } from "./server/gui-launcher.js";
+import { runServe } from "./server/serve.js";
+import { MCPManager } from "./mcp/manager.js";
+import { CheckpointManager } from "./core/checkpoints.js";
+import { getInstallRoot, loadRegistries } from "./core/bootstrap.js";
+import { runHeadless } from "./core/headless.js";
+import { EXIT_CODES, EXIT_CODE_HELP } from "./core/exit-codes.js";
+import { VERSION } from "./core/version.js";
+import type { PermissionMode } from "./core/permissions.js";
 import { setLogLevel, createLogger } from "./utils/logger.js";
 
 const log = createLogger({ prefix: "cli" });
 
-const VERSION = "0.4.0";
-
-function getInstallRoot(): string {
-  return resolve(
-    new URL("..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
-  );
+/** Read piped stdin to end (for bare `sentinel -p`). */
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8").trim();
 }
 
-function loadRegistries(installRoot: string, skillPaths: string[]): void {
-  const { skills } = loadAllSkills(installRoot, skillPaths);
-  for (const skill of skills) {
-    skillRegistry.register(skill);
-  }
-
-  const commands = loadAllCommands(installRoot);
-  for (const cmd of commands) {
-    commandRegistry.register(cmd);
-  }
-
-  const agents = loadAllAgents(installRoot);
-  for (const agent of agents) {
-    agentRegistry.register(agent);
-  }
-}
 
 const program = new Command();
 
@@ -78,8 +43,8 @@ program
   .option("--theme <theme>", "Set theme", "opencode")
   .option("--model <model>", "Set AI model")
   .option("--agent <agent>", "Set default agent")
-  .option("--verbose", "Enable verbose logging")
-  .option("--no-tui", "Run without TUI (headless mode)")
+  .option("-p, --print [prompt]", "Non-interactive: run one task headlessly and exit (reads piped stdin when no prompt is given)")
+  .option("--output-format <fmt>", "With -p: text | json | stream-json (json = NDJSON stream)")
   .option("--project <path>", "Project root directory", process.cwd())
   .action(async (options) => {
     try {
@@ -199,6 +164,12 @@ program
       } else {
         console.error(`Error: ${err instanceof Error ? err.message : err}`);
       }
+      // Headless one-shot must fail loudly in CI: auth/config problems are
+      // CONFIG_ERROR; everything else (rate limit, provider, network) AGENT_ERROR.
+      process.exitCode =
+        err instanceof ProviderError && (err.status === 401 || err.status === 403)
+          ? EXIT_CODES.CONFIG_ERROR
+          : EXIT_CODES.AGENT_ERROR;
     }
   });
 
@@ -208,7 +179,12 @@ program
   .option("--model <model>", "AI model to use (provider/model)")
   .option("--agent <agent>", "Agent to use (default: config default_agent)")
   .option("--max-steps <n>", "Maximum tool rounds")
+  .addHelpText(
+    "after",
+    "\nExit codes:\n" + EXIT_CODE_HELP.map(([code, meaning]) => `  ${String(code).padEnd(5)} ${meaning}`).join("\n")
+  )
   .option("--json", "Emit newline-delimited JSON events instead of text")
+  .option("--output-format <fmt>", "Output format: text | json | stream-json (json = NDJSON stream)")
   .option("--quiet", "Only emit the final result (text or JSON --json)")
   .option("--project <path>", "Project root directory")
   .option("--permission-mode <mode>", "Permission mode: yolo | auto | gated (default: yolo)")
@@ -217,203 +193,24 @@ program
     // --model/--project are also defined on the root command, so commander binds
     // them to the global opts; merge so subcommand flags are honored either way.
     const merged = command.optsWithGlobals();
-    const projectRoot = merged.project || opts.project || process.cwd();
-    const config = getConfigManager(projectRoot).load();
-    providerManager.initializeFromConfig(config.provider as any, { sentinelProxy: config.sentinelProxy, headroom: config.headroom });
-    toolManager.initialize(projectRoot);
-    loadRegistries(getInstallRoot(), config.skills.paths);
-
-    const explicitModel = merged.model as string | undefined;
-    const agentName = opts.agent || config.default_agent;
-    const json = !!opts.json;
-    const quiet = !!opts.quiet;
-    // Use the router when configured (and no explicit --model override); it
-    // resolves a provider/model chain with fallback + retry. Otherwise a single
-    // provider, exactly as before.
-    let provider;
-    let modelName: string | undefined;
-    if (config.router && !explicitModel) {
-      provider = new RoutedProvider(config.router, agentName);
-      modelName = undefined;
-    } else {
-      const model = explicitModel || config.model;
-      const parts = model.split("/");
-      modelName = parts.slice(1).join("/") || undefined;
-      const single = providerManager.getProvider(parts[0]);
-      if (!single || !single.isAvailable()) {
-        console.error(`Provider "${parts[0]}" not available. Configure it (sentinel setup) or set an API key.`);
-        process.exitCode = 1;
-        return;
-      }
-      provider = single;
-    }
-
-    contextManager.setSystemPrompt(buildSystemPrompt(agentName, projectRoot));
-
-    // R3: connect configured MCP servers and merge their tools into the toolset.
-    const mcp = new MCPManager();
-    await mcp.connect((config.mcp as any) || {});
-    const toolDefs = [...getToolDefinitions(), ...mcp.getToolDefs()];
-    const mcpAware = createMcpAwareExecutor(mcp, executeToolCall);
-
-    // R2: enforce permissions + checkpoint mutations. Default mode is "yolo"
-    // (unchanged behavior); --permission-mode auto|gated turns on guardrails.
-    const mode: PermissionMode = (opts.permissionMode as PermissionMode) || "yolo";
-    const autoApprove = !!opts.yes;
-    const engine = new PermissionEngine(mode, config.permissions as any, projectRoot);
-    const checkpoints = new CheckpointManager(projectRoot);
-    const guardedExecute = createGuardedExecutor({
-      engine,
-      checkpoints,
-      baseExecute: mcpAware,
-      ask: async (req: PermissionRequest, reason: string) => {
-        // Headless: approve only with --yes; otherwise deny. Stay silent in
-        // --json mode so the denial note can't be mistaken for protocol output.
-        const label = `${req.tool}${req.action ? `(${req.action})` : ""}`;
-        if (autoApprove) return true;
-        if (!json) console.error(`Permission required: ${label} [${reason}] — denied (pass --yes to allow).`);
-        return false;
-      },
+    const fmt = (opts.outputFormat || (opts.json ? "json" : "text")).toLowerCase();
+    const json = fmt === "json" || fmt === "stream-json";
+    const outcome = await runHeadless({
+      task,
+      projectRoot: merged.project || opts.project || process.cwd(),
+      model: merged.model || opts.model,
+      agent: opts.agent,
+      maxSteps: opts.maxSteps ? parseInt(opts.maxSteps, 10) : undefined,
+      json,
+      quiet: !!opts.quiet,
+      permissionMode: opts.permissionMode as PermissionMode | undefined,
+      autoApprove: !!opts.yes,
+      installRoot: getInstallRoot(),
     });
-
-    // V1: subagent delegation. The child reuses the same guarded executor (so
-    // permissions/checkpoints still apply) but its toolset omits the subagent
-    // tool, capping nesting at one level.
-    const subagentTool = createSubagentTool({
-      provider,
-      toolDefs,
-      executeTool: guardedExecute,
-      extractToolCalls,
-      model: modelName,
-      systemPrompt: buildSystemPrompt(agentName, projectRoot),
-    });
-    const subagentExecute = createSubagentAwareExecutor(subagentTool, guardedExecute);
-    // V1: todo tracker (parent-only) composed over the subagent executor.
-    const todoTool = createTodoTool();
-    const parentExecute = createTodoAwareExecutor(todoTool, subagentExecute);
-
-    // V7: user-defined shell hooks around every tool call (outermost layer).
-    const topExecute = config.hooks
-      ? createHookAwareExecutor(config.hooks, parentExecute, defaultRunShell)
-      : parentExecute;
-
-    const autoCfg: import("./core/types.js").AutonomousConfig = config.autonomous || {
-      enabled: false, maxRounds: 15, budgetUSD: 0, selfEvaluation: true,
-      completionDetection: true, stuckDetection: true, stuckThreshold: 3,
-      verificationCommands: [],
-    };
-    const isAutonomous = autoCfg.enabled && agentName === "gsd";
-    const maxRounds = opts.maxSteps ? parseInt(opts.maxSteps, 10) : isAutonomous ? (autoCfg.maxRounds || 50) : agentName === "gsd" ? 30 : 15;
-    const runner = new AgentRunner(
-      {
-        provider,
-        context: contextManager,
-        toolDefs: [...toolDefs, subagentTool.def, todoTool.def],
-        executeTool: topExecute,
-        extractToolCalls,
-        runVerification: async () => {
-          const cmd = autoCfg.verificationCommands?.[0];
-          const r = await runDiagnostics(projectRoot, cmd ? { command: cmd } : {});
-          return { ok: r.ok, output: formatDiagnostics(r.diagnostics) };
-        },
-        compactContext: async () => {
-          if (contextManager.getContextUtilization() < 0.8) return false;
-          await contextManager.compactWithLLM(async (texts) => {
-            const resp = await provider.chatStream(
-              [{
-                role: "user",
-                content:
-                  "Summarize this conversation excerpt concisely. Preserve the task/goal, " +
-                  "decisions made, files changed, and any unresolved problems; omit chit-chat.\n\n" +
-                  texts.join("\n"),
-              }],
-              { model: modelName, temperature: 0.3, maxTokens: 400 }
-            );
-            return resp.content || "";
-          });
-          return true;
-        },
-      },
-      {
-        model: modelName,
-        maxRounds,
-        selfEvaluation: isAutonomous && autoCfg.selfEvaluation !== false,
-        stuckDetection: isAutonomous && autoCfg.stuckDetection !== false,
-        stuckThreshold: autoCfg.stuckThreshold || 3,
-        budgetUSD: autoCfg.budgetUSD || 0,
-        getEstimatedCost: () => usageTracker.snapshot().estimatedCostUSD,
-        verifyOnComplete: isAutonomous && autoCfg.verifyOnComplete !== false,
-        maxVerifyRetries: autoCfg.maxVerifyRetries,
-      }
-    );
-
-    const emit = (obj: Record<string, unknown>) => {
-      if (json && !quiet) console.log(JSON.stringify(obj));
-    };
-
-    if (!quiet) {
-      runner.on("roundStart", (round) => emit({ type: "round_start", round }));
-      runner.on("token", (text) => {
-        if (json) emit({ type: "token", text });
-        else process.stdout.write(text);
-      });
-      runner.on("streamEnd", () => {
-        if (!json) process.stdout.write("\n");
-      });
-      runner.on("usage", (u) => emit({ type: "usage", ...u }));
-      runner.on("toolStart", (name, args) => {
-        emit({ type: "tool_start", name, args });
-        if (!json) process.stdout.write(`[tool] ${name} ${args}\n`);
-      });
-      runner.on("toolResult", (name, ok, firstLine, full) => {
-        emit({ type: "tool_result", name, ok, firstLine, full });
-        if (!json) process.stdout.write(`  ${ok ? "ok" : "ERR"} ${firstLine}\n`);
-      });
-      runner.on("roundEnd", (round, willContinue) => emit({ type: "round_end", round, willContinue }));
-      runner.on("runError", (e) => {
-        const message = e instanceof Error ? e.message : String(e);
-        emit({ type: "error", message });
-        if (!json) console.error(`\nError: ${message}`);
-      });
-    }
-
-    const ac = new AbortController();
-    process.once("SIGINT", () => ac.abort());
-
-    // disconnect MCP (kills child processes) on ANY exit path, including a throw
-    // before the agent loop — otherwise the process can't drain and exit.
-    let result;
-    try {
-      // V2: expand @file / @url mentions in the task before the agent runs.
-      let outboundTask = await expandMentions(task, projectRoot);
-      // V3: auto-recall from the Sentinel Prime brain when its MCP is connected.
-      if (mcp.has(DEFAULT_RECALL_TOOL)) {
-        try {
-          outboundTask += await recallRelevant(mcpAware, task);
-        } catch {
-          // best-effort
-        }
-      }
-      contextManager.setMaxTokens(compactionBudget(modelName || ""));
-      result = await runner.run(outboundTask, ac.signal);
-    } finally {
-      await mcp.disconnect();
-    }
-    // In quiet mode, only emit the final result
-    if (quiet && json) {
-      console.log(JSON.stringify({ type: "done", stopReason: result.stopReason, rounds: result.rounds, usage: result.usage, result: result.finalContent }));
-    } else if (quiet) {
-      console.log(result.finalContent);
-    } else {
-      emit({ type: "done", stopReason: result.stopReason, rounds: result.rounds, usage: result.usage });
-    }
-
-    // Set exitCode and let the event loop drain (don't process.exit() — on
-    // Windows that can tear down a still-flushing piped stdout and crash libuv).
-    process.exitCode =
-      result.stopReason === "no_tool_calls" ? 0 :
-      result.stopReason === "aborted" ? 130 :
-      result.stopReason === "max_rounds" ? 3 : 1;
+    if (outcome.configError) console.error(outcome.configError);
+    // Let the event loop drain (don't process.exit() — on Windows that can
+    // tear down a still-flushing piped stdout and crash libuv).
+    process.exitCode = outcome.exitCode;
   });
 
 program
@@ -530,6 +327,8 @@ async function runMain(options: {
   verbose?: boolean;
   tui?: boolean;
   project: string;
+  print?: string | boolean;
+  outputFormat?: string;
 }): Promise<void> {
   if (options.verbose) {
     setLogLevel("debug");
@@ -564,7 +363,31 @@ async function runMain(options: {
 
   toolManager.initialize(projectRoot);
 
-  loadRegistries(installRoot, config.skills.paths);
+  // -p / --print: one-shot non-interactive agentic run (prompt arg or piped
+  // stdin), then exit. Never touches the TUI, safe with no TTY.
+  if (options.print !== undefined) {
+    const task =
+      typeof options.print === "string" && options.print.trim().length > 0
+        ? options.print
+        : await readStdin();
+    if (!task) {
+      console.error("--print needs a prompt argument or a task piped on stdin.");
+      process.exitCode = EXIT_CODES.CONFIG_ERROR;
+      return;
+    }
+    const fmt = (options.outputFormat || "text").toLowerCase();
+    const outcome = await runHeadless({
+      task,
+      projectRoot,
+      model: options.model,
+      agent: options.agent,
+      json: fmt === "json" || fmt === "stream-json",
+      installRoot,
+    });
+    if (outcome.configError) console.error(outcome.configError);
+    process.exitCode = outcome.exitCode;
+    return;
+  }
 
   if (!options.tui) {
     log.info("Running in headless mode");

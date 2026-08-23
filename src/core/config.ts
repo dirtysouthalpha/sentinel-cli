@@ -160,11 +160,18 @@ export class ConfigManager {
   }
 }
 
-let configManager: ConfigManager | null = null;
+
+const configManagers: Map<string, ConfigManager> = new Map();
 
 export function getConfigManager(projectRoot?: string): ConfigManager {
-  if (!configManager) {
-    configManager = new ConfigManager(projectRoot);
+  // Keyed by resolved root: one manager per project. A process-global singleton
+  // silently returned the FIRST project's config for every other root — wrong
+  // for multi-project SDK use (`runHeadless` across roots) and for tests.
+  const key = projectRoot || process.cwd();
+  let manager = configManagers.get(key);
+  if (!manager) {
+    manager = new ConfigManager(key);
+    configManagers.set(key, manager);
   }
-  return configManager;
+  return manager;
 }
