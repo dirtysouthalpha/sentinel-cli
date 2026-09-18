@@ -337,3 +337,15 @@ Scan the code, or follow the link.
 No tiers, no paywalled features, no "pro" build.
 
 <br clear="left">
+
+---
+### More from Dirty South Alpha
+*Self-hosted AI. Security-first. Always innovating.*
+
+- 🚀 [intel-arc-llm-stack](https://github.com/dirtysouthalpha/intel-arc-llm-stack) — run any LLM locally on Intel Arc
+- 🎛️ [muse-maestro](https://github.com/dirtysouthalpha/muse-maestro) — guardrails, memory & cost telemetry for Meta Muse Code
+- 📊 [intel-arc-llm-benchmarks](https://github.com/dirtysouthalpha/intel-arc-llm-benchmarks) — real Arc B60 inference numbers
+- 🛠️ [msptier3toolkit](https://github.com/dirtysouthalpha/msptier3toolkit) — battle-tested MSP PowerShell
+- 👤 [@dirtysouthalpha](https://github.com/dirtysouthalpha) — the full fleet
+
+⭐ If this saved you time, star it and follow for more.
