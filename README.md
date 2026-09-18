@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="assets/logo.svg" width="128" alt="Sentinel CLI logo">
+  <img src="assets/banner.svg" alt="sentinel-cli — one AI coding engine, four faces, any model">
 </p>
-
-<h1 align="center">Sentinel CLI</h1>
 
 <p align="center">
   <strong>One AI coding engine. Four faces. Any model.</strong><br>
@@ -10,17 +8,15 @@
 </p>
 
 <p align="center">
-  <a href="#-quick-start"><img src="https://img.shields.io/badge/node-%3E%3D20-3b82f6?style=for-the-badge&logo=node.js&logoColor=white" alt="node >= 20"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-34d399?style=for-the-badge" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/version-3.2.0-f59e0b?style=for-the-badge" alt="v3.2.0">
-  <img src="https://img.shields.io/badge/tests-849%20passing-22c55e?style=for-the-badge" alt="849 tests passing">
-  <img src="https://img.shields.io/badge/TypeScript-ESM-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript ESM">
-  <img src="https://img.shields.io/badge/MCP-client%20%2B%20server-a78bfa?style=for-the-badge" alt="MCP client + server">
-  <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-64748b?style=for-the-badge" alt="cross-platform">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22D3EE?style=flat-square&labelColor=0A0A0F" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/version-3.2.0-22D3EE?style=flat-square&labelColor=0A0A0F" alt="v3.2.0">
+  <img src="https://img.shields.io/badge/tests-849%20passing-22C55E?style=flat-square&labelColor=0A0A0F" alt="849 tests passing">
+  <img src="https://img.shields.io/badge/TypeScript-ESM-22D3EE?style=flat-square&labelColor=0A0A0F" alt="TypeScript ESM">
+  <img src="https://img.shields.io/badge/built%20with-MCP-8B5CF6?style=flat-square&labelColor=0A0A0F" alt="MCP client + server">
 </p>
 
 <p align="center">
-  <img src="assets/screenshot-chat.png" width="880" alt="Sentinel CLI desktop GUI">
+  <img src="assets/demo.svg" alt="sentinel --help — one engine, four faces">
 </p>
 
 > 🚀 **New in 3.2 — Production-ready.** Every competitive gap closed:
@@ -81,6 +77,10 @@ Build once; pick how you use it — all share the same engine, tools, and config
 | 📦 **Native app** | `cd gui && npm run tauri build` | a **Tauri v2** window that spawns the engine and embeds the GUI |
 | ⚙️ **Headless** | `sentinel run "task" --json` | scriptable / CI one-shots with a JSON event stream |
 | 🔗 **MCP server** | `sentinel mcp-serve` | expose Sentinel's tools to Claude Desktop or any MCP client |
+
+<p align="center">
+  <img src="assets/screenshot-chat.png" width="820" alt="Sentinel CLI desktop GUI — block chat with inline diffs">
+</p>
 
 ---
 
