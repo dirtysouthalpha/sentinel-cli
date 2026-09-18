@@ -87,8 +87,8 @@ Build once; pick how you use it — all share the same engine, tools, and config
 ## 🚀 Quick start
 
 ```bash
-git clone https://github.com/dirtysouthalpha/sentinel-cli.git
-cd sentinel-cli
+git clone https://github.com/dirtysouthalpha/sentinel-code.git
+cd sentinel-code
 npm install
 npm run build
 ```
@@ -345,7 +345,10 @@ No tiers, no paywalled features, no "pro" build.
 - 🚀 [intel-arc-llm-stack](https://github.com/dirtysouthalpha/intel-arc-llm-stack) — run any LLM locally on Intel Arc
 - 🎛️ [muse-maestro](https://github.com/dirtysouthalpha/muse-maestro) — guardrails, memory & cost telemetry for Meta Muse Code
 - 📊 [intel-arc-llm-benchmarks](https://github.com/dirtysouthalpha/intel-arc-llm-benchmarks) — real Arc B60 inference numbers
-- 🛠️ [msptier3toolkit](https://github.com/dirtysouthalpha/msptier3toolkit) — battle-tested MSP PowerShell
+- 🛠️ [msp-tier3-toolkit](https://github.com/dirtysouthalpha/msp-tier3-toolkit) — battle-tested MSP PowerShell
 - 👤 [@dirtysouthalpha](https://github.com/dirtysouthalpha) — the full fleet
 
 ⭐ If this saved you time, star it and follow for more.
+
+---
+<p align="center"><sub><b>Dirty South Alpha™</b> · © 2026 · <a href="https://dirtysouthalpha.com">dirtysouthalpha.com</a> · self-hosted AI · security-first</sub></p>

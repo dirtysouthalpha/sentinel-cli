@@ -6,11 +6,11 @@
   "author": "DirtySouthAlpha",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dirtysouthalpha/sentinel-cli.git"
+    "url": "git+https://github.com/dirtysouthalpha/sentinel-code.git"
   },
-  "homepage": "https://github.com/dirtysouthalpha/sentinel-cli#readme",
+  "homepage": "https://github.com/dirtysouthalpha/sentinel-code#readme",
   "bugs": {
-    "url": "https://github.com/dirtysouthalpha/sentinel-cli/issues"
+    "url": "https://github.com/dirtysouthalpha/sentinel-code/issues"
   },
   "bin": {
     "sentinel": "dist/cli.js"

@@ -67,7 +67,7 @@ Your project files in this folder are not affected.
 
 Publishing needs **your** npm credentials, so it can't be automated for you. One-time setup, then it's two commands per release.
 
-**Before the first publish — confirm the repo URL.** `package.json` currently points `repository`/`homepage`/`bugs` at `github.com/dirtysouthalpha/sentinel-cli`. Edit those if your GitHub repo differs (or delete them).
+**Before the first publish — confirm the repo URL.** `package.json` currently points `repository`/`homepage`/`bugs` at `github.com/dirtysouthalpha/sentinel-code`. Edit those if your GitHub repo differs (or delete them).
 
 1. **Log in** (needs a free account from npmjs.com):
 
